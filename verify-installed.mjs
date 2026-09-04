@@ -171,7 +171,7 @@ assert.equal(registrations.length, 9, `expected 9 tools, got ${registrations.len
 assert.equal(ctx.commandRegistrations.length, 1, 'expected the /tasks command');
 assert.equal(ctx.commandRegistrations[0].name, 'tasks');
 assert.ok(ctx.provides.taskCoordinator, 'taskCoordinator service not provided');
-assert.equal(ctx.provides.taskCoordinator.version, '0.10.0');
+assert.equal(ctx.provides.taskCoordinator.version, '0.11.0');
 // the skill mount is fire-and-forget (dynamic import); give it a macrotask
 await new Promise((resolve) => setImmediate(resolve));
 assert.equal(ctx.mountedPlugins.length, 1, 'expected the skill provider mount');
@@ -334,6 +334,27 @@ const subsetBatch = await byName.task_spawn_batch.execute({
 assert.equal(subsetBatch.ok, true);
 assert.equal(subsetBatch.startedCount, 1);
 console.log('task_confirm_select: OK -> subset', JSON.stringify(selectResult.selected), '| mismatch rejected | subset dispatched');
+
+// 0.11.0 mission-scoped (reusable) approval: confirm ONCE, then every gated
+// batch of the mission reuses the same confirmationId.
+const missionConfirm = await byName.task_confirm.execute({
+  plan: '# 长线方案（复用凭证验证）',
+  reusable: true,
+}, supervisorExec);
+assert.equal(missionConfirm.ok, true);
+assert.equal(missionConfirm.approved, true);
+assert.equal(missionConfirm.reusable, true);
+const missionBatchOne = await byName.task_spawn_batch.execute({
+  tasks: [{ prompt: '里程碑一甲' }, { prompt: '里程碑一乙' }],
+  confirmationId: missionConfirm.confirmationId,
+}, supervisorExec);
+assert.equal(missionBatchOne.ok, true);
+const missionBatchTwo = await byName.task_spawn_batch.execute({
+  tasks: [{ prompt: '里程碑二甲' }, { prompt: '里程碑二乙' }],
+  confirmationId: missionConfirm.confirmationId,
+}, supervisorExec);
+assert.equal(missionBatchTwo.ok, true); // credential survived the first success
+console.log('reusable credential: OK ->', missionConfirm.confirmationId, 'covered two gated batches');
 console.log('task_spawn_batch   : OK ->', batchResult.results.map((item) => item.sessionId).join(', '), '| gate + team listed:', batchTeamList.count === 2);
 assert.equal(createRequests[1].workspaceId, 'ws-verify', 'batch item 1 inherits the workspace');
 assert.equal(createRequests[2].workspaceId, 'ws-verify', 'batch item 2 inherits the workspace');

@@ -758,6 +758,56 @@ test('ops.confirmSelect: gated batch consumes a subset credential (0.10.0)', asy
   assert.equal(reuse.code, 'confirmation-required');
 });
 
+test('ops.confirmPlan reusable: mission-scoped credential survives successful batches (0.11.0)', async () => {
+  const registry = new SpawnRegistry(tempRegistryPath());
+  const harness = makeHarness({ registry });
+  const confirmed = await harness.ops.confirmPlan({ plan: '# 长线方案', reusable: true }, SUPERVISOR);
+  assert.equal(confirmed.approved, true);
+  assert.equal(confirmed.reusable, true);
+  // first gated batch succeeds...
+  const first = await harness.ops.spawnBatch({
+    tasks: [{ prompt: '里程碑一甲' }, { prompt: '里程碑一乙' }],
+    confirmationId: confirmed.confirmationId,
+  }, SUPERVISOR);
+  assert.equal(first.ok, true);
+  // ...and the SAME credential still covers the next milestone's batch
+  const second = await harness.ops.spawnBatch({
+    tasks: [{ prompt: '里程碑二甲' }, { prompt: '里程碑二乙' }],
+    confirmationId: confirmed.confirmationId,
+  }, SUPERVISOR);
+  assert.equal(second.ok, true);
+  // foreign caller cannot borrow the mission credential
+  const foreign = await harness.ops.spawnBatch({
+    tasks: [{ prompt: 'x' }, { prompt: 'y' }],
+    confirmationId: confirmed.confirmationId,
+  }, { sessionId: 'session-other' });
+  assert.equal(foreign.code, 'confirmation-required');
+});
+
+test('ops.confirmSelect reusable: subset credential survives, enforcement persists (0.11.0)', async () => {
+  const registry = new SpawnRegistry(tempRegistryPath());
+  const harness = makeHarness({
+    registry,
+    askUser: async (request) => ({ answers: request.questions.map((question) => ({ id: question.id, selected: question.options.slice(0, 2).map((option) => option.label) })) }),
+  });
+  const confirmed = await harness.ops.confirmSelect({
+    tasks: [{ title: '功能｜甲' }, { title: '功能｜乙' }, { title: '功能｜丙' }],
+    reusable: true,
+  }, SUPERVISOR);
+  assert.equal(confirmed.reusable, true);
+  assert.deepEqual(confirmed.selected, ['功能｜甲', '功能｜乙']);
+  const batchTasks = [{ title: '功能｜甲', prompt: 'do 甲' }, { title: '功能｜乙', prompt: 'do 乙' }];
+  assert.equal((await harness.ops.spawnBatch({ tasks: batchTasks, confirmationId: confirmed.confirmationId }, SUPERVISOR)).ok, true);
+  // reusable: the same credential still passes the gate for a later batch
+  assert.equal((await harness.ops.spawnBatch({ tasks: batchTasks, confirmationId: confirmed.confirmationId }, SUPERVISOR)).ok, true);
+  // subset enforcement still applies on every reuse
+  const mismatch = await harness.ops.spawnBatch({
+    tasks: [{ title: '功能｜甲', prompt: 'do 甲' }, { title: '功能｜丙', prompt: 'do 丙' }],
+    confirmationId: confirmed.confirmationId,
+  }, SUPERVISOR);
+  assert.equal(mismatch.code, 'confirmation-mismatch');
+});
+
 test('ops.spawnBatch: confirmation gate', async () => {
   const harness = makeHarness();
   // missing confirmationId on a gated batch
@@ -1163,6 +1213,8 @@ test('registerTools: eight tools with delegation', async () => {
   assert.ok(byName.task_spawn.parameters.team); // task_spawn workstream
   assert.ok(byName.task_spawn.parameters.reportBack); // result push-back convention
   assert.equal(byName.task_confirm.parameters.plan.required, true);
+  assert.ok(byName.task_confirm.parameters.reusable); // 0.11.0 mission-scoped approval
+  assert.ok(byName.task_confirm_select.parameters.reusable);
   assert.equal(byName.task_confirm_select.parameters.tasks.required, true); // 0.10.0 multi-select confirmation
   assert.ok(byName.task_confirm_select.parameters.question);
   assert.equal(byName.task_confirm_select.parameters.tasks.items.additionalProperties, false); // host schema compiler requires explicit

@@ -143,7 +143,8 @@ export function registerTools(ctx, ops, deps, config) {
     description: 'Present a decomposition/dispatch plan to the user as an interactive approval card and block until they answer. '
       + 'REQUIRED before task_spawn_batch when the batch reaches the confirmation threshold: pass the returned confirmationId to the batch call. '
       + 'On approval returns { approved: true, confirmationId }; when the user declines or edits, returns their feedback — fold it into a revised plan and confirm again. '
-      + 'If the user closes the card (confirm-cancelled), stop dispatching and wait for their next message.',
+      + 'If the user closes the card (confirm-cancelled), stop dispatching and wait for their next message. '
+      + 'Set reusable: true for a long mission (e.g. goal mode): confirm ONCE after the initial analysis, then every batch of the mission reuses the same confirmationId.',
     parameters: {
       plan: {
         type: 'string',
@@ -151,11 +152,12 @@ export function registerTools(ctx, ops, deps, config) {
         description: 'The full dispatch plan in markdown: what gets split into how many task sessions, each task\'s scope and why it is independent. Must start with a # heading (the host plan-review convention). Rendered as the card body — this is what the user reviews.',
       },
       question: { type: 'string', description: 'Optional one-line question shown above the plan. Defaults to asking whether to approve the dispatch.' },
+      reusable: { type: 'boolean', description: 'Mission-scoped approval: the confirmationId survives successful batches instead of being single-use. Use for autonomous multi-milestone runs; confirm once after the initial analysis.' },
     },
     output: OUTPUT,
     async execute(args, exec) {
       try {
-        return await ops.confirmPlan({ plan: args.plan, question: args.question }, callerFrom(exec), exec?.agent, exec?.signal);
+        return await ops.confirmPlan({ plan: args.plan, question: args.question, reusable: args.reusable }, callerFrom(exec), exec?.agent, exec?.signal);
       } catch (error) {
         return { ok: false, code: 'internal', error: error?.message ?? String(error) };
       }
@@ -167,7 +169,8 @@ export function registerTools(ctx, ops, deps, config) {
     description: 'Present the proposed task list as a MULTI-SELECT card: the user checks WHICH of the proposed tasks to dispatch (partial dispatch) and can add adjustment feedback via the custom input row. Renders in the host\'s neutral question UI (not the amber plan-review card). '
       + 'Present the full plan in your chat message BEFORE calling this — the card only carries the task list. '
       + 'On approval returns { approved: true, selected: [...titles], confirmationId }; task_spawn_batch then accepts ONLY those exact titles (subset enforced). '
-      + 'When the user selects nothing, returns their feedback — revise the list and confirm again.',
+      + 'When the user selects nothing, returns their feedback — revise the list and confirm again. '
+      + 'Set reusable: true for a long mission: the subset approval then covers later batches too (the subset check still applies to every batch).',
     parameters: {
       question: { type: 'string', description: 'Optional one-line question shown on the card. Defaults to asking which tasks to dispatch.' },
       tasks: {
@@ -183,11 +186,12 @@ export function registerTools(ctx, ops, deps, config) {
           },
         },
       },
+      reusable: { type: 'boolean', description: 'Mission-scoped approval: the confirmationId survives successful batches instead of being single-use (subset enforcement still applies).' },
     },
     output: OUTPUT,
     async execute(args, exec) {
       try {
-        return await ops.confirmSelect({ question: args.question, tasks: args.tasks }, callerFrom(exec), exec?.agent, exec?.signal);
+        return await ops.confirmSelect({ question: args.question, tasks: args.tasks, reusable: args.reusable }, callerFrom(exec), exec?.agent, exec?.signal);
       } catch (error) {
         return { ok: false, code: 'internal', error: error?.message ?? String(error) };
       }

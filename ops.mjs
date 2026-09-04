@@ -494,7 +494,7 @@ export function createOps(deps) {
      * the official exit_plan_mode) and blocks until the user answers.
      * Approval mints a single-use confirmationId consumed by task_spawn_batch.
      */
-    async confirmPlan({ plan, question }, caller, agent, signal) {
+    async confirmPlan({ plan, question, reusable }, caller, agent, signal) {
       const callerDeny = checkCaller(caller, config);
       if (callerDeny) return failDeny(callerDeny);
       if (typeof plan !== 'string' || plan.trim().length === 0) {
@@ -538,12 +538,20 @@ export function createOps(deps) {
       const approved = selected.includes(approveLabel);
       if (approved) {
         const confirmationId = `confirm-${uuid()}`;
-        confirmations.set(confirmationId, { callerSessionId: caller.sessionId, approvedAt: Date.now(), taskHint: excerpt(plan.trim(), 80) });
+        confirmations.set(confirmationId, {
+          callerSessionId: caller.sessionId,
+          approvedAt: Date.now(),
+          taskHint: excerpt(plan.trim(), 80),
+          ...(reusable === true ? { reusable: true } : {}),
+        });
         return {
           ok: true,
           approved: true,
           confirmationId,
-          hint: 'pass this confirmationId to task_spawn_batch for this plan; it is single-use and bound to your session',
+          ...(reusable === true ? { reusable: true } : {}),
+          hint: reusable === true
+            ? 'pass this confirmationId to every task_spawn_batch of this mission; it is REUSABLE (survives successful batches) and bound to your session'
+            : 'pass this confirmationId to task_spawn_batch for this plan; it is single-use and bound to your session',
         };
       }
       return {
@@ -564,7 +572,7 @@ export function createOps(deps) {
      * The generic UI renders no markdown body, so the supervisor presents the
      * full plan in chat before calling this (the tool description says so).
      */
-    async confirmSelect({ question, tasks }, caller, agent, signal) {
+    async confirmSelect({ question, tasks, reusable }, caller, agent, signal) {
       const callerDeny = checkCaller(caller, config);
       if (callerDeny) return failDeny(callerDeny);
       if (!Array.isArray(tasks) || tasks.length === 0) {
@@ -617,6 +625,7 @@ export function createOps(deps) {
         approvedAt: Date.now(),
         taskHint: excerpt(`select ${selected.length}/${options.length}: ${selected.join(', ')}`, 80),
         selected,
+        ...(reusable === true ? { reusable: true } : {}),
       });
       return {
         ok: true,
@@ -624,7 +633,10 @@ export function createOps(deps) {
         selected,
         ...(custom !== undefined ? { custom } : {}),
         confirmationId,
-        hint: 'pass this confirmationId to task_spawn_batch; the batch must contain ONLY the selected tasks (titles match exactly); single-use and bound to your session',
+        ...(reusable === true ? { reusable: true } : {}),
+        hint: reusable === true
+          ? 'pass this confirmationId to every task_spawn_batch of this mission; it is REUSABLE (survives successful batches) but the batch must still contain ONLY the selected tasks; bound to your session'
+          : 'pass this confirmationId to task_spawn_batch; the batch must contain ONLY the selected tasks (titles match exactly); single-use and bound to your session',
       };
     },
 
@@ -709,8 +721,8 @@ export function createOps(deps) {
         // the same plan after an all-failed attempt.
         return { ok: false, code: OP_CODES.BATCH_ALL_FAILED, error: `all ${tasks.length} batch spawns failed`, results };
       }
-      if (needsConfirmation && typeof confirmationId === 'string') {
-        confirmations.delete(confirmationId); // single-use: consumed on success
+      if (needsConfirmation && typeof confirmationId === 'string' && record?.reusable !== true) {
+        confirmations.delete(confirmationId); // single-use: consumed on success (reusable credentials survive)
       }
       return {
         ok: true,

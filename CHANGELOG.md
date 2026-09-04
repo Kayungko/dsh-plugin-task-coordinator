@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.11.0] - 2026-09-04
+
+### Added
+
+- **任务级复用凭证（`reusable: true`）**：`task_confirm` 与 `task_confirm_select` 新增可选 `reusable` 参数。长线任务（如 goal 模式）首次分析后确认一次，铸出的 `confirmationId` 不随批量成功而消耗，同一使命的后续批量全部复用——消除"每里程碑一张确认卡"的摩擦；默认行为（单次凭证）不变，向后兼容。复用凭证仍绑定调用会话、进程内存放（宿主重启失效）；多选变体的子集强制对每次复用依然生效。技能手册、双 README、PROTOCOL 同步。单元测试 62 → 64；`verify-installed.mjs` 增加复用凭证跨批断言。
+
 ## [0.10.0] - 2026-09-04
 
 ### Added
@@ -135,7 +141,8 @@
 
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
-[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.4...v0.9.0
 [0.8.4]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.3...v0.8.4

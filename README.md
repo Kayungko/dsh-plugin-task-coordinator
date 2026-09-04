@@ -9,7 +9,7 @@
 
 [![DSH 0.1.2-rc.1 verified](https://img.shields.io/badge/DSH-0.1.2--rc.1%20verified-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![62 unit tests](https://img.shields.io/badge/tests-62%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![64 unit tests](https://img.shields.io/badge/tests-64%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
 [What is this](#what-is-this) · [Quick start](#quick-start) · [Tools](#the-nine-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Changelog](CHANGELOG.md) · [中文](README.zh-CN.md)
@@ -111,6 +111,8 @@ Batch dispatches used to be a silent model decision — not anymore:
 3. `task_spawn_batch` at or above `confirmBatchThreshold` (default 2) **refuses to run without a valid `confirmationId`** (`confirmation-required`). The credential is single-use and consumed on success; an all-failed batch keeps it so the user is not asked twice for the same plan.
 
 **Multi-select variant (0.10.0)**: when the tasks are independently droppable, `task_confirm_select({ tasks: [{title, scope}] })` renders the list in the host's **neutral** question UI (multi-select + custom input row, no amber plan-review styling) and the user checks which tasks to dispatch. The minted credential carries the selected subset, and `task_spawn_batch` rejects any batch title the user did not check (`confirmation-mismatch`). Present the full plan in chat first — the generic card carries the task list, not the plan body.
+
+**Mission-scoped approval (0.11.0)**: for a long autonomous run (e.g. goal mode), confirm ONCE — `task_confirm({ plan, reusable: true })` mints a **reusable** credential that survives successful batches, so every later batch of the same mission passes the gate with the same `confirmationId` instead of raising a card per milestone. Single-use stays the default; reusable credentials are still caller-bound and in-process (a host restart clears them); `task_confirm_select` supports `reusable` too (subset enforcement applies on every reuse).
 
 Degradation: with no UI connected, `task_confirm` returns `no-question-channel` and the bundled skill instructs the supervisor to fall back to a plain-text confirmation in chat. Subagent callers get `delegated-caller` (a child agent cannot ask a human).
 

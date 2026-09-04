@@ -9,7 +9,7 @@
 
 [![DSH 0.1.2-rc.1 实测](https://img.shields.io/badge/DSH-0.1.2--rc.1%20实测-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![62 个单元测试](https://img.shields.io/badge/tests-62%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![64 个单元测试](https://img.shields.io/badge/tests-64%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
 [这是什么](#这是什么) · [快速开始](#快速开始) · [九个工具](#九个工具) · [架构设计](docs/ARCHITECTURE.md) · [主机契约](docs/PROTOCOL.md) · [更新日志](CHANGELOG.md) · [English](README.md)
@@ -110,6 +110,8 @@ pwsh install.ps1 -Source .
 3. 达到 `confirmBatchThreshold`（默认 2）的 `task_spawn_batch` **没有有效 `confirmationId` 直接拒绝**（`confirmation-required`）。凭证单次使用、成功派发后消耗；全部失败不消耗——同一方案不会问用户两遍。
 
 **多选变体（0.10.0）**：任务之间可独立取舍时，用 `task_confirm_select({ tasks: [{title, scope}] })`——任务清单渲染进宿主**中性**提问 UI（多选 + 自定义输入行，无琥珀审批卡样式），用户勾选要派发哪些。凭证携带选中子集，`task_spawn_batch` 拒绝任何用户未勾选的标题（`confirmation-mismatch`）。完整方案请先在聊天里给出——通用卡片承载任务清单，不承载计划全文。
+
+**任务级复用凭证（0.11.0）**：长程自主任务（如 goal 模式）**只确认一次**——`task_confirm({ plan, reusable: true })` 铸出的凭证不随批量成功而消耗，同一使命后续的每个批量都凭同一个 `confirmationId` 过闸，不再逐里程碑弹卡。默认仍是单次凭证；复用凭证同样绑定调用会话、进程内存放（宿主重启失效）；`task_confirm_select` 也支持 `reusable`（子集强制对每次复用依然生效）。
 
 降级：无 UI 连接时返回 `no-question-channel`，内置技能指引总控改用聊天文字确认；子代理调用方收到 `delegated-caller`（子代理不能发起人工确认）。
 

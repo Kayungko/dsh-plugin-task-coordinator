@@ -26,7 +26,7 @@ whenToUse: >
 | `task_progress` | 深入读一个任务：状态、队列中的消息、对话尾部、todos、goal |
 | `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`），可用 `reference` 关联先前指令 |
 | `task_spawn` | 新建任务 + 命名 + 开场提示词，立即出现在会话列表；可用 `team` 编组；默认带回报约定（`reportBack`）；新任务默认继承调用方所在工作区（传显式 `cwd` 则按指定目录、不挂工作区） |
-| `task_confirm` | **派发前确认**：把拆分方案做成审批卡弹给用户，阻塞直到回答；批准返回单次 `confirmationId` |
+| `task_confirm` | **派发前确认**：把拆分方案做成审批卡弹给用户，阻塞直到回答；批准返回 `confirmationId`（默认单次；`reusable: true` 铸**任务级复用凭证**——长线任务首次分析后确认一次即可，后续各里程碑批量复用同一凭证） |
 | `task_confirm_select` | **多选确认/部分派发**：任务清单渲染为多选卡（中性样式，非琥珀审批卡），用户勾选要派发哪些；批准返回 `selected` 子集 + `confirmationId`，批量只能派发被勾选的标题（精确匹配）；先在聊天里给出完整方案再调用 |
 | `task_spawn_batch` | **一次创建一批任务**（拆分执行步）：传 `tasks: [{title?, prompt}]` + 统一 `team`（+ 必需的 `confirmationId`）；默认带回报约定 |
 | `task_wait` | 阻塞直到任务空闲（或超时）；支持多目标（`sessionIds` + `mode: all/any`） |
@@ -156,7 +156,12 @@ task_confirm_select({ tasks: [{title, scope}…] })  ← 用户勾选要派发�
 ```
 
 适用：任务之间可独立取舍、用户可能只想先做一部分。整批"全要/全不要"的审批用
-`task_confirm`（计划全文审批卡）；两种凭证都是单次使用、绑定调用方。
+`task_confirm`（计划全文审批卡）；两种凭证都是绑定调用方的。
+
+**长线任务（goal 模式）只确认一次**：首次分析出总体路线图后，用
+`task_confirm({ plan, reusable: true })` 铸任务级复用凭证；此后同一使命的每个
+`task_spawn_batch` 都带这同一个 `confirmationId`，不再逐里程碑弹卡。单次凭证
+（默认）仍是"一批一卡"。
 
 ## task_spawn 命名规则
 
