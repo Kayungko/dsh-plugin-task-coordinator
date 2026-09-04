@@ -1,0 +1,11 @@
+# Task Coordinator: cross-task coordination tools for supervisor agents.
+# Mounted as an isolated plugin group so a fault cannot take down the host.
+- insert:
+    - id: task-coordinator
+      name: '@deepseek-ai/cordis-plugin-group'
+      group: true
+      isolate:
+        taskCoordinator: true
+      config:
+        - id: task-coordinator-runtime
+          name: 'dsh-plugin-task-coordinator'

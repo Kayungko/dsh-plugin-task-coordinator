@@ -1,0 +1,52 @@
+{
+  "name": "dsh-plugin-task-coordinator",
+  "version": "0.2.0",
+  "description": "Codex-style cross-task coordination for DeepSeek Harness: list, inspect, spawn, message and steer top-level sessions from a supervisor agent. Ships the task-coordination supervisor skill.",
+  "type": "module",
+  "main": "index.mjs",
+  "exports": {
+    ".": "./index.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "config.mjs",
+    "safety.mjs",
+    "title.mjs",
+    "ops.mjs",
+    "tools.mjs",
+    "skills.mjs",
+    "skills/",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
+    ".gitignore",
+    "install.ps1"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "check": "node --check index.mjs && node --check config.mjs && node --check safety.mjs && node --check title.mjs && node --check ops.mjs && node --check tools.mjs && node --check skills.mjs",
+    "test": "node --test test/smoke.test.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-llm": ">=0.1.2-0 <0.2.0",
+    "@deepseek-ai/dsh-skill-filesystem": ">=0.1.2-0 <0.2.0",
+    "@deepseek-ai/dsh-tools": ">=0.1.2-0 <0.2.0"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "task-coordination",
+    "supervisor",
+    "multi-session",
+    "skill"
+  ],
+  "license": "MIT"
+}
