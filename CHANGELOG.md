@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.2] - 2026-09-04
+
+### Fixed
+
+- **客户端模块未装载**（0.8.0 按钮不出现的根因）：宿主 `dsh-client-modules` 扫描插件时经 `createRequire(baseUrl).resolve('<包名>/package.json')` 定位清单，而我们的 `exports` 未导出 `./package.json` → `ERR_PACKAGE_PATH_NOT_EXPORTED` → 插件被静默排除出客户端模块图（对照实测：同环境第三方插件 `dsh-better-sidebar` 因导出该项而正常装载）。补上 `"./package.json": "./package.json"` 导出；安装态验证新增该断言。
+
 ## [0.8.1] - 2026-09-04
 
 ### Fixed
@@ -100,7 +106,8 @@
 
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
-[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.3.0...v0.7.0

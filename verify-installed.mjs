@@ -171,7 +171,7 @@ assert.equal(registrations.length, 8, `expected 8 tools, got ${registrations.len
 assert.equal(ctx.commandRegistrations.length, 1, 'expected the /tasks command');
 assert.equal(ctx.commandRegistrations[0].name, 'tasks');
 assert.ok(ctx.provides.taskCoordinator, 'taskCoordinator service not provided');
-assert.equal(ctx.provides.taskCoordinator.version, '0.8.1');
+assert.equal(ctx.provides.taskCoordinator.version, '0.8.2');
 // the skill mount is fire-and-forget (dynamic import); give it a macrotask
 await new Promise((resolve) => setImmediate(resolve));
 assert.equal(ctx.mountedPlugins.length, 1, 'expected the skill provider mount');
@@ -359,6 +359,7 @@ console.log('dispose            : OK -> all tools unregistered');
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 assert.equal(pkg.dsh?.client?.platform, 'web', 'dsh.client.platform must be "web"');
 assert.equal(pkg.exports?.['./client'], './client.js', 'exports["./client"] must point at ./client.js');
+assert.equal(pkg.exports?.['./package.json'], './package.json', 'exports["./package.json"] is required by the client-modules manifest scan');
 assert.ok(existsSync(new URL('./client.js', import.meta.url)), 'client.js bundle missing');
 
 const clientSrc = readFileSync(new URL('./client.js', import.meta.url), 'utf8');

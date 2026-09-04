@@ -216,9 +216,9 @@
 插件首次进入浏览器侧。装载链逐段实测（DSH Desktop 2.0.5 / core 0.1.2-rc.1）：
 
 1. **声明**：`package.json` 的 `dsh.client` 必须含 `platform: "web"`；`dsh-client-modules` 的 `parseDshClient` 对其余字段（`inject?`、`external?`、`immediately?`）做窄化校验，非法即抛。
-2. **入口解析**：`exports["./client"]`（字符串或含字符串 `default` 的对象）解析为相对包根的路径；缺失则 `declares dsh.client but exports no "./client" bundle`。
+2. **入口解析**：`exports["./client"]`（字符串或含字符串 `default` 的对象）解析为相对包根的路径；缺失则 `declares dsh.client but exports no "./client" bundle`。**另需 `exports["./package.json"]`**：扫描器经 `createRequire(baseUrl).resolve('<包名>/package.json')` 定位清单，未导出该子路径会 `ERR_PACKAGE_PATH_NOT_EXPORTED`，插件被**静默排除**出客户端模块图（0.8.2 实测根因；同环境 `dsh-better-sidebar` 有该导出而正常装载）。
 3. **bundle 格式**：该文件被**原样** `readFileSync` 装载并经 `/plugins/<id>/client.js` combo 路由下发，必须是 `window.__ModuleLoader__.load({ id, factory })` 注册（官方 `dsh-session-log-export` 编译产物同构）；`factory(require)` 中 `require` 绑定共享客户端图（`react` 等），返回 `module.exports`，导出 `apply` 与 `inject`（服务名数组，如 `["slots"]`）。
 4. **槽位占用**：`apply(ctx)` 在客户端 cordis 纤维执行；`ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({ name, id, order?, label? }, Component))`。占用者组件收到标准会话 props（含 `sessionId`）+ `inject()` 返回的附加 props。
 5. **本插件占用**：`id: "copy-session-id"`，渲染「复制 ID」按钮——点击 `navigator.clipboard.writeText(sessionId)`（`document.execCommand('copy')` 降级），1.5s 状态反馈（已复制 ✓ / 复制失败）。
 
-**已验证**：1–4 为源码级实测（`dsh-client-modules/lib/index.js` resolveMeta/parseDshClient/clientExportOf + 槽契约总目 + 官方占用者先例），`verify-installed.mjs` 覆盖声明/bundle/占槽/点击复制。**未验证**：真实 GUI 渲染（需一次宿主重启后目视确认按钮出现）。
+**已验证**：1–4 为源码级实测（`dsh-client-modules/lib/index.js` resolveMeta/parseDshClient/clientExportOf + 槽契约总目 + 官方占用者先例），`verify-installed.mjs` 覆盖声明/bundle/占槽/点击复制；`./package.json` 导出缺失 → `ERR_PACKAGE_PATH_NOT_EXPORTED` 的排除路径已离线复现（0.8.2）。**未验证**：真实 GUI 渲染（宿主重启后目视确认按钮出现）。
