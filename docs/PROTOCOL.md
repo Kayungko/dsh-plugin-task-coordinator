@@ -221,7 +221,7 @@
 4. **槽位占用**：`apply(ctx)` 在客户端 cordis 纤维执行；`ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({ name, id, order?, label? }, Component))`。占用者组件收到标准会话 props（含 `sessionId`）+ `inject()` 返回的附加 props。
 5. **本插件占用**：`id: "copy-session-id"`，渲染「复制会话Id」按钮——面性设计（亮色黑底白字 / 暗色白底黑字，走 `--dsw-alias-label-primary` / `--dsw-alias-label-primary-foreground` 主题 token），几何对齐「Session 日志」按钮（圆角 18px / 高 32px / 13px 文字）；点击 `navigator.clipboard.writeText(sessionId)`（`document.execCommand('copy')` 降级），1.5s 状态反馈（已复制 ✓ / 复制失败）。
 
-**已验证**：1–4 为源码级实测（`dsh-client-modules/lib/index.js` resolveMeta/parseDshClient/clientExportOf + 槽契约总目 + 官方占用者先例），`verify-installed.mjs` 覆盖声明/bundle/占槽/点击复制；`./package.json` 导出缺失 → `ERR_PACKAGE_PATH_NOT_EXPORTED` 的排除路径已离线复现（0.8.2）。**渲染链路已活体通过**：0.8.2 修复后按钮在真实 GUI 出现，用户基于描边版提出样式改版（0.8.3 面性版已部署，样式目视为最终确认项）。
+**已验证**：1–4 为源码级实测（`dsh-client-modules/lib/index.js` resolveMeta/parseDshClient/clientExportOf + 槽契约总目 + 官方占用者先例），`verify-installed.mjs` 覆盖声明/bundle/占槽/点击复制；`./package.json` 导出缺失 → `ERR_PACKAGE_PATH_NOT_EXPORTED` 的排除路径已离线复现（0.8.2）。**渲染链路活体通过**：0.8.2 修复后按钮在真实 GUI 出现，用户基于描边版提出样式改版；0.8.3 面性版（亮色黑底白字 / 暗色反转、对齐「Session 日志」几何）经用户目视确认通过（2026-09-04）。**本章无遗留未验证项。**
 
 ## 16. 部署约定 [0.8.4 新增]
 
