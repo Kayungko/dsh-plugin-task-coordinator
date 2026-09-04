@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.8.0)
+ * dsh-plugin-task-coordinator — client module (0.8.3)
  *
  * Occupies the `conversation.session.header.utilities` slot with a
  * "Copy session id" action, so any session's stable id can be grabbed with

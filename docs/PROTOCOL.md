@@ -1,9 +1,9 @@
 # 主机契约与投递语义（实测版）
 
-本文档描述 `dsh-plugin-task-coordinator` 依赖的 DSH 宿主契约与八个 `task_*` 工具 + `/tasks` 命令的投递语义。来源为插件开发期的宿主源码通读 + 真实宿主端到端实测（**DSH 0.1.2-alpha.1**，2026-09-04 于 `~/.dsh/profiles/desktop`）。
+本文档描述 `dsh-plugin-task-coordinator` 依赖的 DSH 宿主契约与八个 `task_*` 工具 + `/tasks` 命令的投递语义。来源为插件开发期的宿主源码通读 + 真实宿主端到端实测（初验 **DSH 0.1.2-alpha.1**，2026-09-04 于 `~/.dsh/profiles/desktop`；宿主升级 **DSH Desktop 2.0.5 / core 0.1.2-rc.1** 后经 `verify-installed.mjs` 全量复验通过）。
 
-⚠️ 宿主版本是硬约束：契约按 0.1.2-alpha.1 验证，宿主大版本升级后须重跑 `verify-installed.mjs` 再放行。
-📌 章节按引入版本标注 **[0.3.0 新增]** ~ **[0.7.0 新增]**（对应回归测试已全绿，见 §14）。
+⚠️ 宿主版本是硬约束：契约按 0.1.2 系列（alpha.1 → rc.1）验证，peer 区间 `>=0.1.2-0 <0.2.0`；宿主大版本升级后须重跑 `verify-installed.mjs` 再放行。
+📌 章节按引入版本标注 **[0.3.0 新增]** ~ **[0.8.0 新增]**；0.8.1/0.8.2/0.8.4 为既有章节的行内修订与 §16（对应回归测试已全绿，见 §14）。
 
 ## 1. 宿主注入面（cordis）
 
@@ -221,4 +221,10 @@
 4. **槽位占用**：`apply(ctx)` 在客户端 cordis 纤维执行；`ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({ name, id, order?, label? }, Component))`。占用者组件收到标准会话 props（含 `sessionId`）+ `inject()` 返回的附加 props。
 5. **本插件占用**：`id: "copy-session-id"`，渲染「复制会话Id」按钮——面性设计（亮色黑底白字 / 暗色白底黑字，走 `--dsw-alias-label-primary` / `--dsw-alias-label-primary-foreground` 主题 token），几何对齐「Session 日志」按钮（圆角 18px / 高 32px / 13px 文字）；点击 `navigator.clipboard.writeText(sessionId)`（`document.execCommand('copy')` 降级），1.5s 状态反馈（已复制 ✓ / 复制失败）。
 
-**已验证**：1–4 为源码级实测（`dsh-client-modules/lib/index.js` resolveMeta/parseDshClient/clientExportOf + 槽契约总目 + 官方占用者先例），`verify-installed.mjs` 覆盖声明/bundle/占槽/点击复制；`./package.json` 导出缺失 → `ERR_PACKAGE_PATH_NOT_EXPORTED` 的排除路径已离线复现（0.8.2）。**未验证**：真实 GUI 渲染（宿主重启后目视确认按钮出现）。
+**已验证**：1–4 为源码级实测（`dsh-client-modules/lib/index.js` resolveMeta/parseDshClient/clientExportOf + 槽契约总目 + 官方占用者先例），`verify-installed.mjs` 覆盖声明/bundle/占槽/点击复制；`./package.json` 导出缺失 → `ERR_PACKAGE_PATH_NOT_EXPORTED` 的排除路径已离线复现（0.8.2）。**渲染链路已活体通过**：0.8.2 修复后按钮在真实 GUI 出现，用户基于描边版提出样式改版（0.8.3 面性版已部署，样式目视为最终确认项）。
+
+## 16. 部署约定 [0.8.4 新增]
+
+- **安装入口**：`install.ps1`（仓库根为工作区便捷包装，`plugin/install.ps1` 为仓内等价版）——复制包文件、保证 profile `package.json` 的 `dependencies` + `dsh.profile.bundles` 登记，然后**必须重启宿主**才装载新 bundle。
+- **技能目录拷内容不拷目录**：`Copy-Item` 的源是目录且目标目录已存在时会拷**进去**（嵌套 `skills/skills/`），正式路径技能文件从此不再更新——0.4.0–0.8.3 的实际事故。现行脚本复制 `skills\*` 内容并清理历史嵌套残留；技能走 `patchReload: live`，内容更新**无需重启**即刻热刷新。
+- **安装态自检**：任何宿主/插件变更后，把 `verify-installed.mjs` 复制进安装目录运行（跑完删除），全绿才放行；它断言服务版本、8 工具、`/tasks`、确认闸门、工作区归属与客户端模块全链。

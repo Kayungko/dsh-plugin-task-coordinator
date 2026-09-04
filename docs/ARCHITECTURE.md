@@ -71,15 +71,15 @@ flowchart LR
 
 分层约束（与 [unity-pipe](https://github.com/Kayungko/unity-pipe) 的移植边界思路一致，这里用 DI 达成）：
 
-- **纯模块**（`config.mjs` / `safety.mjs` / `title.mjs`）：零宿主 import，全部单测覆盖——55 个单元测试的主体；
+- **纯模块**（`config.mjs` / `safety.mjs` / `title.mjs`）：零宿主 import，全部单测覆盖——59 个单元测试的主体；
 - **`registry.mjs`**：持久 spawn 注册表（团队工作流的跨重启记忆）。读写永不抛错：损坏/缺失降级为空注册表，损坏文件保留为 `*.corrupt-<ts>`；写入近似原子（临时文件 + 重命名）；容量上限裁剪（`registryMaxEntries`）；0.5.0 起每条记录还带 `depth` 与 `parentSessionId`（递归治理的依据）；
 - **`ops.mjs`**：工厂函数 `createOps(deps)`，宿主对象（sessionController / agents / createUserMessage / limiter / registry / uuid / askUser）**全部经依赖注入**，离开宿主进程可完整测试；
 - **`tools.mjs`**：连 `defineTool` 都经注入——模型面注册与宿主包解耦；
 - **`commands.mjs`**：`/tasks` 斜杠命令（0.4.0）——仿官方 `dsh-command-goal` 的 `inject=['commands']` + `ctx.commands.register` 模式；宿主无命令注册表时降级为 warning，工具面不受影响；
-- **`client.js`**：Web 客户端模块（0.8.0）——插件唯一运行在**浏览器侧**的产物。不经 cordis 入口装配，而是由宿主 `dsh-client-modules` 依 `dsh.client` 声明 + `exports["./client"]` 原样装载（`window.__ModuleLoader__` factory 格式），占 `conversation.session.header.utilities` 槽渲染「复制 ID」按钮；与宿主侧九个模块完全解耦，缺槽位只影响该按钮；
+- **`client.js`**：Web 客户端模块（0.8.0）——插件唯一运行在**浏览器侧**的产物。不经 cordis 入口装配，而是由宿主 `dsh-client-modules` 依 `dsh.client` 声明 + `exports["./client"]` 原样装载（`window.__ModuleLoader__` factory 格式），占 `conversation.session.header.utilities` 槽渲染「复制会话Id」按钮（面性胶囊：亮色黑底白字 / 暗色白底黑字，走 `--dsw-alias-label-primary(-foreground)` 主题 token，几何对齐「Session 日志」）；与宿主侧九个模块完全解耦，缺槽位只影响该按钮；
 - **`index.mjs`**：唯一直接 import 宿主包（`dsh-tools` / `dsh-llm`）的装配层；`skills.mjs` 对 `dsh-skill-filesystem` 用**动态 import**；`ctx.get('userQuestions')` 在 `task_confirm` 调用时**惰性解析**（不硬注入，宿主缺该接缝时其余工具不受影响）。
 
-## 机制设计（0.4.0–0.8.0 新增）
+## 机制设计（0.4.0–0.8.4 新增）
 
 ### 派发确认链（0.6.0）
 
@@ -97,6 +97,18 @@ flowchart LR
 ### 递归治理（0.5.0）
 
 深度不是配置出来的，是**从注册表推导**的：子深度 = 调用方已记录深度 + 1，从未被派生的根会话算 0。闸门在 `spawnTask` 入口（`spawnBatch` 的每一项都过 `spawnTask`，天然同限）。超限拒绝时明确指引用 subagent——subagent 是宿主原生面，不占本插件的深度预算。
+
+### 工作区归属（0.8.1）
+
+宿主 `create` 对 `workspaceId` 与 `cwd` 是**互斥**语义，且只有 `workspaceId` 触发 `workspace.attachSession`。`spawnTask` 因此先解析调用方的工作区成员归属（调用方自身 + `parentSessionId` 祖先链 ≤8 跳，与工作区 `sessionIds` 求交），命中传 `workspaceId`（宿主以工作区路径为 cwd 并挂入），显式 `cwd` 优先、无归属降级为旧语义——子任务与总控在同一工作区侧栏可见。
+
+### 客户端模块装载要点（0.8.0–0.8.2）
+
+两段实测教训沉淀为硬契约：① `dsh.client` 声明 + `exports["./client"]` 之外，**还必须导出 `exports["./package.json"]`**——扫描器经 `createRequire(baseUrl).resolve('<包名>/package.json')` 定位清单，缺该导出会 `ERR_PACKAGE_PATH_NOT_EXPORTED` 且被静默排除（0.8.2 根因）；② bundle 必须是 `window.__ModuleLoader__.load({id, factory})` 注册、原样下发，`apply(ctx)` 在客户端纤维执行、`inject: ["slots"]` 声明依赖。完整五步链见 [PROTOCOL.md §15](PROTOCOL.md)。
+
+### 部署卫生（0.8.4）
+
+`install.ps1` 复制技能目录必须拷**内容**（`skills\*` → 目标）而非目录本身：PowerShell `Copy-Item` 在目标目录已存在时会把源目录拷进去，0.4.0–0.8.3 由此产生嵌套 `skills/skills/`、正式路径 SKILL.md 从未更新（总控一直加载旧版操作手册）。脚本现拷内容并清理历史嵌套残留。
 
 ## 降级策略
 
