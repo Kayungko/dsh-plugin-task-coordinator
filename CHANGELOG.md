@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.1] - 2026-09-04
+
+### Fixed
+
+- **派发的工作区归属**（实测缺陷修复）：此前 `task_spawn` / `task_spawn_batch` 只向 `sessionController.create` 传 `cwd`，子任务会话全部落进「未分组工作区」。现在解析调用方所在工作区（`workspaceRegistry` 成员归属，含经 spawn 注册表的祖先链回溯），改传 `workspaceId`（宿主语义：与 `cwd` 互斥，自动以工作区路径为 cwd 并 `attachSession`），子任务与总控同工作区可见。显式 `cwd` 参数仍优先（保持旧语义）；宿主无工作区注册表时降级为 cwd 语义，派发不受影响。单元测试 55 → 59，安装态验证新增归属断言。
+
 ## [0.8.0] - 2026-09-04
 
 ### Added
@@ -94,7 +100,8 @@
 
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
-[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.3.0...v0.7.0
 [0.6.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/commit/5599b2e

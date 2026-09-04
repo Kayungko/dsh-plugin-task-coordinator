@@ -9,7 +9,7 @@
 
 [![DSH 0.1.2-alpha.1 verified](https://img.shields.io/badge/DSH-0.1.2--alpha.1%20verified-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![55 unit tests](https://img.shields.io/badge/tests-55%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![59 unit tests](https://img.shields.io/badge/tests-59%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
 [What is this](#what-is-this) · [Quick start](#quick-start) · [Tools](#the-eight-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Changelog](CHANGELOG.md) · [中文](README.zh-CN.md)
@@ -76,7 +76,7 @@ Uninstall: `pwsh install.ps1 -Source . -Uninstall` (also takes effect after rest
 | `task_list` | List coordination-visible tasks with stable session ids, status, titles, todo/goal progress; filterable by `team` |
 | `task_progress` | Read one task in depth: live/cold state, queued messages, conversation tail, todos, goal |
 | `task_send` | Deliver a visible follow-up prompt (`mode: queue` or `steer`; `reference` links an earlier instruction); returns a `messageId` |
-| `task_spawn` | Create + name + kick off a brand-new task (title follows the `MMDD｜type｜topic` rule; groupable via `team`); returns a `correlationId`; appends the report-back convention by default |
+| `task_spawn` | Create + name + kick off a brand-new task (title follows the `MMDD｜type｜topic` rule; groupable via `team`); returns a `correlationId`; appends the report-back convention by default; the child attaches to the caller's workspace unless an explicit `cwd` is given |
 | `task_confirm` | Present a decomposition/dispatch plan as an **interactive approval card** and block until the user answers; approval mints a single-use `confirmationId` |
 | `task_spawn_batch` | Spawn a whole decomposition plan in one call (`tasks: [{title?, prompt}]` + one `team`); requires the `confirmationId` once the batch reaches the confirmation threshold; one failed item does not abort the rest |
 | `task_wait` | Block until one task becomes idle (or timeout); multi-target (`sessionIds` + `mode: all/any`) |
@@ -202,7 +202,7 @@ Module layering, DI boundaries and the degradation strategy live in **[docs/ARCH
 
 ```powershell
 node --check *.mjs                      # syntax check
-node --test test/smoke.test.mjs         # 55 unit tests (mocked host)
+node --test test/smoke.test.mjs         # 59 unit tests (mocked host)
 # after installing into a profile (see Quick start):
 node verify-installed.mjs               # installed-location integration check: real host packages + mock ctx
 ```
@@ -225,7 +225,7 @@ dsh-plugin-task-coordinator/
 ├── cordis.patch.yml    isolated plugin-group mount descriptor
 ├── install.ps1         deploy script (copy-based install + automatic backups)
 ├── verify-installed.mjs installed-location integration check
-├── test/smoke.test.mjs 55 unit tests
+├── test/smoke.test.mjs 59 unit tests
 └── docs/               ARCHITECTURE.md · PROTOCOL.md
 ```
 

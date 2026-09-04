@@ -316,6 +316,7 @@ function makeHarness(overrides = {}) {
     config,
     limiter,
     ...(overrides.registry ? { registry: overrides.registry } : {}),
+    ...(overrides.listWorkspaces ? { listWorkspaces: overrides.listWorkspaces } : {}),
     uuid: () => 'req-test-1',
     askUser,
   });
@@ -516,6 +517,59 @@ test('ops.spawnTask: defaults cwd to caller; title derived from kickoff prompt',
   assert.match(result.title, /^\d{4}｜探索｜go$/);
   assert.equal(harness.calls.rename.length, 1);
   assert.ok(String(result.correlationId).length > 0);
+});
+
+test('ops.spawnTask: workspace inheritance — child attaches to caller workspace', async () => {
+  const workspaces = [{ id: 'ws-1', path: '/ws/proj', sessionIds: ['session-super'] }];
+  const harness = makeHarness({ listWorkspaces: () => workspaces });
+  const result = await harness.ops.spawnTask({ prompt: 'in-workspace work' }, SUPERVISOR);
+  assert.equal(result.ok, true);
+  assert.equal(harness.calls.create[0].workspaceId, 'ws-1');
+  assert.equal(harness.calls.create[0].cwd, undefined); // host derives cwd from the workspace path
+  // an explicit cwd intentionally overrides workspace inheritance
+  const overridden = await harness.ops.spawnTask({ prompt: 'elsewhere', cwd: '/other' }, SUPERVISOR);
+  assert.equal(overridden.ok, true);
+  assert.equal(harness.calls.create[1].cwd, '/other');
+  assert.equal(harness.calls.create[1].workspaceId, undefined);
+});
+
+test('ops.spawnTask: workspace inheritance — ancestor chain and degradation', async () => {
+  // caller is not a direct member, but its recorded spawn parent is
+  const workspaces = [{ id: 'ws-2', path: '/ws2', sessionIds: ['session-root'] }];
+  const fakeRegistry = {
+    get: (id) => (id === 'session-super' ? { parentSessionId: 'session-root' } : undefined),
+    record: () => {},
+  };
+  const harness = makeHarness({ listWorkspaces: () => workspaces, registry: fakeRegistry });
+  const result = await harness.ops.spawnTask({ prompt: 'grandchild work' }, SUPERVISOR);
+  assert.equal(result.ok, true);
+  assert.equal(harness.calls.create[0].workspaceId, 'ws-2');
+  // a throwing registry snapshot degrades to caller cwd — spawn never fails on it
+  const broken = makeHarness({ listWorkspaces: () => { throw new Error('registry gone'); } });
+  const fallback = await broken.ops.spawnTask({ prompt: 'plain work' }, SUPERVISOR);
+  assert.equal(fallback.ok, true);
+  assert.equal(broken.calls.create[0].cwd, '/work');
+  assert.equal(broken.calls.create[0].workspaceId, undefined);
+});
+
+test('ops.spawnBatch: workspace inheritance applies to every item', async () => {
+  const workspaces = [{ id: 'ws-3', path: '/ws3', sessionIds: ['session-super'] }];
+  const harness = makeHarness({ listWorkspaces: () => workspaces, config: { confirmBeforeBatch: false } });
+  const batch = await harness.ops.spawnBatch({ tasks: [{ prompt: 'a' }, { prompt: 'b' }] }, SUPERVISOR);
+  assert.equal(batch.ok, true);
+  assert.equal(harness.calls.create.length, 2);
+  for (const request of harness.calls.create) assert.equal(request.workspaceId, 'ws-3');
+});
+
+test('resolveCallerWorkspaceId: pure-function edge cases', async () => {
+  const { resolveCallerWorkspaceId } = await import('../ops.mjs');
+  assert.equal(resolveCallerWorkspaceId('session-x', null, undefined), undefined);
+  assert.equal(resolveCallerWorkspaceId('session-x', null, () => []), undefined);
+  assert.equal(resolveCallerWorkspaceId('session-x', null, () => [{ id: 'ws', sessionIds: ['other'] }]), undefined);
+  assert.equal(resolveCallerWorkspaceId('session-x', null, () => [{ id: 'ws', sessionIds: ['session-x'] }]), 'ws');
+  assert.equal(resolveCallerWorkspaceId('session-x', null, () => [{ sessionIds: ['session-x'] }]), undefined); // no id
+  assert.equal(resolveCallerWorkspaceId('session-x', null, () => { throw new Error('boom'); }), undefined);
+  assert.equal(resolveCallerWorkspaceId('', null, () => [{ id: 'ws', sessionIds: [''] }]), undefined);
 });
 
 test('ops.spawnTask: kickoff failure reports the orphan', async () => {

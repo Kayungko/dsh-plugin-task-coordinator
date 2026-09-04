@@ -52,11 +52,66 @@ export const CONFIRM_APPROVE_LABEL = '按计划派发（推荐）';
 export const CONFIRM_DECLINE_LABEL = '暂不派发';
 
 /**
+ * Resolve the workspace a spawn should attach to: the workspace (if any)
+ * whose membership contains the caller or one of its recorded spawn
+ * ancestors. Pure and failure-tolerant — any missing piece yields undefined
+ * and the caller falls back to plain cwd semantics.
+ * @param {string} callerSessionId - the session doing the spawning
+ * @param {object|null} registry - durable spawn registry (parent chain)
+ * @param {Function|undefined} listWorkspaces - lazy host registry snapshot
+ * @returns {string|undefined} workspaceId to pass to sessionController.create
+ */
+export function resolveCallerWorkspaceId(callerSessionId, registry, listWorkspaces) {
+  if (typeof callerSessionId !== 'string' || callerSessionId.length === 0) return undefined;
+  if (typeof listWorkspaces !== 'function') return undefined;
+  let workspaces;
+  try {
+    workspaces = listWorkspaces();
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(workspaces) || workspaces.length === 0) return undefined;
+  const candidates = new Set([callerSessionId]);
+  let entry = registry?.get?.(callerSessionId);
+  let hops = 0;
+  while (entry?.parentSessionId && hops < 8) {
+    candidates.add(entry.parentSessionId);
+    entry = registry?.get?.(entry.parentSessionId);
+    hops += 1;
+  }
+  const hit = workspaces.find(
+    (workspace) => Array.isArray(workspace?.sessionIds) && workspace.sessionIds.some((id) => candidates.has(id)),
+  );
+  return typeof hit?.id === 'string' && hit.id.length > 0 ? hit.id : undefined;
+}
+
+/**
+ * Best-effort path lookup for a workspace id (result payload only — the host
+ * derives the real cwd itself). Failure-tolerant like resolveCallerWorkspaceId.
+ * @param {string} workspaceId - workspace to look up
+ * @param {Function|undefined} listWorkspaces - lazy host registry snapshot
+ * @returns {string|undefined} the workspace path when known
+ */
+export function workspacePathOf(workspaceId, listWorkspaces) {
+  if (typeof workspaceId !== 'string' || workspaceId.length === 0) return undefined;
+  if (typeof listWorkspaces !== 'function') return undefined;
+  let workspaces;
+  try {
+    workspaces = listWorkspaces();
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(workspaces)) return undefined;
+  const hit = workspaces.find((workspace) => workspace?.id === workspaceId);
+  return typeof hit?.path === 'string' && hit.path.length > 0 ? hit.path : undefined;
+}
+
+/**
  * @param {object} deps
  * @returns {TaskOps}
  */
 export function createOps(deps) {
-  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser } = deps;
+  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser, listWorkspaces } = deps;
 
   const fail = (code, message) => ({ ok: false, code, error: message });
   const failDeny = (denial) => fail(denial.code, denial.message);
@@ -335,9 +390,27 @@ export function createOps(deps) {
       }
       const request = {};
       if (typeof sessionId === 'string' && sessionId.length > 0) request.sessionId = sessionId;
-      const resolvedCwd = typeof cwd === 'string' && cwd.length > 0 ? cwd : caller.cwd;
-      if (resolvedCwd) request.cwd = resolvedCwd;
       if (typeof agentPreset === 'string' && agentPreset.length > 0) request.agentPreset = agentPreset;
+      // Workspace inheritance: an explicit cwd overrides everything (legacy
+      // semantics); otherwise the child attaches to the caller's workspace so
+      // spawned tasks stay visible beside their supervisor instead of landing
+      // in the ungrouped bucket. The host derives cwd from the workspace path
+      // and rejects requests carrying both fields.
+      const explicitCwd = typeof cwd === 'string' && cwd.length > 0 ? cwd : undefined;
+      let effectiveCwd;
+      if (explicitCwd) {
+        request.cwd = explicitCwd;
+        effectiveCwd = explicitCwd;
+      } else {
+        const workspaceId = resolveCallerWorkspaceId(caller.sessionId, registry, listWorkspaces);
+        if (workspaceId) {
+          request.workspaceId = workspaceId;
+          effectiveCwd = workspacePathOf(workspaceId, listWorkspaces) ?? caller.cwd;
+        } else if (caller.cwd) {
+          request.cwd = caller.cwd;
+          effectiveCwd = caller.cwd;
+        }
+      }
       let created;
       try {
         created = await sessionController.create(request);
@@ -406,7 +479,7 @@ export function createOps(deps) {
         shortId: shortId(newId),
         title: appliedTitle,
         ...(cleanTeam !== undefined ? { team: cleanTeam } : {}),
-        cwd: resolvedCwd ?? null,
+        cwd: effectiveCwd ?? null,
         started,
         correlationId,
         depth: childDepth,

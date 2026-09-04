@@ -38,7 +38,7 @@ export function defaultRegistryFile() {
 
 export function apply(ctx, input = {}) {
   const config = resolveConfig(input);
-  ctx.provide('taskCoordinator', { config, version: '0.7.0' });
+  ctx.provide('taskCoordinator', { config, version: '0.8.1' });
   if (!config.enabled) {
     ctx.logger?.info('task-coordinator: disabled by config; no tools registered');
     return;
@@ -72,6 +72,20 @@ export function apply(ctx, input = {}) {
     if (!service || typeof service.ask !== 'function') return Promise.resolve(null);
     return service.ask(request);
   };
+  // Workspace inheritance: spawned tasks attach to the caller's workspace.
+  // The host's sessionController.create accepts workspaceId (mutually
+  // exclusive with cwd) and attaches the new session to it; without one,
+  // sessions land in the ungrouped bucket. Resolved lazily per spawn — a
+  // missing or throwing registry degrades to plain cwd semantics.
+  const listWorkspaces = () => {
+    try {
+      const service = typeof ctx.get === 'function' ? ctx.get('workspaceRegistry') : undefined;
+      const list = typeof service?.list === 'function' ? service.list() : undefined;
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
+    }
+  };
   const ops = createOps({
     sessionController,
     agents,
@@ -81,6 +95,7 @@ export function apply(ctx, input = {}) {
     registry,
     uuid: () => `task-coord-${randomUUID()}`,
     askUser,
+    listWorkspaces,
   });
   const dispose = registerTools(ctx, ops, { defineTool }, config);
   const disposeCommands = registerCommands(ctx, ops);

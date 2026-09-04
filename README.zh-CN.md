@@ -9,7 +9,7 @@
 
 [![DSH 0.1.2-alpha.1 实测](https://img.shields.io/badge/DSH-0.1.2--alpha.1%20实测-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![55 个单元测试](https://img.shields.io/badge/tests-55%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![59 个单元测试](https://img.shields.io/badge/tests-59%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
 [这是什么](#这是什么) · [快速开始](#快速开始) · [八个工具](#八个工具) · [架构设计](docs/ARCHITECTURE.md) · [主机契约](docs/PROTOCOL.md) · [更新日志](CHANGELOG.md) · [English](README.md)
@@ -75,7 +75,7 @@ pwsh install.ps1 -Source .
 | `task_list` | 列出协调可见的任务（含稳定 sessionId、状态、标题、todo/goal 进度；可按 `team` 过滤） |
 | `task_progress` | 深入读取单个任务：实时/冷状态、排队消息、对话尾部、todos、goal |
 | `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`；`reference` 关联先前指令），返回 `messageId` |
-| `task_spawn` | 创建 + 命名 + 启动新任务（标题遵循 `MMDD｜类型｜主题`；可用 `team` 编组），返回 `correlationId`；默认附带回报约定 |
+| `task_spawn` | 创建 + 命名 + 启动新任务（标题遵循 `MMDD｜类型｜主题`；可用 `team` 编组），返回 `correlationId`；默认附带回报约定；新任务默认挂进调用方所在工作区（显式传 `cwd` 则不挂工作区） |
 | `task_confirm` | 把拆分/派发方案做成**交互式审批卡**弹给用户，阻塞直到回答；批准返回单次 `confirmationId` |
 | `task_spawn_batch` | 一次批量创建整个拆分方案（`tasks: [{title?, prompt}]` + 统一 `team`）；达到确认阈值时必须携带 `confirmationId`；单条失败不中止整批 |
 | `task_wait` | 阻塞直到目标任务空闲（或超时）；支持多目标（`sessionIds` + `mode: all/any`） |
@@ -201,7 +201,7 @@ pwsh install.ps1 -Source .
 
 ```powershell
 node --check *.mjs                      # 语法检查
-node --test test/smoke.test.mjs         # 55 个单元测试（mock 宿主）
+node --test test/smoke.test.mjs         # 59 个单元测试（mock 宿主）
 # 安装进 profile 后（见快速开始）：
 node verify-installed.mjs               # 安装态集成验证：真实宿主包 + mock ctx
 ```
@@ -224,7 +224,7 @@ dsh-plugin-task-coordinator/
 ├── cordis.patch.yml    隔离插件组挂载描述
 ├── install.ps1         部署脚本（复制式安装 + 自动备份）
 ├── verify-installed.mjs 安装态集成验证
-├── test/smoke.test.mjs 55 个单元测试
+├── test/smoke.test.mjs 59 个单元测试
 └── docs/               ARCHITECTURE.md · PROTOCOL.md
 ```
 

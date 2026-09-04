@@ -39,7 +39,11 @@ const sessions = new Map();
 const liveAgents = new Map();
 const registrations = [];
 const calls = [];
+const createRequests = [];
 let createCount = 0;
+// The supervisor session is a member of exactly one workspace; every spawn it
+// performs must therefore carry workspaceId (host create: workspaceId XOR cwd).
+const verifyWorkspace = { id: 'ws-verify', path: '/proj', sessionIds: ['session-super'] };
 
 sessions.set('session-super', {
   sessionId: 'session-super',
@@ -99,7 +103,10 @@ const ctx = {
   },
   // user-questions seam stand-in: auto-approve the first (approve) option,
   // mirroring the real ctx.get('userQuestions').ask() contract shape.
+  // workspace-registry stand-in: the supervisor lives in one workspace, so
+  // spawned children must attach to it (workspaceId in the create request).
   get(name) {
+    if (name === 'workspaceRegistry') return { list: () => [verifyWorkspace] };
     if (name !== 'userQuestions') return undefined;
     return {
       async ask(request) {
@@ -122,8 +129,11 @@ const ctx = {
     async list() { calls.push('list'); return { items: [...sessions.values()] }; },
     async create(request) {
       calls.push('create');
+      createRequests.push(request);
       createCount += 1;
       const id = request.sessionId ?? `session-spawned-${createCount}`;
+      // mirror workspace.attachSession on workspaceId-based creation
+      if (request.workspaceId === verifyWorkspace.id) verifyWorkspace.sessionIds.push(id);
       sessions.set(id, { sessionId: id, updatedAt: Date.now(), running: false, blank: true, cwd: request.cwd, projections: { asOfSeq: 0, values: {} } });
       return { sessionId: id };
     },
@@ -161,7 +171,7 @@ assert.equal(registrations.length, 8, `expected 8 tools, got ${registrations.len
 assert.equal(ctx.commandRegistrations.length, 1, 'expected the /tasks command');
 assert.equal(ctx.commandRegistrations[0].name, 'tasks');
 assert.ok(ctx.provides.taskCoordinator, 'taskCoordinator service not provided');
-assert.equal(ctx.provides.taskCoordinator.version, '0.7.0');
+assert.equal(ctx.provides.taskCoordinator.version, '0.8.1');
 // the skill mount is fire-and-forget (dynamic import); give it a macrotask
 await new Promise((resolve) => setImmediate(resolve));
 assert.equal(ctx.mountedPlugins.length, 1, 'expected the skill provider mount');
@@ -237,6 +247,10 @@ assert.match(spawnKickoff, /^run the regression suite/);
 assert.match(spawnKickoff, /汇报约定/);
 assert.match(spawnKickoff, /session-super/);
 console.log('task_spawn         : OK ->', spawnResult.sessionId, 'title:', spawnResult.title, '| team listed:', teamList.tasks.length === 1, '| report-back:', /汇报约定/.test(spawnKickoff));
+assert.equal(createRequests[0].workspaceId, 'ws-verify', 'spawn must attach the caller workspace');
+assert.equal(createRequests[0].cwd, undefined, 'session.create takes workspaceId XOR cwd');
+assert.equal(spawnResult.cwd, '/proj', 'result cwd reflects the workspace path');
+assert.ok(verifyWorkspace.sessionIds.includes(spawnResult.sessionId), 'created session attached to the workspace');
 
 // dispatch confirmation gate: unapproved batch is refused...
 const unapprovedBatch = await byName.task_spawn_batch.execute({
@@ -290,12 +304,15 @@ const batchBad = await byName.task_spawn_batch.execute({ tasks: [] }, supervisor
 assert.equal(batchBad.code, 'bad-request');
 console.log('task_confirm       : OK -> approved,', confirmResult.confirmationId, '(single-use enforced)');
 console.log('task_spawn_batch   : OK ->', batchResult.results.map((item) => item.sessionId).join(', '), '| gate + team listed:', batchTeamList.count === 2);
+assert.equal(createRequests[1].workspaceId, 'ws-verify', 'batch item 1 inherits the workspace');
+assert.equal(createRequests[2].workspaceId, 'ws-verify', 'batch item 2 inherits the workspace');
 
 // report-back opt-out: kickoff is exactly the user prompt
 const quietSpawn = await byName.task_spawn.execute({ prompt: 'quiet errand', reportBack: false }, supervisorExec);
 assert.equal(quietSpawn.ok, true);
 assert.equal(sessions.get(quietSpawn.sessionId).kickoffPrompt, 'quiet errand');
 console.log('reportBack: false  : OK -> kickoff stays pristine');
+assert.equal(createRequests[3].workspaceId, 'ws-verify', 'reportBack opt-out does not affect workspace inheritance');
 
 const waitResult = await byName.task_wait.execute({ sessionIds: ['session-worker', spawnResult.sessionId], mode: 'all', timeoutMs: 1000 }, supervisorExec);
 assert.equal(waitResult.settled, true);

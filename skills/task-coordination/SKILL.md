@@ -23,7 +23,7 @@ whenToUse: >
 | `task_list` | 查找任务，取 sessionId；可按 `team` 过滤、可含子代理（默认不含） |
 | `task_progress` | 深入读一个任务：状态、队列中的消息、对话尾部、todos、goal |
 | `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`），可用 `reference` 关联先前指令 |
-| `task_spawn` | 新建任务 + 命名 + 开场提示词，立即出现在会话列表；可用 `team` 编组；默认带回报约定（`reportBack`） |
+| `task_spawn` | 新建任务 + 命名 + 开场提示词，立即出现在会话列表；可用 `team` 编组；默认带回报约定（`reportBack`）；新任务默认继承调用方所在工作区（传显式 `cwd` 则按指定目录、不挂工作区） |
 | `task_confirm` | **派发前确认**：把拆分方案做成审批卡弹给用户，阻塞直到回答；批准返回单次 `confirmationId` |
 | `task_spawn_batch` | **一次创建一批任务**（拆分执行步）：传 `tasks: [{title?, prompt}]` + 统一 `team`（+ 必需的 `confirmationId`）；默认带回报约定 |
 | `task_wait` | 阻塞直到任务空闲（或超时）；支持多目标（`sessionIds` + `mode: all/any`） |

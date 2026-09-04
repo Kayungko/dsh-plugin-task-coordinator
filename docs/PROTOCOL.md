@@ -152,7 +152,8 @@
 
 - **批量原子性**：`task_spawn_batch` 先全量校验（数组非空、≤ `maxBatchSpawn`、每项 `prompt` 非空），再逐项走 `spawnTask`——标题规则、注册表、深度治理与单发完全一致；**单条失败不中止其余**，逐项 `results` 带独立 `code`；
 - **深度推导**：子深度 = 调用方在注册表的已记录深度 + 1；从未被派生的会话算根（深度 0）。闸门在 `spawnTask` 入口，批量每一项天然同限；
-- **超限指引**：`spawn-depth-exceeded` 的 `error` 文案明确要求改用 subagent——subagent 是宿主原生面，不占本插件深度预算。
+- **超限指引**：`spawn-depth-exceeded` 的 `error` 文案明确要求改用 subagent——subagent 是宿主原生面，不占本插件深度预算；
+- **工作区归属 [0.8.1]**：宿主 `create` 接受 `workspaceId` 或 `cwd`（互斥，见 `dsh-api-session-controller.create`）；`spawnTask` 解析调用方的工作区成员归属（含注册表祖先链回溯）并传 `workspaceId`——宿主以工作区路径为 cwd 并 `attachSession`，子任务与总控同工作区可见；显式 `cwd` 优先、无工作区降级为 cwd 语义。
 
 ## 10. 派发确认 [0.6.0 新增]
 
@@ -206,7 +207,7 @@
 
 ## 14. 验证记录
 
-- **单元**：55 个测试（`test/smoke.test.mjs`，mock 宿主，`node --test`）全绿——覆盖 0.3.0 注册表/编组/引用/多目标等待、0.4.0 命令语法/渲染/注册降级、0.5.0 批量（部分失败/超上限/深度链）、0.6.0 确认（批准/拒绝/取消/无信道/子代理拒答/闸门五态）、0.7.0 回报（默认开/关/批量逐项）；
+- **单元**：59 个测试（`test/smoke.test.mjs`，mock 宿主，`node --test`）全绿——覆盖 0.3.0 注册表/编组/引用/多目标等待、0.4.0 命令语法/渲染/注册降级、0.5.0 批量（部分失败/超上限/深度链）、0.6.0 确认（批准/拒绝/取消/无信道/子代理拒答/闸门五态）、0.7.0 回报（默认开/关/批量逐项）、0.8.1 工作区归属（继承/显式 cwd 覆盖/祖先链/降级/批量逐项）；
 - **集成**：`verify-installed.mjs` 在**安装位置**用真实 `@deepseek-ai/dsh-tools` / `dsh-llm` / `dsh-skill-filesystem` 包 + mock ctx 跑 `apply()` 全链路（schema 编译、消息构造、8 工具、`/tasks` 五路径、确认闸门全链、安全守卫、卸载清理、0.8.0 客户端模块全链）；宿主升级 2.0.5（core **0.1.2-rc.1**）后重跑全绿；
 - **端到端**（重启后真实宿主）：0.2.0 六项能力实测通过（运行中 `steer` 纠偏、取消后恢复、自环守卫；`task_spawn` kickoff 曾发现 prompt 门面缺 AbortSignal 的缺陷，修复后复验 `SPAWN_FIXED_OK`）；命名规则实测 `0904｜修复｜回归套件`；0.6.0 确认卡经官方 `userQuestions` 接缝同构路径构造（`exit_plan_mode` 先例 + 接缝错误码逐项核对）。
 
