@@ -1,40 +1,133 @@
-# dsh-plugin-task-coordinator
+<div align="center">
 
-**Codex 风格的跨任务协调** —— DeepSeek Harness (DSH) 的总控操作手册。
+**Codex 风格的跨任务协调 · DeepSeek Harness 的总控插件**
 
-任意顶层会话（“任务”）都可以：
-- 发现其他顶层会话
-- 读取进度
-- 自动创建任务（会话列表立即可见）
-- 发送可见的后续提示词（空闲即启动新一轮，运行中排队到边界）
+[![DSH 0.1.2-alpha.1 实测](https://img.shields.io/badge/DSH-0.1.2--alpha.1%20实测-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
+[![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
+[![33 个单元测试](https://img.shields.io/badge/tests-33%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
-所有跨任务指令都带 `kind: 'coordinator'` 来源标记，可在目标会话 transcript 中追溯。
+[这是什么](#这是什么) · [快速开始](#快速开始) · [六个工具](#六个工具) · [架构设计](docs/ARCHITECTURE.md) · [主机契约](docs/PROTOCOL.md) · [更新日志](CHANGELOG.md) · [English](README.md)
+
+</div>
+
+---
+
+## 这是什么
+
+**装完之后，你只要在一个会话里用大白话说要并行干什么——中间所有调度都是 `task_*` 工具的事：**
+
+```text
+把这件事拆成三个任务并行做：A 研究方案，B 写原型，C 跑测试，做完汇总给我。
+```
+
+背后发生的事：你（说人话）→ 总控会话 → 六个 `task_*` 工具 → DSH Desktop 里的其他顶层会话（"任务"），中间不需要你盯任何一步。
+
+- 这是一个 DSH 插件：它让**任意顶层会话**都能发现任务、读进度、建任务、发指令；
+- 新建的任务**立即出现在 GUI 会话列表**（走的是侧栏消费的同一个 `api-session/added` 事件）；
+- 每条跨任务指令都带 `coordinator` 来源标记，在目标会话的 transcript 里可见、可追溯；
+- 前提只有一条：**DSH Desktop 已经装好并能启动**（插件不会替你启动宿主）。
+
+> 📌 主机契约已在 **DSH 0.1.2-alpha.1** 实测；六项能力全部通过重启后的真实宿主端到端验证（判据见 [主机契约](docs/PROTOCOL.md)）。
+
+## 快速开始
+
+### 前置条件
+
+- DSH Desktop（主机契约按 0.1.2-alpha.1 验证）；
+- Node.js `^22.19.0 || >=24`（宿主运行时通常已满足）；
+- PowerShell（部署脚本是 `.ps1`）。
+
+### 安装（一条命令）
+
+```powershell
+git clone https://github.com/Kayungko/dsh-plugin-task-coordinator.git
+cd dsh-plugin-task-coordinator
+pwsh install.ps1 -Source .
+```
+
+脚本做三件事：把插件复制进 profile 的 `node_modules/`（不跑 `pnpm install`、不碰 lockfile）、在 profile manifest 登记依赖与 bundle、登记 `.package-map.json`——**改前全部自动备份**到 `backups/<时间戳>/`。
+
+装完**重启 DSH Desktop**即可，任何会话都能使用六个工具。
+
+> 💡 `install.ps1` 的默认 `-Source` 是 `$PSScriptRoot/plugin`（工作区布局）；在插件仓库根目录直接运行要**显式传 `-Source .`**。
+> 重复执行是安全的：文件覆盖幂等，manifest 登记自动去重。
+
+### 验证
+
+重启后，把这句发给任意会话：
+
+`列一下当前可见的任务`
+
+它调用 `task_list` 并返回任务列表（空列表也算正常回答），即工具已挂载 ✅
+
+卸载：`pwsh install.ps1 -Source . -Uninstall`（同样重启后生效）。
 
 ## 六个工具
 
-| 工具          | 用途 |
-|---------------|------|
-| `task_list`   | 列出协调可见的任务（含 sessionId、状态、标题、todo/goal 进度） |
-| `task_progress` | 深入读取单个任务（实时/冷状态、队列消息、对话尾部、todos、goal） |
-| `task_send`   | 发送可见后续提示词（mode: queue / steer） |
-| `task_spawn`  | 创建 + 命名 + 启动新任务（标题 `MMDD｜类型｜主题`） |
-| `task_wait`   | 阻塞直到目标任务空闲（或超时） |
-| `task_cancel` | 取消目标活动轮次（保留队列消息） |
+| 工具 | 用途 |
+|---|---|
+| `task_list` | 列出协调可见的任务（含稳定 sessionId、状态、标题、todo/goal 进度；可按 `team` 过滤） |
+| `task_progress` | 深入读取单个任务：实时/冷状态、排队消息、对话尾部、todos、goal |
+| `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`；`reference` 关联先前指令），返回 `messageId` |
+| `task_spawn` | 创建 + 命名 + 启动新任务（标题遵循 `MMDD｜类型｜主题`；可用 `team` 编组），返回 `correlationId` |
+| `task_wait` | 阻塞直到目标任务空闲（或超时）；支持多目标（`sessionIds` + `mode: all/any`） |
+| `task_cancel` | 取消目标的活动轮次（保留其排队消息） |
 
-## Spawn-title 规则（MMDD｜类型｜主题）
+## 投递语义（最关键的一节）
 
-任务创建标题统一格式 `MMDD｜类型｜主题`：
+| 目标状态 | `task_send` 行为 |
+|---|---|
+| **空闲** | 立即启动目标的新一轮执行 |
+| **运行中** + `queue`（默认） | 消息排队，**下一个轮次边界**消费 |
+| **运行中** + `steer` | 消息排队，**下一个步骤边界**消费（更快的中途纠偏） |
 
-- **日期前缀**由插件根据会话**创建时间**（Asia/Shanghai）机械盖印，模型只填 `类型｜主题`
-- 允许类型：功能、设计、修复、优化、发布、探索、文档、研究
-- 主题最多 16 字，适合侧栏显示
-- 拿不准类型用兜底「探索」；无标题时从 kickoff prompt 第一行自动提取
+结论：**不需要轮询**——投递后 `task_wait` 等空闲，再 `task_progress` 读结果。要立刻纠偏运行中的任务用 `steer`，发 `queue` 不会提前生效。
 
-## 内置技能（supervisor playbook）
+> ⚠️ **投递 ≠ 消费**：`delivered: true` 只表示消息进了收件箱。超时、异常或长时间无响应时，先用 `task_progress` 看队列和对话尾部**对账**，再决定补发还是继续等——绝不把不确定的投递当新消息盲发。
 
-插件自带 `task-coordination` 技能（`skills/task-coordination/SKILL.md`），教总控“何时、如何”编排六个工具。技能隔离挂载，随插件安装/卸载/编辑热加载。
+## 关联与追溯
 
-## 配置示例（cordis.yml）
+- `task_send` 返回 `messageId`，`task_spawn` 返回 `correlationId`——记下需要被引用的那一条；
+- 纠偏/续接先前指令时，给 `task_send` 传 `reference: <messageId 或 correlationId>`——引用以**可见注释行**随消息送达，目标任务明确知道"这是对哪条指令的修正"；
+- 每条跨任务消息带 `coordinator` 来源标记，在目标会话 transcript 中可回溯到发起方。
+
+## 团队工作流与持久注册表
+
+- `task_spawn` 传 `team: <工作流名>` 即可把任务编组，之后 `task_list({ team })` 随时找回整组；
+- 编组记录在**持久 spawn 注册表**（默认 `<DSH_HOME 或 ~/.dsh>/task-coordinator/registry.json`）——**宿主重启后依然有效**（原生会话列表回答不了"哪些任务是我的、怎么分组"）；
+- 注册表写入近似原子（临时文件 + 重命名）；记录上限 `registryMaxEntries`（默认 500，最旧先裁剪）；损坏文件不静默丢弃，保留为 `*.corrupt-<时间戳>` 供检查。
+
+## 机器可读错误码
+
+失败返回 `{ ok: false, code, error }`——agent 按 `code` 分支，不读文案。两类：守卫拒绝（`self-send-denied` / `subagent-caller-denied` / `subagent-target-denied` / `target-not-found` / `rate-limited` / `queue-full`…）与操作失败（`bad-request` / `target-busy` / `target-cold` / `spawn-create-failed` / `kickoff-rejected`…）。完整码表见 [主机契约 §6](docs/PROTOCOL.md#6-错误信封与码表)。
+
+## 安全模型
+
+- 自寻址（给自己发消息）**恒被拒绝**；
+- 目标必须是顶层会话——子代理会话被栅栏隔离；
+- 子代理调用方默认拒绝（`allowSubagentUse` 显式放行）；
+- 同一目标限频（`minSendIntervalMs`）+ 排队深度限制（`maxQueuePerTask`），防失控刷屏；
+- 调用方身份**每次工具调用都从执行上下文重新推导**，不接受自报。
+
+## Spawn 命名规则（MMDD｜类型｜主题）
+
+`task_spawn` 的标题分工明确——**模型只填 `类型｜主题`，日期由插件机械盖印**：
+
+- **日期前缀**按会话**创建时间**（`titleTimeZone`，默认 Asia/Shanghai）盖印——永不用 `updatedAt`，永不让模型算；
+- **类型** ∈ 功能 / 设计 / 修复 / 优化 / 发布 / 探索 / 文档 / 研究（`titleTypes`）；拿不准时用兜底「探索」（`titleFallbackType`），不猜；
+- **主题**截断到 16 字（`titleMaxTopicChars`），适合侧栏显示；没给 `title` 时从 kickoff prompt 第一行提取；
+- 过期的行首 `MMDD｜` 会按真实创建时间重新盖印，半角 `|` 与旧式 `[团队]` 前缀自动归一。
+
+示例：`修复｜对账精度` → `0904｜修复｜对账精度`。
+
+## 内置技能：task-coordination
+
+插件随包携带一个技能（`skills/task-coordination/SKILL.md`），教总控**何时、如何**编排六个工具：投递语义、扇出/监督/交接模式、命名规则、反模式。按需加载，不协调就不占上下文。
+
+挂载走隔离 `dsh-skill-filesystem` provider（同 `@openviking/dsh-memory-plugin` 先例）：`providerName: 'task-coordinator'`、`includeDefaultRoots: false`、只见本插件的 `skills/` 目录。效果：编辑热加载、不遮蔽项目/用户技能、随插件卸载一起消失。provider 包不可用时降级为一条 warning，**六个工具照常工作**。
+
+## 配置（cordis.yml / patch）
 
 ```yaml
 - id: task-coordinator-runtime
@@ -42,34 +135,65 @@
   config:
     enabled: true
     allowSubagentUse: false
+    includeSubagentsInList: false
     titleTypes: ['功能', '设计', '修复', '优化', '发布', '探索', '文档', '研究']
     titleFallbackType: '探索'
     titleMaxTopicChars: 16
     titleTimeZone: 'Asia/Shanghai'
+    registryFile: ''              # 留空 = <DSH_HOME 或 ~/.dsh>/task-coordinator/registry.json
+    registryMaxEntries: 500
     maxQueuePerTask: 5
     minSendIntervalMs: 2000
+    waitDefaultTimeoutMs: 120000
+    waitMaxTimeoutMs: 600000
+    excerptChars: 400
+    progressTailMessages: 6
 ```
 
-## 主机合约（已验证 DSH 0.1.2-alpha.1）
+配置解析**拒绝错误类型而不是猜测**：类型不对直接 `TypeError` 快速失败。全部配置项及语义见 [主机契约 §5](docs/PROTOCOL.md#5-限流与容量判据)。
 
-- `ctx.sessionController` 支持 list/create/rename/prompt/cancel
-- `ctx.agents` 提供 get/status/inbox/whenIdle/followup/steer
-- 支持 `@deepseek-ai/dsh-tools` 的 defineTool
+---
 
-新任务创建后会自动出现在 GUI 会话列表（`api-session/added` 事件）。
+## 给开发者
 
-## 开发与部署
+模块分层、DI 边界与降级策略见 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**。本节只留速查。
+
+### 开发与测试
 
 ```powershell
-cd D:/git/DHS-Tool/plugin
-node --check *.mjs
-node --test test/smoke.test.mjs
-# 安装到桌面 profile
-pwsh install.ps1
-# 重新部署
-pwsh install.ps1
+node --check *.mjs                      # 语法检查
+node --test test/smoke.test.mjs         # 33 个单元测试（mock 宿主）
+# 安装进 profile 后（见快速开始）：
+node verify-installed.mjs               # 安装态集成验证：真实宿主包 + mock ctx
 ```
 
-## 许可证
+### 目录
 
-MIT
+```
+dsh-plugin-task-coordinator/
+├── index.mjs           cordis 入口 · 装配（唯一直接 import 宿主包的层）
+├── config.mjs          配置解析（纯模块）
+├── safety.mjs          守卫 + 限流器 + 拒绝码（纯模块）
+├── title.mjs           spawn 命名规则（纯模块）
+├── registry.mjs        持久 spawn 注册表（近似原子写 · 损坏容错）
+├── ops.mjs             会话操作 · DI 工厂
+├── tools.mjs           六个 task_* 工具注册
+├── skills.mjs          隔离技能挂载（动态 import，fire-and-forget）
+├── skills/task-coordination/   supervisor 操作手册（随包分发）
+├── cordis.patch.yml    隔离插件组挂载描述
+├── install.ps1         部署脚本（复制式安装 + 自动备份）
+├── verify-installed.mjs 安装态集成验证
+├── test/smoke.test.mjs 33 个单元测试
+└── docs/               ARCHITECTURE.md · PROTOCOL.md
+```
+
+## 文档
+
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — 架构设计：为什么是插件、模块分层图、安全守卫分层、降级策略
+- **[docs/PROTOCOL.md](docs/PROTOCOL.md)** — 主机契约与投递语义实测参考（注入面、门面签名、限流判据、验证记录）
+- **[CHANGELOG.md](CHANGELOG.md)** — 版本更新日志
+- **[skills/task-coordination/SKILL.md](skills/task-coordination/SKILL.md)** — 模型实际读取的总控操作手册
+
+## 许可
+
+本插件代码 [MIT](LICENSE)。运行时依赖的 `@deepseek-ai/*` 宿主包归 DeepSeek Harness 官方所有与许可，不在本仓库许可范围内。
