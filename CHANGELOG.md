@@ -2,6 +2,18 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.0] - 2026-09-04
+
+### Added
+
+- **Web 客户端模块（复制会话 ID 按钮）**：插件首个客户端侧能力。`package.json` 声明 `dsh.client.platform: "web"` + `exports["./client"]`，`client.js`（`window.__ModuleLoader__` factory 格式，官方 `dsh-session-log-export` 同构）占用 `conversation.session.header.utilities` 槽，在每个会话头部右侧加「复制 ID」按钮：一键复制当前会话完整 `sessionId` 到剪贴板（`execCommand` 降级兜底），复制后短暂显示「已复制 ✓」。配合协调场景：复制即可粘进 `task_send` / `task_progress` / `/tasks <id>`。侧栏会话行右键菜单为宿主硬编码（实测不可扩展），故选有官方先例的头部槽位。
+- 安装态集成验证新增客户端模块全链检查：声明解析、bundle 加载、槽位占用、点击复制行为。
+
+### Changed
+
+- `install.ps1` 文件清单补齐遗漏（`registry.mjs` / `commands.mjs` / `client.js`）。
+- 确认兼容 DSH Desktop 2.0.5 / core **0.1.2-rc.1**（宿主升级后契约重验全绿：8 工具真实 `defineTool`、消息构造、技能挂载、命令注册、确认链）。
+
 ## [0.7.0] - 2026-09-04
 
 ### Added
@@ -82,7 +94,8 @@
 
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
-[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.3.0...v0.7.0
 [0.6.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/commit/5599b2e
 [0.5.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/commit/5599b2e

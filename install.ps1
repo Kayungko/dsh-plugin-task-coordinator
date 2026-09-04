@@ -60,7 +60,7 @@ if (-not (Test-Path $ManifestPath)) { throw "profile manifest not found: $Manife
 # while it is any process's working directory, and file overwrites work even
 # when the running host has the loaded modules in memory.
 if (-not (Test-Path $Target)) { New-Item -ItemType Directory -Force -Path $Target | Out-Null }
-$files = @('package.json', 'cordis.patch.yml', 'index.mjs', 'config.mjs', 'safety.mjs', 'title.mjs', 'ops.mjs', 'tools.mjs', 'skills.mjs', 'README.md')
+$files = @('package.json', 'cordis.patch.yml', 'index.mjs', 'config.mjs', 'safety.mjs', 'title.mjs', 'registry.mjs', 'ops.mjs', 'tools.mjs', 'commands.mjs', 'skills.mjs', 'client.js', 'README.md')
 foreach ($file in $files) {
   $from = Join-Path $Source $file
   if (Test-Path $from) { Copy-Item $from (Join-Path $Target $file) -Force }

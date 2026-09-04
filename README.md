@@ -86,6 +86,10 @@ Uninstall: `pwsh install.ps1 -Source . -Uninstall` (also takes effect after rest
 
 Read-only lookups can bypass the model entirely: `/tasks` (all tasks), `/tasks team <name>` (one workstream), `/tasks <sessionId>` (one task's progress, short-id prefixes resolve when unique). The command executes directly in the host — zero tokens, instant answer. Anything that *acts* (send/spawn/wait/cancel) still goes through the tools.
 
+### Copying session ids — one click in the session header
+
+The plugin ships a small **web client module** (`client.js`, declared via `dsh.client` in `package.json`) that occupies the official `conversation.session.header.utilities` slot — the same seam the shipped `session-log-export` package uses. Every session header gets a **「复制 ID」** button that copies the session's full `sessionId` to the clipboard, ready to paste into `task_send`, `task_progress` or `/tasks <id>` on the supervisor side. (The sidebar's per-session context menu is hard-coded in the host and cannot be extended — field-verified — so the header slot is the sanctioned place.)
+
 ## Dispatch confirmation (the anti-black-box gate)
 
 Batch dispatches used to be a silent model decision — not anymore:
@@ -215,6 +219,7 @@ dsh-plugin-task-coordinator/
 ├── ops.mjs             session operations · DI factory
 ├── tools.mjs           eight task_* tool registrations
 ├── commands.mjs        /tasks slash command (direct execution, no model turn)
+├── client.js           web client module: copy-session-id header button (dsh.client)
 ├── skills.mjs          isolated skill mount (dynamic import, fire-and-forget)
 ├── skills/task-coordination/   supervisor playbook (shipped with the bundle)
 ├── cordis.patch.yml    isolated plugin-group mount descriptor

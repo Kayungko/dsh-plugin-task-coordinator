@@ -207,5 +207,17 @@
 ## 14. 验证记录
 
 - **单元**：55 个测试（`test/smoke.test.mjs`，mock 宿主，`node --test`）全绿——覆盖 0.3.0 注册表/编组/引用/多目标等待、0.4.0 命令语法/渲染/注册降级、0.5.0 批量（部分失败/超上限/深度链）、0.6.0 确认（批准/拒绝/取消/无信道/子代理拒答/闸门五态）、0.7.0 回报（默认开/关/批量逐项）；
-- **集成**：`verify-installed.mjs` 在**安装位置**用真实 `@deepseek-ai/dsh-tools` / `dsh-llm` / `dsh-skill-filesystem` 包 + mock ctx 跑 `apply()` 全链路（schema 编译、消息构造、8 工具、`/tasks` 五路径、确认闸门全链、安全守卫、卸载清理）；
+- **集成**：`verify-installed.mjs` 在**安装位置**用真实 `@deepseek-ai/dsh-tools` / `dsh-llm` / `dsh-skill-filesystem` 包 + mock ctx 跑 `apply()` 全链路（schema 编译、消息构造、8 工具、`/tasks` 五路径、确认闸门全链、安全守卫、卸载清理、0.8.0 客户端模块全链）；宿主升级 2.0.5（core **0.1.2-rc.1**）后重跑全绿；
 - **端到端**（重启后真实宿主）：0.2.0 六项能力实测通过（运行中 `steer` 纠偏、取消后恢复、自环守卫；`task_spawn` kickoff 曾发现 prompt 门面缺 AbortSignal 的缺陷，修复后复验 `SPAWN_FIXED_OK`）；命名规则实测 `0904｜修复｜回归套件`；0.6.0 确认卡经官方 `userQuestions` 接缝同构路径构造（`exit_plan_mode` 先例 + 接缝错误码逐项核对）。
+
+## 15. 客户端模块契约 [0.8.0 新增]
+
+插件首次进入浏览器侧。装载链逐段实测（DSH Desktop 2.0.5 / core 0.1.2-rc.1）：
+
+1. **声明**：`package.json` 的 `dsh.client` 必须含 `platform: "web"`；`dsh-client-modules` 的 `parseDshClient` 对其余字段（`inject?`、`external?`、`immediately?`）做窄化校验，非法即抛。
+2. **入口解析**：`exports["./client"]`（字符串或含字符串 `default` 的对象）解析为相对包根的路径；缺失则 `declares dsh.client but exports no "./client" bundle`。
+3. **bundle 格式**：该文件被**原样** `readFileSync` 装载并经 `/plugins/<id>/client.js` combo 路由下发，必须是 `window.__ModuleLoader__.load({ id, factory })` 注册（官方 `dsh-session-log-export` 编译产物同构）；`factory(require)` 中 `require` 绑定共享客户端图（`react` 等），返回 `module.exports`，导出 `apply` 与 `inject`（服务名数组，如 `["slots"]`）。
+4. **槽位占用**：`apply(ctx)` 在客户端 cordis 纤维执行；`ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({ name, id, order?, label? }, Component))`。占用者组件收到标准会话 props（含 `sessionId`）+ `inject()` 返回的附加 props。
+5. **本插件占用**：`id: "copy-session-id"`，渲染「复制 ID」按钮——点击 `navigator.clipboard.writeText(sessionId)`（`document.execCommand('copy')` 降级），1.5s 状态反馈（已复制 ✓ / 复制失败）。
+
+**已验证**：1–4 为源码级实测（`dsh-client-modules/lib/index.js` resolveMeta/parseDshClient/clientExportOf + 槽契约总目 + 官方占用者先例），`verify-installed.mjs` 覆盖声明/bundle/占槽/点击复制。**未验证**：真实 GUI 渲染（需一次宿主重启后目视确认按钮出现）。

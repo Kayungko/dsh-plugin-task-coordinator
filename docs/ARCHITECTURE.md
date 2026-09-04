@@ -24,6 +24,7 @@ flowchart LR
         ops["ops.mjs<br/>会话操作 · DI 工厂"]
         skills["skills.mjs<br/>隔离技能挂载"]
         registry["registry.mjs<br/>持久 spawn 注册表"]
+        client["client.js<br/>Web 客户端模块（浏览器侧）"]
 
         subgraph pure["纯模块（零宿主 import）"]
             direction LR
@@ -45,12 +46,15 @@ flowchart LR
     agents["ctx.agents<br/>get/status/inbox/<br/>whenIdle/followup/steer"]
     uq["ctx.userQuestions<br/>ask()（惰性解析）"]
     skill["task-coordination 技能<br/>（supervisor playbook）"]
+    slot["conversation.session.<br/>header.utilities 槽"]
 
     host -->|"ctx.provide / inject"| index
+    host -->|"dsh.client bundle 路由"| client
     ops -->|"全部经 DI 注入"| sc
     ops --> agents
     ops -.->|"task_confirm 弹窗"| uq
     skills -.->|"fire-and-forget"| skill
+    client -.->|"占槽 · 复制 ID"| slot
 
     classDef host fill:#1E293B,stroke:#64748B,color:#F8FAFC,stroke-width:2px;
     classDef wiring fill:#0F172A,stroke:#38BDF8,color:#F8FAFC,stroke-width:2px;
@@ -58,9 +62,9 @@ flowchart LR
     classDef target fill:#1E293B,stroke:#F59E0B,color:#F8FAFC,stroke-width:3px;
 
     class host host;
-    class index,tools,commands,skills wiring;
+    class index,tools,commands,skills,client wiring;
     class ops,config,safety,title,registry core;
-    class sc,agents,uq,skill target;
+    class sc,agents,uq,skill,slot target;
 ```
 
 > 图注：`registry.mjs` 是唯一碰磁盘的逻辑模块（`node:fs`），职责边界是「近似原子写 + 损坏容错」，通过 DI 注入 `ops`，测试可用假路径隔离。
@@ -72,9 +76,10 @@ flowchart LR
 - **`ops.mjs`**：工厂函数 `createOps(deps)`，宿主对象（sessionController / agents / createUserMessage / limiter / registry / uuid / askUser）**全部经依赖注入**，离开宿主进程可完整测试；
 - **`tools.mjs`**：连 `defineTool` 都经注入——模型面注册与宿主包解耦；
 - **`commands.mjs`**：`/tasks` 斜杠命令（0.4.0）——仿官方 `dsh-command-goal` 的 `inject=['commands']` + `ctx.commands.register` 模式；宿主无命令注册表时降级为 warning，工具面不受影响；
+- **`client.js`**：Web 客户端模块（0.8.0）——插件唯一运行在**浏览器侧**的产物。不经 cordis 入口装配，而是由宿主 `dsh-client-modules` 依 `dsh.client` 声明 + `exports["./client"]` 原样装载（`window.__ModuleLoader__` factory 格式），占 `conversation.session.header.utilities` 槽渲染「复制 ID」按钮；与宿主侧九个模块完全解耦，缺槽位只影响该按钮；
 - **`index.mjs`**：唯一直接 import 宿主包（`dsh-tools` / `dsh-llm`）的装配层；`skills.mjs` 对 `dsh-skill-filesystem` 用**动态 import**；`ctx.get('userQuestions')` 在 `task_confirm` 调用时**惰性解析**（不硬注入，宿主缺该接缝时其余工具不受影响）。
 
-## 机制设计（0.4.0–0.7.0 新增）
+## 机制设计（0.4.0–0.8.0 新增）
 
 ### 派发确认链（0.6.0）
 

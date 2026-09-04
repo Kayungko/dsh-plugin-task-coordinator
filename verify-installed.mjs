@@ -337,4 +337,59 @@ console.log('task_cancel        : OK');
 for (const factory of ctx.effects) factory()();
 assert.equal(registrations.length, 0, 'dispose must unregister all tools');
 console.log('dispose            : OK -> all tools unregistered');
+
+// 7. client module: declaration, bundle format, slot occupation, copy behavior
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
+assert.equal(pkg.dsh?.client?.platform, 'web', 'dsh.client.platform must be "web"');
+assert.equal(pkg.exports?.['./client'], './client.js', 'exports["./client"] must point at ./client.js');
+assert.ok(existsSync(new URL('./client.js', import.meta.url)), 'client.js bundle missing');
+
+const clientSrc = readFileSync(new URL('./client.js', import.meta.url), 'utf8');
+const clientRegistrations = [];
+const fakeWindow = { __ModuleLoader__: { load: (entry) => clientRegistrations.push(entry) } };
+new Function('window', clientSrc)(fakeWindow);
+assert.equal(clientRegistrations.length, 1, 'client.js must register exactly one module');
+const clientEntry = clientRegistrations[0];
+assert.equal(clientEntry.id, pkg.name, 'client module id must match package name');
+
+const fakeReact = {
+  createElement: (type, props, ...children) => ({ type, props, children }),
+  useState: (initial) => [initial, () => {}],
+};
+const clientExports = clientEntry.factory((spec) => {
+  assert.equal(spec, 'react', 'client module may only require shared graph deps');
+  return fakeReact;
+});
+assert.equal(typeof clientExports.apply, 'function');
+assert.deepEqual(clientExports.inject, ['slots']);
+
+const slotInjections = [];
+const slotCtx = {
+  slots: {
+    inject: (name, thunk) => slotInjections.push({ name, thunk }),
+    register: (options, component) => ({ options, component }),
+  },
+};
+clientExports.apply(slotCtx);
+assert.equal(slotInjections.length, 1);
+assert.equal(slotInjections[0].name, 'conversation.session.header.utilities');
+const occupation = slotInjections[0].thunk();
+assert.equal(occupation.options.id, 'copy-session-id');
+assert.equal(typeof occupation.component, 'function');
+
+const wrote = [];
+const navDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+Object.defineProperty(globalThis, 'navigator', {
+  value: { clipboard: { writeText: async (t) => { wrote.push(t); } } },
+  configurable: true,
+});
+const button = occupation.component({ sessionId: 'session-copy-target' });
+assert.equal(button.type, 'button');
+assert.match(button.props.title, /session-copy-target/);
+await button.props.onClick();
+assert.deepEqual(wrote, ['session-copy-target']);
+if (navDesc) Object.defineProperty(globalThis, 'navigator', navDesc);
+else delete globalThis.navigator;
+console.log('client module      : OK -> dsh.client declared, bundle loads, slot occupied, copy writes sessionId');
+
 console.log('\nALL INTEGRATION CHECKS PASSED');

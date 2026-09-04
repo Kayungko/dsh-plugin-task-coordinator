@@ -85,6 +85,10 @@ pwsh install.ps1 -Source .
 
 只读查询可以完全绕开模型：`/tasks`（全部任务）、`/tasks team <名称>`（单个工作流编组）、`/tasks <sessionId>`（单任务进度，短 ID 前缀唯一时可解析）。命令在宿主直接执行——零 token、立即出结果。一切**动作类**操作（发消息/派发/等待/取消）仍走工具。
 
+### 复制会话 ID —— 会话头部一键完成
+
+插件随包一个 **Web 客户端模块**（`client.js`，由 `package.json` 的 `dsh.client` 声明），占用官方 `conversation.session.header.utilities` 槽位——与自带的 `session-log-export` 同一条接缝。每个会话头部右侧会出现「复制 ID」按钮：一键复制当前会话的完整 `sessionId`，直接粘给总控侧的 `task_send`、`task_progress` 或 `/tasks <id>`。（侧栏会话行右键菜单为宿主硬编码，实测不可扩展，故选择有官方先例的头部槽位。）
+
 ## 派发确认（反信息黑盒闸门）
 
 批量派发曾经是模型的静默决策——现在不是了：
@@ -214,6 +218,7 @@ dsh-plugin-task-coordinator/
 ├── ops.mjs             会话操作 · DI 工厂
 ├── tools.mjs           八个 task_* 工具注册
 ├── commands.mjs        /tasks 斜杠命令（直接执行，不进模型）
+├── client.js           Web 客户端模块：复制会话 ID 头部按钮（dsh.client）
 ├── skills.mjs          隔离技能挂载（动态 import，fire-and-forget）
 ├── skills/task-coordination/   supervisor 操作手册（随包分发）
 ├── cordis.patch.yml    隔离插件组挂载描述

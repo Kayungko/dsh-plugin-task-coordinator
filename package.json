@@ -1,11 +1,12 @@
 {
   "name": "dsh-plugin-task-coordinator",
-  "version": "0.7.0",
-  "description": "Codex-style cross-task coordination for DeepSeek Harness: list, inspect, spawn, message and steer top-level sessions from a supervisor agent, with team workstreams, correlation ids, batch spawning, interactive dispatch confirmation (task_confirm approval cards), default result report-back from spawned tasks, recursion-depth governance, a durable spawn registry and a /tasks slash command. Ships the task-coordination supervisor skill.",
+  "version": "0.8.0",
+  "description": "Codex-style cross-task coordination for DeepSeek Harness: list, inspect, spawn, message and steer top-level sessions from a supervisor agent, with team workstreams, correlation ids, batch spawning, interactive dispatch confirmation (task_confirm approval cards), default result report-back from spawned tasks, recursion-depth governance, a durable spawn registry, a /tasks slash command and a copy-session-id header button. Ships the task-coordination supervisor skill.",
   "type": "module",
   "main": "index.mjs",
   "exports": {
-    ".": "./index.mjs"
+    ".": "./index.mjs",
+    "./client": "./client.js"
   },
   "files": [
     "index.mjs",
@@ -18,6 +19,7 @@
     "commands.mjs",
     "skills.mjs",
     "skills/",
+    "client.js",
     "cordis.patch.yml",
     "CHANGELOG.md",
     "docs/",
@@ -30,10 +32,13 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
     }
   },
   "scripts": {
-    "check": "node --check index.mjs && node --check config.mjs && node --check safety.mjs && node --check title.mjs && node --check registry.mjs && node --check ops.mjs && node --check tools.mjs && node --check commands.mjs && node --check skills.mjs",
+    "check": "node --check index.mjs && node --check config.mjs && node --check safety.mjs && node --check title.mjs && node --check registry.mjs && node --check ops.mjs && node --check tools.mjs && node --check commands.mjs && node --check skills.mjs && node --check client.js",
     "test": "node --test test/smoke.test.mjs"
   },
   "peerDependencies": {
