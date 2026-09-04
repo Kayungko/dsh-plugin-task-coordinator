@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.4] - 2026-09-04
+
+### Fixed
+
+- **技能部署错位**（影响 0.4.0–0.8.3 全部部署）：`install.ps1` 的 `Copy-Item $skillsSrc <target>/skills` 在目标目录已存在时会把源目录拷**进去**，形成嵌套 `skills/skills/`，而正式路径 `skills/task-coordination/SKILL.md` 自 0.4.0 起从未更新——总控实际加载的操作手册一直是旧版（缺 `task_confirm`/批量/回报/复制按钮等语义）。改为复制目录**内容**并清理历史嵌套残留；重启后技能目录描述与正文恢复同步。
+
 ## [0.8.3] - 2026-09-04
 
 ### Changed
@@ -112,7 +118,8 @@
 
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
-[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.4...HEAD
+[0.8.4]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.0...v0.8.1

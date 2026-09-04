@@ -65,9 +65,18 @@ foreach ($file in $files) {
   $from = Join-Path $Source $file
   if (Test-Path $from) { Copy-Item $from (Join-Path $Target $file) -Force }
 }
-# bundled skills directory (recursive)
+# bundled skills directory (recursive). Copy the CONTENTS into the target:
+# Copy-Item with an existing destination directory puts the source directory
+# INSIDE it, which silently created skills/skills/ and left the canonical
+# skills/task-coordination stale (0.4.0-0.8.3 deploy bug).
 $skillsSrc = Join-Path $Source 'skills'
-if (Test-Path $skillsSrc) { Copy-Item $skillsSrc (Join-Path $Target 'skills') -Recurse -Force }
+$skillsDst = Join-Path $Target 'skills'
+if (Test-Path $skillsSrc) {
+  if (-not (Test-Path $skillsDst)) { New-Item -ItemType Directory -Force -Path $skillsDst | Out-Null }
+  Copy-Item (Join-Path $skillsSrc '*') $skillsDst -Recurse -Force
+  $nestedJunk = Join-Path $skillsDst 'skills'
+  if (Test-Path $nestedJunk) { Remove-Item $nestedJunk -Recurse -Force }
+}
 Write-Host "copied plugin -> $Target"
 
 # --- profile manifest: dependency specifier + bundle entry --------------------
