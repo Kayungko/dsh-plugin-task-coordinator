@@ -18,24 +18,7 @@ pids
 coverage
 *.lcov
 
-# Exclude all node_modules
-node_modules
+# Lockfiles (the plugin installs by file copy, no package manager step)
 package-lock.json
 pnpm-lock.yaml
 yarn.lock
-
-# Ignore the entire plugin directory except .gitignore and LICENSE
-!README.md
-!README.zh-CN.md
-!LICENSE
-!package.json
-!index.mjs
-!config.mjs
-!safety.mjs
-!title.mjs
-!ops.mjs
-!tools.mjs
-!skills.mjs
-!skills/
-!cordis.patch.yml
-!test/

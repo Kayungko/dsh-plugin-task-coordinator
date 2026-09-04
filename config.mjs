@@ -32,6 +32,24 @@ export const DEFAULTS = Object.freeze({
   registryFile: '',
   /** Max spawn records kept in the registry (oldest pruned first). */
   registryMaxEntries: 500,
+  /** Max tasks one task_spawn_batch call may create. */
+  maxBatchSpawn: 6,
+  /**
+   * Dispatch confirmation gate: when true, task_spawn_batch calls with at
+   * least `confirmBatchThreshold` tasks are rejected unless they carry a
+   * confirmationId minted by an approved task_confirm call. Keeps big
+   * fan-outs user-approved instead of silently decided.
+   */
+  confirmBeforeBatch: true,
+  /** Batch size (>=) at which the confirmation gate engages. */
+  confirmBatchThreshold: 2,
+  /**
+   * Recursion governance: max spawn depth of the coordination tree.
+   * Tasks spawned by a never-spawned (root) session are depth 1; tasks they
+   * spawn are depth 2; deeper spawn attempts are rejected so coordinators at
+   * the bottom fall back to subagents instead of growing the session tree.
+   */
+  maxSpawnDepth: 2,
   /** Max pending inbox messages a single target may hold before task_send refuses. */
   maxQueuePerTask: 5,
   /** Minimum interval between task_send/task_spawn kickoffs toward one target. */
@@ -54,7 +72,7 @@ export const DEFAULTS = Object.freeze({
 export function resolveConfig(input = {}) {
   const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
   const config = { ...DEFAULTS };
-  const booleans = ['enabled', 'allowSubagentUse', 'includeSubagentsInList'];
+  const booleans = ['enabled', 'allowSubagentUse', 'includeSubagentsInList', 'confirmBeforeBatch'];
   const numbers = [
     'maxQueuePerTask',
     'minSendIntervalMs',
@@ -64,6 +82,9 @@ export function resolveConfig(input = {}) {
     'progressTailMessages',
     'titleMaxTopicChars',
     'registryMaxEntries',
+    'maxBatchSpawn',
+    'confirmBatchThreshold',
+    'maxSpawnDepth',
   ];
   const strings = ['titleFallbackType', 'titleTimeZone', 'registryFile'];
   for (const key of booleans) {
@@ -97,6 +118,9 @@ export function resolveConfig(input = {}) {
   if (config.maxQueuePerTask < 1) config.maxQueuePerTask = 1;
   if (config.titleMaxTopicChars < 1) config.titleMaxTopicChars = 1;
   if (config.registryMaxEntries < 1) config.registryMaxEntries = 1;
+  if (config.maxBatchSpawn < 1) config.maxBatchSpawn = 1;
+  if (config.confirmBatchThreshold < 1) config.confirmBatchThreshold = 1;
+  if (config.maxSpawnDepth < 1) config.maxSpawnDepth = 1;
   if (config.waitMaxTimeoutMs < config.waitDefaultTimeoutMs) {
     config.waitDefaultTimeoutMs = config.waitMaxTimeoutMs;
   }

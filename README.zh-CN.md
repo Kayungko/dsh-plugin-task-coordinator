@@ -9,10 +9,10 @@
 
 [![DSH 0.1.2-alpha.1 实测](https://img.shields.io/badge/DSH-0.1.2--alpha.1%20实测-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![33 个单元测试](https://img.shields.io/badge/tests-33%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![55 个单元测试](https://img.shields.io/badge/tests-55%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
-[这是什么](#这是什么) · [快速开始](#快速开始) · [六个工具](#六个工具) · [架构设计](docs/ARCHITECTURE.md) · [主机契约](docs/PROTOCOL.md) · [更新日志](CHANGELOG.md) · [English](README.md)
+[这是什么](#这是什么) · [快速开始](#快速开始) · [八个工具](#八个工具) · [架构设计](docs/ARCHITECTURE.md) · [主机契约](docs/PROTOCOL.md) · [更新日志](CHANGELOG.md) · [English](README.md)
 
 </div>
 
@@ -26,14 +26,14 @@
 把这件事拆成三个任务并行做：A 研究方案，B 写原型，C 跑测试，做完汇总给我。
 ```
 
-背后发生的事：你（说人话）→ 总控会话 → 六个 `task_*` 工具 → DSH Desktop 里的其他顶层会话（"任务"），中间不需要你盯任何一步。
+背后发生的事：你（说人话）→ 总控会话 → 拆分分析 → **弹窗确认拆分方案（你点批准）** → 批量创建任务会话 → 各任务完成后主动回报结果 → 总控汇总。中间不需要你盯任何一步，但决策点留在你手上。
 
 - 这是一个 DSH 插件：它让**任意顶层会话**都能发现任务、读进度、建任务、发指令；
 - 新建的任务**立即出现在 GUI 会话列表**（走的是侧栏消费的同一个 `api-session/added` 事件）；
 - 每条跨任务指令都带 `coordinator` 来源标记，在目标会话的 transcript 里可见、可追溯；
 - 前提只有一条：**DSH Desktop 已经装好并能启动**（插件不会替你启动宿主）。
 
-> 📌 主机契约已在 **DSH 0.1.2-alpha.1** 实测；六项能力全部通过重启后的真实宿主端到端验证（判据见 [主机契约](docs/PROTOCOL.md)）。
+> 📌 主机契约已在 **DSH 0.1.2-alpha.1** 实测；全部能力通过重启后的真实宿主端到端验证（判据见 [主机契约](docs/PROTOCOL.md)）。
 
 ## 快速开始
 
@@ -53,7 +53,7 @@ pwsh install.ps1 -Source .
 
 脚本做三件事：把插件复制进 profile 的 `node_modules/`（不跑 `pnpm install`、不碰 lockfile）、在 profile manifest 登记依赖与 bundle、登记 `.package-map.json`——**改前全部自动备份**到 `backups/<时间戳>/`。
 
-装完**重启 DSH Desktop**即可，任何会话都能使用六个工具。
+装完**重启 DSH Desktop**即可，任何会话都能使用八个工具和 `/tasks` 命令。
 
 > 💡 `install.ps1` 的默认 `-Source` 是 `$PSScriptRoot/plugin`（工作区布局）；在插件仓库根目录直接运行要**显式传 `-Source .`**。
 > 重复执行是安全的：文件覆盖幂等，manifest 登记自动去重。
@@ -68,16 +68,40 @@ pwsh install.ps1 -Source .
 
 卸载：`pwsh install.ps1 -Source . -Uninstall`（同样重启后生效）。
 
-## 六个工具
+## 八个工具
 
 | 工具 | 用途 |
 |---|---|
 | `task_list` | 列出协调可见的任务（含稳定 sessionId、状态、标题、todo/goal 进度；可按 `team` 过滤） |
 | `task_progress` | 深入读取单个任务：实时/冷状态、排队消息、对话尾部、todos、goal |
 | `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`；`reference` 关联先前指令），返回 `messageId` |
-| `task_spawn` | 创建 + 命名 + 启动新任务（标题遵循 `MMDD｜类型｜主题`；可用 `team` 编组），返回 `correlationId` |
+| `task_spawn` | 创建 + 命名 + 启动新任务（标题遵循 `MMDD｜类型｜主题`；可用 `team` 编组），返回 `correlationId`；默认附带回报约定 |
+| `task_confirm` | 把拆分/派发方案做成**交互式审批卡**弹给用户，阻塞直到回答；批准返回单次 `confirmationId` |
+| `task_spawn_batch` | 一次批量创建整个拆分方案（`tasks: [{title?, prompt}]` + 统一 `team`）；达到确认阈值时必须携带 `confirmationId`；单条失败不中止整批 |
 | `task_wait` | 阻塞直到目标任务空闲（或超时）；支持多目标（`sessionIds` + `mode: all/any`） |
 | `task_cancel` | 取消目标的活动轮次（保留其排队消息） |
+
+### `/tasks` —— 不进模型的快速通道
+
+只读查询可以完全绕开模型：`/tasks`（全部任务）、`/tasks team <名称>`（单个工作流编组）、`/tasks <sessionId>`（单任务进度，短 ID 前缀唯一时可解析）。命令在宿主直接执行——零 token、立即出结果。一切**动作类**操作（发消息/派发/等待/取消）仍走工具。
+
+## 派发确认（反信息黑盒闸门）
+
+批量派发曾经是模型的静默决策——现在不是了：
+
+1. 总控调用 `task_confirm({ plan })`，把完整拆分方案（markdown）做成**计划审批卡**——走宿主 `ctx.userQuestions` 接缝，与官方 `exit_plan_mode` 同构，**零客户端改动**；
+2. 批准 → 返回绑定调用会话的单次 `confirmationId`；拒绝 → 用户意见随工具结果回传；关窗 → `confirm-cancelled`（总控停手等待）；
+3. 达到 `confirmBatchThreshold`（默认 2）的 `task_spawn_batch` **没有有效 `confirmationId` 直接拒绝**（`confirmation-required`）。凭证单次使用、成功派发后消耗；全部失败不消耗——同一方案不会问用户两遍。
+
+降级：无 UI 连接时返回 `no-question-channel`，内置技能指引总控改用聊天文字确认；子代理调用方收到 `delegated-caller`（子代理不能发起人工确认）。
+
+## 结果回报
+
+派发的任务**默认带回报约定**（`reportBack`）：开场提示词尾部自动追加一条指令——任务完成（或确认无法完成）后用 `task_send` 把结果摘要（结论、产出路径、遗留问题）推回派发方会话；发送失败时把摘要写进最终回复兜底。总控因此得到**推送 + `task_wait` 拉取兜底**，不用轮询。确实不需要汇报的一次性任务传 `reportBack: false`。
+
+## 递归治理
+
+被派生的总控可以继续派生——上限 `maxSpawnDepth`（默认 2 代）。持久注册表记录每个任务的 `depth` 与 `parentSessionId`；超限以 `spawn-depth-exceeded` 拒绝，并指引改用 **subagent** 做更深层并行（subagent 不占深度预算）。
 
 ## 投递语义（最关键的一节）
 
@@ -99,19 +123,21 @@ pwsh install.ps1 -Source .
 
 ## 团队工作流与持久注册表
 
-- `task_spawn` 传 `team: <工作流名>` 即可把任务编组，之后 `task_list({ team })` 随时找回整组；
-- 编组记录在**持久 spawn 注册表**（默认 `<DSH_HOME 或 ~/.dsh>/task-coordinator/registry.json`）——**宿主重启后依然有效**（原生会话列表回答不了"哪些任务是我的、怎么分组"）；
+- `task_spawn` / `task_spawn_batch` 传 `team: <工作流名>` 即可把任务编组，之后 `task_list({ team })` 随时找回整组；
+- 编组记录在**持久 spawn 注册表**（默认 `<DSH_HOME 或 ~/.dsh>/task-coordinator/registry.json`），连同每次派生的标题、提示词摘录、`depth`、`parentSessionId`——**宿主重启后依然有效**（原生会话列表回答不了"哪些任务是我的、怎么分组"）；
 - 注册表写入近似原子（临时文件 + 重命名）；记录上限 `registryMaxEntries`（默认 500，最旧先裁剪）；损坏文件不静默丢弃，保留为 `*.corrupt-<时间戳>` 供检查。
 
 ## 机器可读错误码
 
-失败返回 `{ ok: false, code, error }`——agent 按 `code` 分支，不读文案。两类：守卫拒绝（`self-send-denied` / `subagent-caller-denied` / `subagent-target-denied` / `target-not-found` / `rate-limited` / `queue-full`…）与操作失败（`bad-request` / `target-busy` / `target-cold` / `spawn-create-failed` / `kickoff-rejected`…）。完整码表见 [主机契约 §6](docs/PROTOCOL.md#6-错误信封与码表)。
+失败返回 `{ ok: false, code, error }`——agent 按 `code` 分支，不读文案。两类：守卫拒绝（`self-send-denied` / `subagent-caller-denied` / `subagent-target-denied` / `target-not-found` / `rate-limited` / `queue-full`…）与操作失败（`bad-request` / `target-busy` / `target-cold` / `spawn-create-failed` / `kickoff-rejected` / `spawn-depth-exceeded` / `confirmation-required` / `confirm-cancelled` / `no-question-channel` / `delegated-caller` / `batch-all-failed`…）。完整码表见 [主机契约 §6](docs/PROTOCOL.md#6-错误信封与码表)。
 
 ## 安全模型
 
 - 自寻址（给自己发消息）**恒被拒绝**；
 - 目标必须是顶层会话——子代理会话被栅栏隔离；
 - 子代理调用方默认拒绝（`allowSubagentUse` 显式放行）；
+- 达到阈值的批量派发**没有用户显式批准不可能执行**（见上）；
+- 递归深度封顶（`maxSpawnDepth`），派生树不会无限生长；
 - 同一目标限频（`minSendIntervalMs`）+ 排队深度限制（`maxQueuePerTask`），防失控刷屏；
 - 调用方身份**每次工具调用都从执行上下文重新推导**，不接受自报。
 
@@ -128,9 +154,9 @@ pwsh install.ps1 -Source .
 
 ## 内置技能：task-coordination
 
-插件随包携带一个技能（`skills/task-coordination/SKILL.md`），教总控**何时、如何**编排六个工具：投递语义、扇出/监督/交接模式、命名规则、反模式。按需加载，不协调就不占上下文。
+插件随包携带一个技能（`skills/task-coordination/SKILL.md`），教总控**何时、如何**编排八个工具：投递语义、拆分判据、确认语义、扇出/监督/交接模式、递归治理、命名规则、反模式。按需加载，不协调就不占上下文。
 
-挂载走隔离 `dsh-skill-filesystem` provider（同 `@openviking/dsh-memory-plugin` 先例）：`providerName: 'task-coordinator'`、`includeDefaultRoots: false`、只见本插件的 `skills/` 目录。效果：编辑热加载、不遮蔽项目/用户技能、随插件卸载一起消失。provider 包不可用时降级为一条 warning，**六个工具照常工作**。
+挂载走隔离 `dsh-skill-filesystem` provider（同 `@openviking/dsh-memory-plugin` 先例）：`providerName: 'task-coordinator'`、`includeDefaultRoots: false`、只见本插件的 `skills/` 目录。效果：编辑热加载、不遮蔽项目/用户技能、随插件卸载一起消失。provider 包不可用时降级为一条 warning，**八个工具照常工作**。
 
 ## 配置（cordis.yml / patch）
 
@@ -147,6 +173,10 @@ pwsh install.ps1 -Source .
     titleTimeZone: 'Asia/Shanghai'
     registryFile: ''              # 留空 = <DSH_HOME 或 ~/.dsh>/task-coordinator/registry.json
     registryMaxEntries: 500
+    maxBatchSpawn: 6              # task_spawn_batch 单次上限
+    maxSpawnDepth: 2              # 根会话以下允许的派生代数
+    confirmBeforeBatch: true      # 派发确认闸门
+    confirmBatchThreshold: 2      # 触发闸门的最小批量
     maxQueuePerTask: 5
     minSendIntervalMs: 2000
     waitDefaultTimeoutMs: 120000
@@ -167,7 +197,7 @@ pwsh install.ps1 -Source .
 
 ```powershell
 node --check *.mjs                      # 语法检查
-node --test test/smoke.test.mjs         # 33 个单元测试（mock 宿主）
+node --test test/smoke.test.mjs         # 55 个单元测试（mock 宿主）
 # 安装进 profile 后（见快速开始）：
 node verify-installed.mjs               # 安装态集成验证：真实宿主包 + mock ctx
 ```
@@ -182,13 +212,14 @@ dsh-plugin-task-coordinator/
 ├── title.mjs           spawn 命名规则（纯模块）
 ├── registry.mjs        持久 spawn 注册表（近似原子写 · 损坏容错）
 ├── ops.mjs             会话操作 · DI 工厂
-├── tools.mjs           六个 task_* 工具注册
+├── tools.mjs           八个 task_* 工具注册
+├── commands.mjs        /tasks 斜杠命令（直接执行，不进模型）
 ├── skills.mjs          隔离技能挂载（动态 import，fire-and-forget）
 ├── skills/task-coordination/   supervisor 操作手册（随包分发）
 ├── cordis.patch.yml    隔离插件组挂载描述
 ├── install.ps1         部署脚本（复制式安装 + 自动备份）
 ├── verify-installed.mjs 安装态集成验证
-├── test/smoke.test.mjs 33 个单元测试
+├── test/smoke.test.mjs 55 个单元测试
 └── docs/               ARCHITECTURE.md · PROTOCOL.md
 ```
 

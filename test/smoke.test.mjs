@@ -14,6 +14,7 @@ import { registerTools } from '../tools.mjs';
 import { buildSpawnTitle, mmdd, truncateTopic, firstLine } from '../title.mjs';
 import { buildSkillsConfig, SKILL_PROVIDER_NAME, SKILLS_DIR } from '../skills.mjs';
 import { SpawnRegistry } from '../registry.mjs';
+import { parseTasksCommand, registerCommands, renderTaskList, renderProgress, callerFromInvocation } from '../commands.mjs';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -31,18 +32,26 @@ test('config: defaults', () => {
   assert.equal(config.titleFallbackType, '探索');
   assert.equal(config.titleMaxTopicChars, 16);
   assert.equal(config.titleTimeZone, 'Asia/Shanghai');
+  assert.equal(config.maxBatchSpawn, 6);
+  assert.equal(config.confirmBeforeBatch, true);
+  assert.equal(config.confirmBatchThreshold, 2);
+  assert.equal(config.maxSpawnDepth, 2);
 });
 
 test('config: overrides and clamps', () => {
-  const config = resolveConfig({ maxQueuePerTask: 0, waitDefaultTimeoutMs: 90, waitMaxTimeoutMs: 10, titleMaxTopicChars: 0 });
+  const config = resolveConfig({ maxQueuePerTask: 0, waitDefaultTimeoutMs: 90, waitMaxTimeoutMs: 10, titleMaxTopicChars: 0, maxBatchSpawn: 0, maxSpawnDepth: 0 });
   assert.equal(config.maxQueuePerTask, 1);
   assert.equal(config.waitDefaultTimeoutMs, 10);
   assert.equal(config.waitMaxTimeoutMs, 10);
   assert.equal(config.titleMaxTopicChars, 1);
-  const custom = resolveConfig({ titleTypes: [' 功能 ', '研究'], titleFallbackType: '研究', titleTimeZone: 'UTC' });
+  assert.equal(config.maxBatchSpawn, 1);
+  assert.equal(config.maxSpawnDepth, 1);
+  const custom = resolveConfig({ titleTypes: [' 功能 ', '研究'], titleFallbackType: '研究', titleTimeZone: 'UTC', maxBatchSpawn: 3, maxSpawnDepth: 4 });
   assert.deepEqual(custom.titleTypes, ['功能', '研究']);
   assert.equal(custom.titleFallbackType, '研究');
   assert.equal(custom.titleTimeZone, 'UTC');
+  assert.equal(custom.maxBatchSpawn, 3);
+  assert.equal(custom.maxSpawnDepth, 4);
 });
 
 test('config: wrong types throw', () => {
@@ -53,6 +62,10 @@ test('config: wrong types throw', () => {
   assert.throws(() => resolveConfig({ titleTypes: [] }), TypeError);
   assert.throws(() => resolveConfig({ titleTypes: ['功能', ''] }), TypeError);
   assert.throws(() => resolveConfig({ titleMaxTopicChars: -1 }), TypeError);
+  assert.throws(() => resolveConfig({ maxBatchSpawn: 'six' }), TypeError);
+  assert.throws(() => resolveConfig({ confirmBeforeBatch: 'yes' }), TypeError);
+  assert.throws(() => resolveConfig({ confirmBatchThreshold: -1 }), TypeError);
+  assert.throws(() => resolveConfig({ maxSpawnDepth: null }), TypeError);
 });
 
 /* ------------------------------------------------------------------ */
@@ -290,6 +303,12 @@ function makeHarness(overrides = {}) {
   };
   const config = resolveConfig(overrides.config ?? {});
   const limiter = new SendLimiter(config, (id) => harness.ops.pendingCount(id));
+  // Default confirmation channel: auto-approve the first option (the approve
+  // label is always options[0]); tests can override or pass null to simulate
+  // a missing channel.
+  const askUser = Object.hasOwn(overrides, 'askUser')
+    ? overrides.askUser
+    : async (request) => ({ answers: request.questions.map((question) => ({ id: question.id, selected: [question.options[0].label] })) });
   harness.ops = createOps({
     sessionController,
     agents,
@@ -298,6 +317,7 @@ function makeHarness(overrides = {}) {
     limiter,
     ...(overrides.registry ? { registry: overrides.registry } : {}),
     uuid: () => 'req-test-1',
+    askUser,
   });
   return harness;
 }
@@ -443,11 +463,48 @@ test('ops.spawnTask: create + rename + kickoff', async () => {
   assert.equal(harness.calls.create[0].cwd, '/proj');
   assert.equal(harness.calls.rename[0].title, result.title);
   assert.equal(harness.calls.prompt[0].mode, 'queue');
-  assert.equal(harness.calls.prompt[0].content[0].text, 'migrate the module');
+  // report-back convention (default on): original prompt first, then the
+  // push-back instruction naming the caller session.
+  const kickoff = harness.calls.prompt[0].content[0].text;
+  assert.ok(kickoff.startsWith('migrate the module'));
+  assert.match(kickoff, /汇报约定/);
+  assert.match(kickoff, /task_send/);
+  assert.match(kickoff, /session-super/);
   assert.equal(harness.calls.prompt[0].sessionId, result.sessionId);
   // new session row exists -> visible in list
   const listing = await harness.ops.listTasks({}, SUPERVISOR);
   assert.ok(listing.tasks.some((task) => task.sessionId === result.sessionId));
+});
+
+test('ops.spawnTask/spawnBatch: reportBack toggle', async () => {
+  const harness = makeHarness();
+  // opt out: kickoff is exactly the user prompt
+  const quiet = await harness.ops.spawnTask({ prompt: 'solo work', reportBack: false }, SUPERVISOR);
+  assert.equal(quiet.ok, true);
+  assert.equal(harness.calls.prompt[0].content[0].text, 'solo work');
+  // batch applies the convention to every item by default
+  const confirmed = await harness.ops.confirmPlan({ plan: 'plan' }, SUPERVISOR);
+  const batch = await harness.ops.spawnBatch({
+    tasks: [{ prompt: 'item one' }, { prompt: 'item two' }],
+    confirmationId: confirmed.confirmationId,
+  }, SUPERVISOR);
+  assert.equal(batch.ok, true);
+  const batchTexts = harness.calls.prompt.slice(1).map((request) => request.content[0].text);
+  assert.equal(batchTexts.length, 2);
+  for (const text of batchTexts) {
+    assert.match(text, /汇报约定/);
+    assert.match(text, /session-super/);
+  }
+  // batch opt-out
+  const confirmed2 = await harness.ops.confirmPlan({ plan: 'plan' }, SUPERVISOR);
+  const quietBatch = await harness.ops.spawnBatch({
+    tasks: [{ prompt: 'item three' }, { prompt: 'item four' }],
+    confirmationId: confirmed2.confirmationId,
+    reportBack: false,
+  }, SUPERVISOR);
+  assert.equal(quietBatch.ok, true);
+  const quietTexts = harness.calls.prompt.slice(3).map((request) => request.content[0].text);
+  assert.deepEqual(quietTexts, ['item three', 'item four']);
 });
 
 test('ops.spawnTask: defaults cwd to caller; title derived from kickoff prompt', async () => {
@@ -491,6 +548,173 @@ test('ops.spawnTask: kickoff failure reports the orphan', async () => {
   assert.equal(result.code, 'kickoff-rejected');
   assert.equal(result.sessionId, 'session-new');
   assert.match(result.error, /created but the kickoff prompt was rejected/);
+});
+
+test('ops.spawnBatch: creates the whole plan under one team (with confirmation)', async () => {
+  const registry = new SpawnRegistry(tempRegistryPath());
+  const harness = makeHarness({ registry });
+  const confirmed = await harness.ops.confirmPlan({ plan: '拆成两个独立模块' }, SUPERVISOR);
+  assert.equal(confirmed.ok, true);
+  assert.equal(confirmed.approved, true);
+  assert.ok(confirmed.confirmationId.startsWith('confirm-'));
+  const result = await harness.ops.spawnBatch({
+    tasks: [
+      { title: '功能｜模块A', prompt: 'do A' },
+      { title: '功能｜模块B', prompt: 'do B' },
+    ],
+    team: '支付重构',
+    confirmationId: confirmed.confirmationId,
+  }, SUPERVISOR);
+  assert.equal(result.ok, true);
+  assert.equal(result.startedCount, 2);
+  assert.equal(result.failedCount, 0);
+  assert.equal(result.team, '支付重构');
+  assert.equal(result.results.length, 2);
+  for (const item of result.results) {
+    assert.equal(item.ok, true);
+    assert.equal(item.depth, 1);
+    assert.equal(registry.get(item.sessionId).team, '支付重构');
+  }
+  const grouped = await harness.ops.listTasks({ team: '支付重构' }, SUPERVISOR);
+  assert.equal(grouped.count, 2);
+  // confirmation is single-use
+  const reuse = await harness.ops.spawnBatch({ tasks: [{ prompt: 'x' }, { prompt: 'y' }], confirmationId: confirmed.confirmationId }, SUPERVISOR);
+  assert.equal(reuse.code, 'confirmation-required');
+});
+
+test('ops.confirmPlan: decline, cancel and channel errors', async () => {
+  const harness = makeHarness();
+  // decline with custom feedback
+  const declineChannel = async (request) => ({ answers: request.questions.map((question) => ({ id: question.id, selected: ['暂不派发'], custom: '先只做模块A' })) });
+  const harnessDecline = makeHarness({ askUser: declineChannel });
+  const declined = await harnessDecline.ops.confirmPlan({ plan: 'plan' }, SUPERVISOR);
+  assert.equal(declined.ok, true);
+  assert.equal(declined.approved, false);
+  assert.equal(declined.feedback, '先只做模块A');
+  // decline without custom text falls back to the selected label
+  const harnessPlainDecline = makeHarness({ askUser: async (request) => ({ answers: request.questions.map((question) => ({ id: question.id, selected: ['暂不派发'] })) }) });
+  assert.equal((await harnessPlainDecline.ops.confirmPlan({ plan: 'plan' }, SUPERVISOR)).feedback, '暂不派发');
+  // user closed the card
+  const harnessCancel = makeHarness({ askUser: async () => { throw Object.assign(new Error('closed'), { code: 'ASK_CANCELLED' }); } });
+  const cancelled = await harnessCancel.ops.confirmPlan({ plan: 'plan' }, SUPERVISOR);
+  assert.equal(cancelled.code, 'confirm-cancelled');
+  assert.match(cancelled.error, /wait for the user/);
+  // no UI connected
+  const harnessNoProvider = makeHarness({ askUser: async () => { throw Object.assign(new Error('none'), { code: 'NO_PROVIDER' }); } });
+  assert.equal((await harnessNoProvider.ops.confirmPlan({ plan: 'plan' }, SUPERVISOR)).code, 'no-question-channel');
+  // subagent caller cannot ask a human
+  const harnessDelegated = makeHarness({ askUser: async () => { throw Object.assign(new Error('owned'), { code: 'DELEGATED_CALLER' }); } });
+  assert.equal((await harnessDelegated.ops.confirmPlan({ plan: 'plan' }, SUPERVISOR)).code, 'delegated-caller');
+  // channel missing entirely
+  const harnessNoChannel = makeHarness({ askUser: null });
+  assert.equal((await harnessNoChannel.ops.confirmPlan({ plan: 'plan' }, SUPERVISOR)).code, 'no-question-channel');
+  // invalid plan
+  assert.equal((await harness.ops.confirmPlan({ plan: '  ' }, SUPERVISOR)).code, 'bad-request');
+});
+
+test('ops.spawnBatch: confirmation gate', async () => {
+  const harness = makeHarness();
+  // missing confirmationId on a gated batch
+  const gated = await harness.ops.spawnBatch({ tasks: [{ prompt: 'a' }, { prompt: 'b' }] }, SUPERVISOR);
+  assert.equal(gated.code, 'confirmation-required');
+  assert.match(gated.error, /task_confirm/);
+  // confirmation minted for another caller is not usable
+  const other = { sessionId: 'session-other', cwd: '/work' };
+  const foreignConfirm = await harness.ops.confirmPlan({ plan: 'plan' }, other);
+  const foreign = await harness.ops.spawnBatch({ tasks: [{ prompt: 'a' }, { prompt: 'b' }], confirmationId: foreignConfirm.confirmationId }, SUPERVISOR);
+  assert.equal(foreign.code, 'confirmation-required');
+  // below the threshold the gate does not engage
+  const single = await harness.ops.spawnBatch({ tasks: [{ prompt: 'solo' }] }, SUPERVISOR);
+  assert.equal(single.ok, true);
+  // gate disabled by config
+  const harnessOpen = makeHarness({ config: { confirmBeforeBatch: false } });
+  const open = await harnessOpen.ops.spawnBatch({ tasks: [{ prompt: 'a' }, { prompt: 'b' }] }, SUPERVISOR);
+  assert.equal(open.ok, true);
+});
+
+test('ops.spawnBatch: input validation', async () => {
+  const harness = makeHarness({ registry: new SpawnRegistry(tempRegistryPath()) });
+  assert.equal((await harness.ops.spawnBatch({}, SUPERVISOR)).code, 'bad-request');
+  assert.equal((await harness.ops.spawnBatch({ tasks: [] }, SUPERVISOR)).code, 'bad-request');
+  assert.equal((await harness.ops.spawnBatch({ tasks: [{ prompt: '' }] }, SUPERVISOR)).code, 'bad-request');
+  const tooMany = { tasks: Array.from({ length: 7 }, (_, i) => ({ prompt: `task ${i}` })) };
+  const overCap = await harness.ops.spawnBatch(tooMany, SUPERVISOR);
+  assert.equal(overCap.code, 'bad-request');
+  assert.match(overCap.error, /maxBatchSpawn/);
+});
+
+test('ops.spawnBatch: one failed item does not abort the rest', async () => {
+  const sessions = new Map();
+  let createdCount = 0;
+  const config = resolveConfig({ confirmBeforeBatch: false }); // gate is not the subject of this test
+  const failingOps = createOps({
+    sessionController: {
+      list: async () => ({ items: [...sessions.values()] }),
+      create: async (request) => {
+        createdCount += 1;
+        if (request.cwd === '/bad') throw new Error('disk full');
+        const id = `session-created-${createdCount}`;
+        sessions.set(id, { sessionId: id, updatedAt: Date.now(), running: false, blank: true, cwd: request.cwd, projections: { asOfSeq: 0, values: {} } });
+        return { sessionId: id };
+      },
+      rename: async (request) => ({ title: request.title, seq: 1 }),
+      prompt: async (request, signal) => { signal.throwIfAborted(); return { accepted: true }; },
+      resolveAgent: async () => ({ error: { code: 'session-not-found', message: 'no' } }),
+      inspect: async () => ({ events: [] }),
+      cancel: async () => ({ accepted: true }),
+    },
+    agents: { get: () => undefined },
+    createUserMessage: () => ({}),
+    config,
+    limiter: new SendLimiter(config, () => 0),
+    registry: new SpawnRegistry(tempRegistryPath()),
+    uuid: () => 'r',
+  });
+  const result = await failingOps.spawnBatch({
+    tasks: [
+      { prompt: 'good', cwd: '/good' },
+      { prompt: 'bad', cwd: '/bad' },
+    ],
+  }, SUPERVISOR);
+  assert.equal(result.ok, true);
+  assert.equal(result.startedCount, 1);
+  assert.equal(result.failedCount, 1);
+  assert.equal(result.results[0].ok, true);
+  assert.equal(result.results[1].ok, false);
+  assert.equal(result.results[1].code, 'spawn-create-failed');
+  // all-failed batch reports batch-all-failed with per-item detail
+  const allBad = await failingOps.spawnBatch({ tasks: [{ prompt: 'x', cwd: '/bad' }] }, SUPERVISOR);
+  assert.equal(allBad.ok, false);
+  assert.equal(allBad.code, 'batch-all-failed');
+  assert.equal(allBad.results[0].code, 'spawn-create-failed');
+});
+
+test('ops.spawnTask: recursion depth is tracked and capped', async () => {
+  const registry = new SpawnRegistry(tempRegistryPath());
+  const harness = makeHarness({ registry });
+  // root session (never spawned) -> children at depth 1
+  const first = await harness.ops.spawnTask({ prompt: 'level 1' }, SUPERVISOR);
+  assert.equal(first.ok, true);
+  assert.equal(first.depth, 1);
+  assert.equal(registry.get(first.sessionId).parentSessionId, 'session-super');
+  // depth-1 coordinator -> children at depth 2
+  const depth1Caller = { sessionId: first.sessionId, cwd: '/work' };
+  const second = await harness.ops.spawnTask({ prompt: 'level 2' }, depth1Caller);
+  assert.equal(second.ok, true);
+  assert.equal(second.depth, 2);
+  assert.equal(registry.get(second.sessionId).parentSessionId, first.sessionId);
+  // depth-2 coordinator -> rejected, pointed at subagents
+  const depth2Caller = { sessionId: second.sessionId, cwd: '/work' };
+  const third = await harness.ops.spawnTask({ prompt: 'level 3' }, depth2Caller);
+  assert.equal(third.ok, false);
+  assert.equal(third.code, 'spawn-depth-exceeded');
+  assert.match(third.error, /subagents/);
+  // batch spawning obeys the same cap (confirmation acquired first)
+  const depthConfirm = await harness.ops.confirmPlan({ plan: 'plan' }, depth2Caller);
+  const batchThird = await harness.ops.spawnBatch({ tasks: [{ prompt: 'x' }, { prompt: 'y' }], confirmationId: depthConfirm.confirmationId }, depth2Caller);
+  assert.equal(batchThird.ok, false);
+  assert.equal(batchThird.code, 'batch-all-failed');
+  assert.equal(batchThird.results[0].code, 'spawn-depth-exceeded');
 });
 
 test('ops.waitFor: already idle settles immediately', async () => {
@@ -687,10 +911,88 @@ test('ops.sendMessage: reference is quoted visibly and messageId returned', asyn
 });
 
 /* ------------------------------------------------------------------ */
+/* /tasks slash command                                                */
+/* ------------------------------------------------------------------ */
+
+test('commands: parseTasksCommand grammar', () => {
+  assert.deepEqual(parseTasksCommand(''), { kind: 'list' });
+  assert.deepEqual(parseTasksCommand('  '), { kind: 'list' });
+  assert.deepEqual(parseTasksCommand('team 支付重构'), { kind: 'team', team: '支付重构' });
+  assert.deepEqual(parseTasksCommand('team'), { kind: 'invalid' });
+  assert.deepEqual(parseTasksCommand('team '), { kind: 'invalid' });
+  assert.deepEqual(parseTasksCommand('session-abc'), { kind: 'inspect', target: 'session-abc' });
+  assert.deepEqual(parseTasksCommand('abc123'), { kind: 'inspect', target: 'abc123' });
+});
+
+test('commands: callerFromInvocation mirrors tool caller derivation', () => {
+  const caller = callerFromInvocation({ agent: { id: 'session-x', session: { header: { origin: 'subagent', cwd: '/w' } } } });
+  assert.deepEqual(caller, { sessionId: 'session-x', origin: 'subagent', cwd: '/w' });
+  assert.equal(callerFromInvocation({}).sessionId, '');
+});
+
+test('commands: renderers map ops results', () => {
+  const list = renderTaskList({
+    ok: true, count: 2, truncated: false,
+    tasks: [
+      { sessionId: 'session-a', status: 'running', title: 'A', team: '迁移', todos: '1/2 done' },
+      { sessionId: 'session-b', status: 'idle', title: null },
+    ],
+  });
+  assert.equal(list.kind, 'success');
+  assert.match(list.text, /● session-a/);
+  assert.match(list.text, /team=迁移/);
+  assert.match(list.text, /○ session-b/);
+  const failure = renderTaskList({ ok: false, code: 'rate-limited', error: 'slow down' });
+  assert.equal(failure.kind, 'error');
+  assert.match(failure.text, /rate-limited/);
+  const progress = renderProgress({
+    ok: true, sessionId: 'session-a', title: 'A', agentState: 'running', team: '迁移', cwd: '/w',
+    todos: [{ content: 'x', status: 'completed' }, { content: 'y', status: 'in_progress' }],
+    goal: { goal: { objective: 'finish it' } },
+    queue: [{ placement: 'next-turn', text: 'note' }],
+    recent: [{ role: 'assistant', text: 'doing it' }],
+  });
+  assert.equal(progress.kind, 'success');
+  assert.match(progress.text, /todos: 1\/2 done/);
+  assert.match(progress.text, /goal: finish it/);
+  assert.match(progress.text, /doing it/);
+});
+
+test('commands: registerCommands registers, executes and degrades', async () => {
+  const harness = makeHarness({ registry: new SpawnRegistry(tempRegistryPath()) });
+  addRow(harness, { sessionId: 'session-a', projections: { asOfSeq: 1, values: { title: 'Alpha' } } });
+  addRow(harness, { sessionId: 'session-b', projections: { asOfSeq: 1, values: { title: 'Beta' } } });
+  const registered = [];
+  const ctx = { commands: { register(definition) { registered.push(definition); return () => registered.splice(registered.indexOf(definition), 1); } }, logger: null };
+  const dispose = registerCommands(ctx, harness.ops);
+  assert.equal(registered.length, 1);
+  assert.equal(registered[0].name, 'tasks');
+  const invocation = { commandId: 'c', agent: { id: 'session-super' }, attachments: [], rawInput: '' };
+  const listed = await registered[0].handler(invocation);
+  assert.equal(listed.kind, 'success');
+  assert.match(listed.text, /session-a/);
+  // inspect with short id prefix resolves to the unique match
+  const shortId = 'session-a'.replace(/^session-/, '').slice(0, 4);
+  const inspected = await registered[0].handler({ ...invocation, rawInput: shortId });
+  assert.equal(inspected.kind, 'success');
+  assert.match(inspected.text, /Alpha/);
+  // unknown id reports a helpful error
+  const missing = await registered[0].handler({ ...invocation, rawInput: 'session-nope' });
+  assert.equal(missing.kind, 'error');
+  assert.match(missing.text, /not found/);
+  dispose();
+  assert.equal(registered.length, 0);
+  // graceful no-op without a commands registry
+  const noop = registerCommands({ logger: null }, harness.ops);
+  assert.equal(typeof noop, 'function');
+  noop();
+});
+
+/* ------------------------------------------------------------------ */
 /* tools registration                                                  */
 /* ------------------------------------------------------------------ */
 
-test('registerTools: six tools with delegation', async () => {
+test('registerTools: eight tools with delegation', async () => {
   const harness = makeHarness();
   const registered = [];
   const ctx = {
@@ -705,28 +1007,44 @@ test('registerTools: six tools with delegation', async () => {
   // stub defineTool: minimal contract mirror (name/description/parameters/output/execute)
   const defineTool = (options) => options;
   const dispose = registerTools(ctx, harness.ops, { defineTool }, resolveConfig());
-  assert.deepEqual(registered.map((tool) => tool.name), ['task_list', 'task_progress', 'task_send', 'task_spawn', 'task_wait', 'task_cancel']);
-  assert.deepEqual(registered[0].parameters.sessionId, undefined);
-  assert.ok(registered[0].parameters.team); // task_list team filter
-  assert.equal(registered[2].parameters.sessionId.required, true);
-  assert.deepEqual(registered[2].parameters.mode.enum, ['queue', 'steer']);
-  assert.ok(registered[2].parameters.reference); // task_send correlation
-  assert.ok(registered[3].parameters.team); // task_spawn workstream
-  assert.deepEqual(registered[4].parameters.sessionIds.items, { type: 'string' });
-  assert.deepEqual(registered[4].parameters.mode.enum, ['all', 'any']);
-  assert.notEqual(registered[4].parameters.sessionId.required, true); // now optional (sessionIds alternative)
+  assert.deepEqual(registered.map((tool) => tool.name), ['task_list', 'task_progress', 'task_send', 'task_spawn', 'task_confirm', 'task_spawn_batch', 'task_wait', 'task_cancel']);
+  const byName = Object.fromEntries(registered.map((tool) => [tool.name, tool]));
+  assert.deepEqual(byName.task_list.parameters.sessionId, undefined);
+  assert.ok(byName.task_list.parameters.team); // task_list team filter
+  assert.equal(byName.task_send.parameters.sessionId.required, true);
+  assert.deepEqual(byName.task_send.parameters.mode.enum, ['queue', 'steer']);
+  assert.ok(byName.task_send.parameters.reference); // task_send correlation
+  assert.ok(byName.task_spawn.parameters.team); // task_spawn workstream
+  assert.ok(byName.task_spawn.parameters.reportBack); // result push-back convention
+  assert.equal(byName.task_confirm.parameters.plan.required, true);
+  assert.equal(byName.task_spawn_batch.parameters.tasks.required, true);
+  assert.deepEqual(byName.task_spawn_batch.parameters.tasks.items.type, 'object');
+  assert.equal(byName.task_spawn_batch.parameters.tasks.items.additionalProperties, false);
+  assert.equal(byName.task_spawn_batch.parameters.tasks.items.properties.prompt.required, true);
+  assert.ok(byName.task_spawn_batch.parameters.confirmationId); // dispatch confirmation gate
+  assert.ok(byName.task_spawn_batch.parameters.reportBack);
+  assert.deepEqual(byName.task_wait.parameters.sessionIds.items, { type: 'string' });
+  assert.deepEqual(byName.task_wait.parameters.mode.enum, ['all', 'any']);
+  assert.notEqual(byName.task_wait.parameters.sessionId.required, true); // optional (sessionIds alternative)
   // delegation through execute()
   addRow(harness, { sessionId: 'session-a' });
   addRow(harness, { sessionId: 'session-super' });
-  const listResult = await registered[0].execute({}, { agent: { id: 'session-super', session: { header: {} } } });
+  const exec = { agent: { id: 'session-super', session: { header: {} } } };
+  const listResult = await byName.task_list.execute({}, exec);
   assert.equal(listResult.ok, true);
-  const denyResult = await registered[2].execute({ sessionId: 'session-super', message: 'hi' }, { agent: { id: 'session-super', session: { header: {} } } });
+  const denyResult = await byName.task_send.execute({ sessionId: 'session-super', message: 'hi' }, exec);
   assert.equal(denyResult.ok, false);
   assert.equal(denyResult.code, 'self-send-denied');
-  const waitBad = await registered[4].execute({}, { agent: { id: 'session-super', session: { header: {} } } });
+  const waitBad = await byName.task_wait.execute({}, exec);
   assert.equal(waitBad.ok, false);
   assert.equal(waitBad.code, 'bad-request');
-  assert.equal(registered.length, 6);
+  const batchBad = await byName.task_spawn_batch.execute({ tasks: [] }, exec);
+  assert.equal(batchBad.ok, false);
+  assert.equal(batchBad.code, 'bad-request');
+  const confirmBad = await byName.task_confirm.execute({ plan: ' ' }, exec);
+  assert.equal(confirmBad.ok, false);
+  assert.equal(confirmBad.code, 'bad-request');
+  assert.equal(registered.length, 8);
   dispose();
   assert.equal(registered.length, 0);
 });

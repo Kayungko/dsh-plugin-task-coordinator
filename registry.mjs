@@ -52,6 +52,8 @@ export class SpawnRegistry {
               ...(typeof entry.team === 'string' && entry.team.length > 0 ? { team: entry.team } : {}),
               ...(typeof entry.title === 'string' && entry.title.length > 0 ? { title: entry.title } : {}),
               ...(typeof entry.promptExcerpt === 'string' && entry.promptExcerpt.length > 0 ? { promptExcerpt: entry.promptExcerpt } : {}),
+              ...(typeof entry.depth === 'number' && Number.isFinite(entry.depth) && entry.depth >= 1 ? { depth: entry.depth } : {}),
+              ...(typeof entry.parentSessionId === 'string' && entry.parentSessionId.length > 0 ? { parentSessionId: entry.parentSessionId } : {}),
             });
           }
         }
@@ -66,7 +68,7 @@ export class SpawnRegistry {
   /**
    * Record one spawned session. Existing entries are merged (never lost).
    * @param {string} sessionId
-   * @param {{ team?: string; title?: string; promptExcerpt?: string; createdAt?: number }} entry
+   * @param {{ team?: string; title?: string; promptExcerpt?: string; createdAt?: number; depth?: number; parentSessionId?: string }} entry
    */
   record(sessionId, entry = {}) {
     this.ensureLoaded();
@@ -82,10 +84,18 @@ export class SpawnRegistry {
       ...(entry.promptExcerpt !== undefined || existing?.promptExcerpt !== undefined
         ? { promptExcerpt: typeof entry.promptExcerpt === 'string' && entry.promptExcerpt.length > 0 ? entry.promptExcerpt : existing?.promptExcerpt }
         : {}),
+      ...(entry.depth !== undefined || existing?.depth !== undefined
+        ? { depth: typeof entry.depth === 'number' && Number.isFinite(entry.depth) && entry.depth >= 1 ? entry.depth : existing?.depth }
+        : {}),
+      ...(entry.parentSessionId !== undefined || existing?.parentSessionId !== undefined
+        ? { parentSessionId: typeof entry.parentSessionId === 'string' && entry.parentSessionId.length > 0 ? entry.parentSessionId : existing?.parentSessionId }
+        : {}),
     };
     if (merged.team === undefined) delete merged.team;
     if (merged.title === undefined) delete merged.title;
     if (merged.promptExcerpt === undefined) delete merged.promptExcerpt;
+    if (merged.depth === undefined) delete merged.depth;
+    if (merged.parentSessionId === undefined) delete merged.parentSessionId;
     this.entries.set(sessionId, merged);
     this.prune();
     this.save();

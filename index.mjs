@@ -21,11 +21,12 @@ import { resolveConfig } from './config.mjs';
 import { SendLimiter } from './safety.mjs';
 import { createOps } from './ops.mjs';
 import { registerTools } from './tools.mjs';
+import { registerCommands } from './commands.mjs';
 import { mountCoordinatorSkills } from './skills.mjs';
 import { SpawnRegistry } from './registry.mjs';
 
 export const name = 'task-coordinator';
-export const inject = ['agents', 'tools', 'sessionController'];
+export const inject = ['agents', 'tools', 'sessionController', 'commands'];
 
 /** Default registry path: <DSH_HOME or ~/.dsh>/task-coordinator/registry.json */
 export function defaultRegistryFile() {
@@ -37,7 +38,7 @@ export function defaultRegistryFile() {
 
 export function apply(ctx, input = {}) {
   const config = resolveConfig(input);
-  ctx.provide('taskCoordinator', { config, version: '0.3.0' });
+  ctx.provide('taskCoordinator', { config, version: '0.7.0' });
   if (!config.enabled) {
     ctx.logger?.info('task-coordinator: disabled by config; no tools registered');
     return;
@@ -61,6 +62,16 @@ export function apply(ctx, input = {}) {
       : defaultRegistryFile(),
     { maxEntries: config.registryMaxEntries },
   );
+  // Interactive confirmation channel: the ctx.userQuestions seam (same one
+  // the official exit_plan_mode uses). Resolved lazily per call so the seam
+  // mounting order does not matter; missing service degrades to a coded
+  // error, never a crash. Not hard-injected: hosts without the seam still get
+  // every other tool.
+  const askUser = (request) => {
+    const service = typeof ctx.get === 'function' ? ctx.get('userQuestions') : undefined;
+    if (!service || typeof service.ask !== 'function') return Promise.resolve(null);
+    return service.ask(request);
+  };
   const ops = createOps({
     sessionController,
     agents,
@@ -69,9 +80,14 @@ export function apply(ctx, input = {}) {
     limiter,
     registry,
     uuid: () => `task-coord-${randomUUID()}`,
+    askUser,
   });
   const dispose = registerTools(ctx, ops, { defineTool }, config);
-  ctx.effect(() => () => dispose(), 'task-coordinator.dispose');
+  const disposeCommands = registerCommands(ctx, ops);
+  ctx.effect(() => () => {
+    dispose();
+    disposeCommands();
+  }, 'task-coordinator.dispose');
   // Ship the supervisor playbook skill with the bundle. Fire-and-forget: the
   // mount degrades to a warning on failure and never breaks the tools above.
   void mountCoordinatorSkills(ctx);

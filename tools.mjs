@@ -120,6 +120,7 @@ export function registerTools(ctx, ops, deps, config) {
       },
       cwd: { type: 'string', description: 'Working directory for the new task. Defaults to the caller\'s working directory.' },
       team: { type: 'string', description: 'Optional team (workstream) name grouping related spawned tasks; recorded durably and usable as a task_list filter, so the group survives a host restart.' },
+      reportBack: { type: 'boolean', description: 'Default true: append an instruction telling the new task to push its result summary back to your session via task_send when it finishes. Set false for fire-and-forget tasks you will only read with task_progress.' },
       sessionId: { type: 'string', description: 'Optional explicit session id; creation is idempotent for the same id and cwd.' },
       agentPreset: { type: 'string', description: 'Optional agent preset name for the new task.' },
     },
@@ -127,6 +128,65 @@ export function registerTools(ctx, ops, deps, config) {
     async execute(args, exec) {
       try {
         return await ops.spawnTask(args, callerFrom(exec), exec?.signal);
+      } catch (error) {
+        return { ok: false, code: 'internal', error: error?.message ?? String(error) };
+      }
+    },
+  })));
+
+  disposers.push(ctx.tools.register(defineTool({
+    name: 'task_confirm',
+    description: 'Present a decomposition/dispatch plan to the user as an interactive approval card and block until they answer. '
+      + 'REQUIRED before task_spawn_batch when the batch reaches the confirmation threshold: pass the returned confirmationId to the batch call. '
+      + 'On approval returns { approved: true, confirmationId }; when the user declines or edits, returns their feedback — fold it into a revised plan and confirm again. '
+      + 'If the user closes the card (confirm-cancelled), stop dispatching and wait for their next message.',
+    parameters: {
+      plan: {
+        type: 'string',
+        required: true,
+        description: 'The full dispatch plan in markdown: what gets split into how many task sessions, each task\'s scope and why it is independent. Rendered as the card body — this is what the user reviews.',
+      },
+      question: { type: 'string', description: 'Optional one-line question shown above the plan. Defaults to asking whether to approve the dispatch.' },
+    },
+    output: OUTPUT,
+    async execute(args, exec) {
+      try {
+        return await ops.confirmPlan({ plan: args.plan, question: args.question }, callerFrom(exec), exec?.agent, exec?.signal);
+      } catch (error) {
+        return { ok: false, code: 'internal', error: error?.message ?? String(error) };
+      }
+    },
+  })));
+
+  disposers.push(ctx.tools.register(defineTool({
+    name: 'task_spawn_batch',
+    description: 'Execute a decomposition plan: create several task sessions in one call, all optionally under one team. '
+      + 'Use after analyzing the work into independent pieces (no shared files, no producer/consumer dependency between them). '
+      + 'Every item\'s prompt must be fully self-contained. One failed item does not abort the rest; the response lists per-item results. '
+      + spawnTitleRule,
+    parameters: {
+      tasks: {
+        type: 'array',
+        required: true,
+        description: 'The decomposition plan: one entry per new task session.',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            title: { type: 'string', description: 'Semantic title "type｜topic" (MMDD｜ stamped automatically).' },
+            prompt: { type: 'string', required: true, description: 'Self-contained kickoff prompt for this task.' },
+            cwd: { type: 'string', description: 'Working directory override for this task.' },
+          },
+        },
+      },
+      team: { type: 'string', description: 'Team (workstream) name applied to every task in the batch.' },
+      reportBack: { type: 'boolean', description: 'Default true: every task in the batch gets the instruction to push its result summary back to your session via task_send when it finishes.' },
+      confirmationId: { type: 'string', description: 'confirmationId from an approved task_confirm for this plan. Required when the batch reaches the confirmation threshold (confirmation enabled); single-use.' },
+    },
+    output: OUTPUT,
+    async execute(args, exec) {
+      try {
+        return await ops.spawnBatch(args, callerFrom(exec), exec?.signal);
       } catch (error) {
         return { ok: false, code: 'internal', error: error?.message ?? String(error) };
       }
@@ -174,7 +234,7 @@ export function registerTools(ctx, ops, deps, config) {
     },
   })));
 
-  ctx.logger?.info(`task-coordinator: registered 6 coordination tools (subagent use ${config.allowSubagentUse ? 'allowed' : 'denied'})`);
+  ctx.logger?.info(`task-coordinator: registered 8 coordination tools (subagent use ${config.allowSubagentUse ? 'allowed' : 'denied'})`);
   return () => {
     for (const dispose of disposers.splice(0)) {
       try {

@@ -29,6 +29,14 @@ export const OP_CODES = Object.freeze({
   BAD_REQUEST: 'bad-request',
   SPAWN_CREATE_FAILED: 'spawn-create-failed',
   KICKOFF_REJECTED: 'kickoff-rejected',
+  SPAWN_DEPTH_EXCEEDED: 'spawn-depth-exceeded',
+  BATCH_ALL_FAILED: 'batch-all-failed',
+  CONFIRMATION_REQUIRED: 'confirmation-required',
+  CONFIRM_CANCELLED: 'confirm-cancelled',
+  CONFIRM_ABORTED: 'confirm-aborted',
+  NO_QUESTION_CHANNEL: 'no-question-channel',
+  DELEGATED_CALLER: 'delegated-caller',
+  CALLER_NOT_LIVE: 'caller-not-live',
   TARGET_BUSY: 'target-busy',
   TARGET_VANISHED: 'target-vanished',
   RESOLVE_FAILED: 'resolve-failed',
@@ -37,16 +45,50 @@ export const OP_CODES = Object.freeze({
   CANCEL_REJECTED: 'cancel-rejected',
 });
 
+/** Approve option label for the dispatch-confirmation card (must match exactly). */
+export const CONFIRM_APPROVE_LABEL = '按计划派发（推荐）';
+
+/** Decline option label for the dispatch-confirmation card. */
+export const CONFIRM_DECLINE_LABEL = '暂不派发';
+
 /**
  * @param {object} deps
  * @returns {TaskOps}
  */
 export function createOps(deps) {
-  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid } = deps;
+  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser } = deps;
 
   const fail = (code, message) => ({ ok: false, code, error: message });
   const failDeny = (denial) => fail(denial.code, denial.message);
   const shortId = (sessionId) => String(sessionId).replace(/^session-/, '').slice(0, 8);
+
+  /**
+   * Approved-but-unused dispatch confirmations (confirmationId -> record).
+   * Process-local on purpose: after a host restart the supervisor simply
+   * confirms again rather than acting on stale approvals.
+   */
+  const confirmations = new Map();
+
+  /** Map one user-questions service error to our stable codes. */
+  function failQuestionError(error) {
+    const code = error?.code;
+    if (code === 'ASK_CANCELLED') {
+      return fail(OP_CODES.CONFIRM_CANCELLED, 'the user closed the confirmation card without answering; stop dispatching and wait for the user\'s next message');
+    }
+    if (code === 'ASK_ABORTED') {
+      return fail(OP_CODES.CONFIRM_ABORTED, 'confirmation was aborted before the user answered');
+    }
+    if (code === 'NO_PROVIDER') {
+      return fail(OP_CODES.NO_QUESTION_CHANNEL, 'no UI is connected to answer interactive questions; present the plan in plain text and get the user\'s go-ahead in chat');
+    }
+    if (code === 'DELEGATED_CALLER') {
+      return fail(OP_CODES.DELEGATED_CALLER, 'human interaction is only available from a live root session; include the plan and the pending decision in your final result instead');
+    }
+    if (code === 'CALLER_NOT_LIVE') {
+      return fail(OP_CODES.CALLER_NOT_LIVE, 'the calling agent is no longer the exact live instance; retry from a fresh tool call');
+    }
+    return fail('internal', `confirmation channel failed: ${error?.message ?? error}`);
+  }
 
   /** Locate one session row in the visible list without activating agents. */
   async function findRow(targetId, signal) {
@@ -268,11 +310,23 @@ export function createOps(deps) {
     },
 
     /** Capability 6: spawn a brand-new task; it appears in the session list. */
-    async spawnTask({ title, prompt, cwd, sessionId, agentPreset, team }, caller, signal) {
+    async spawnTask({ title, prompt, cwd, sessionId, agentPreset, team, reportBack }, caller, signal) {
       const callerDeny = checkCaller(caller, config);
       if (callerDeny) return failDeny(callerDeny);
       if (typeof prompt !== 'string' || prompt.trim().length === 0) {
         return fail(OP_CODES.BAD_REQUEST, 'prompt is required to start the new task');
+      }
+      // Recursion governance: the child's depth derives from the caller's
+      // recorded depth (a never-spawned root session counts as depth 0).
+      // Beyond maxSpawnDepth the tree stops growing; the rejected coordinator
+      // should fall back to subagents for deeper parallelism.
+      const parentEntry = registry?.get(caller.sessionId);
+      const childDepth = (parentEntry?.depth ?? 0) + 1;
+      if (childDepth > config.maxSpawnDepth) {
+        return fail(
+          OP_CODES.SPAWN_DEPTH_EXCEEDED,
+          `spawn depth would be ${childDepth} but maxSpawnDepth is ${config.maxSpawnDepth}; use subagents for deeper parallelism instead of spawning new task sessions`,
+        );
       }
       const cleanTeam = typeof team === 'string' && team.trim().length > 0 ? team.trim() : undefined;
       if (sessionId !== undefined) {
@@ -311,8 +365,18 @@ export function createOps(deps) {
         ...(cleanTeam !== undefined ? { team: cleanTeam } : {}),
         ...(appliedTitle ? { title: appliedTitle } : {}),
         promptExcerpt: excerpt(prompt.trim(), 120),
+        depth: childDepth,
+        parentSessionId: caller.sessionId,
       });
       const correlationId = uuid();
+      // Report-back convention (default on): the kickoff prompt tells the new
+      // task to push its result summary back to the spawning session via
+      // task_send when it finishes, so the supervisor gets push instead of
+      // only pull. The registry excerpt keeps the user's original prompt.
+      const wantsReport = reportBack !== false;
+      const kickoffText = wantsReport
+        ? `${prompt.trim()}\n\n---\n汇报约定：完成（或确认无法完成）后，用 task_send 把结果摘要发回会话 ${caller.sessionId}（内容：结论、产出路径、遗留问题）。若发送失败，把摘要完整写进你的最终回复。`
+        : prompt.trim();
       let started = false;
       try {
         // The Remote facade's prompt(request, signal) dereferences the signal
@@ -322,7 +386,7 @@ export function createOps(deps) {
           requestId: correlationId,
           sessionId: newId,
           mode: 'queue',
-          content: [{ type: 'text', text: prompt.trim() }],
+          content: [{ type: 'text', text: kickoffText }],
         }, signal ?? new AbortController().signal);
         started = true;
         limiter.accept(newId);
@@ -332,6 +396,7 @@ export function createOps(deps) {
           code: OP_CODES.KICKOFF_REJECTED,
           error: `session ${newId} was created but the kickoff prompt was rejected: ${error?.message ?? error}`,
           sessionId: newId,
+          depth: childDepth,
           ...(cleanTeam !== undefined ? { team: cleanTeam } : {}),
         };
       }
@@ -344,7 +409,150 @@ export function createOps(deps) {
         cwd: resolvedCwd ?? null,
         started,
         correlationId,
+        depth: childDepth,
         hint: 'the new task is now visible in the session list; track it with task_progress',
+      };
+    },
+
+    /**
+     * Capability 6c: interactive dispatch confirmation. Presents the plan as a
+     * plan-review card through the ctx.userQuestions seam (same mechanism as
+     * the official exit_plan_mode) and blocks until the user answers.
+     * Approval mints a single-use confirmationId consumed by task_spawn_batch.
+     */
+    async confirmPlan({ plan, question }, caller, agent, signal) {
+      const callerDeny = checkCaller(caller, config);
+      if (callerDeny) return failDeny(callerDeny);
+      if (typeof plan !== 'string' || plan.trim().length === 0) {
+        return fail(OP_CODES.BAD_REQUEST, 'plan is required (markdown: what gets split into how many tasks and why)');
+      }
+      if (typeof askUser !== 'function') {
+        return fail(OP_CODES.NO_QUESTION_CHANNEL, 'no user-questions channel composed; present the plan in plain text and get the go-ahead in chat');
+      }
+      // Plan-review narrowing (verified against dsh-user-questions + client
+      // PlanReviewPanel): single question, no multiSelect, <=2 options, detail
+      // present, and the approve label must name one option exactly.
+      const approveLabel = CONFIRM_APPROVE_LABEL;
+      const reviewQuestion = {
+        id: 'task-dispatch-review',
+        header: '派发确认',
+        question: typeof question === 'string' && question.trim().length > 0 ? question.trim() : '批准该拆分方案并开始派发？',
+        detail: plan.trim(),
+        options: [
+          { label: approveLabel, description: '总控将按上述方案批量派发任务' },
+          { label: CONFIRM_DECLINE_LABEL, description: '取消本次派发；在聊天里说明调整意见' },
+        ],
+        intent: { kind: 'plan-review', approve: approveLabel },
+      };
+      let result;
+      try {
+        result = await askUser({ questions: [reviewQuestion], agent, signal });
+      } catch (error) {
+        return failQuestionError(error);
+      }
+      if (result === null || result === undefined) {
+        return fail(OP_CODES.NO_QUESTION_CHANNEL, 'no UI is connected to answer interactive questions; present the plan in plain text and get the user\'s go-ahead in chat');
+      }
+      const answer = Array.isArray(result.answers) ? result.answers.find((entry) => entry?.id === reviewQuestion.id) : undefined;
+      const selected = Array.isArray(answer?.selected) ? answer.selected : [];
+      const approved = selected.includes(approveLabel);
+      if (approved) {
+        const confirmationId = `confirm-${uuid()}`;
+        confirmations.set(confirmationId, { callerSessionId: caller.sessionId, approvedAt: Date.now(), taskHint: excerpt(plan.trim(), 80) });
+        return {
+          ok: true,
+          approved: true,
+          confirmationId,
+          hint: 'pass this confirmationId to task_spawn_batch for this plan; it is single-use and bound to your session',
+        };
+      }
+      return {
+        ok: true,
+        approved: false,
+        feedback: typeof answer?.custom === 'string' && answer.custom.trim().length > 0 ? answer.custom.trim() : (selected[0] ?? CONFIRM_DECLINE_LABEL),
+        hint: 'do not dispatch; fold the user\'s feedback into a revised plan and confirm again',
+      };
+    },
+
+    /** Consume one approved confirmationId for this caller, if valid. */
+    consumeConfirmation(confirmationId, caller) {
+      const record = typeof confirmationId === 'string' ? confirmations.get(confirmationId) : undefined;
+      if (!record || record.callerSessionId !== caller.sessionId) return false;
+      confirmations.delete(confirmationId);
+      return true;
+    },
+
+    /**
+     * Capability 6b: spawn a whole decomposition plan in one call.
+     * Every item goes through spawnTask (title rule, registry, depth
+     * governance); one failed item does not abort the rest. Batches at or
+     * above confirmBatchThreshold require an approved confirmationId when
+     * confirmBeforeBatch is on.
+     */
+    async spawnBatch({ tasks, team, confirmationId, reportBack }, caller, signal) {
+      const callerDeny = checkCaller(caller, config);
+      if (callerDeny) return failDeny(callerDeny);
+      if (!Array.isArray(tasks) || tasks.length === 0) {
+        return fail(OP_CODES.BAD_REQUEST, 'tasks must be a non-empty array of {title?, prompt} items');
+      }
+      if (tasks.length > config.maxBatchSpawn) {
+        return fail(OP_CODES.BAD_REQUEST, `batch of ${tasks.length} exceeds maxBatchSpawn (${config.maxBatchSpawn}); split into smaller batches`);
+      }
+      for (const [index, item] of tasks.entries()) {
+        if (!item || typeof item !== 'object' || typeof item.prompt !== 'string' || item.prompt.trim().length === 0) {
+          return fail(OP_CODES.BAD_REQUEST, `tasks[${index}].prompt is required`);
+        }
+      }
+      // Dispatch confirmation gate: big fan-outs must be user-approved first.
+      const needsConfirmation = config.confirmBeforeBatch && tasks.length >= config.confirmBatchThreshold;
+      if (needsConfirmation) {
+        const record = typeof confirmationId === 'string' ? confirmations.get(confirmationId) : undefined;
+        if (!record || record.callerSessionId !== caller.sessionId) {
+          return fail(
+            OP_CODES.CONFIRMATION_REQUIRED,
+            `batches of ${config.confirmBatchThreshold}+ tasks need user approval: call task_confirm with this plan first, then pass its confirmationId`,
+          );
+        }
+      }
+      const cleanTeam = typeof team === 'string' && team.trim().length > 0 ? team.trim() : undefined;
+      const results = [];
+      let startedCount = 0;
+      for (const item of tasks) {
+        // Each item gets its own signal-free path; abort the whole batch when
+        // the caller's signal is already gone.
+        if (signal?.aborted) {
+          results.push({ ok: false, code: 'bad-request', error: 'batch aborted by caller' });
+          continue;
+        }
+        const result = await ops.spawnTask({
+          title: item.title,
+          prompt: item.prompt,
+          cwd: item.cwd,
+          sessionId: item.sessionId,
+          agentPreset: item.agentPreset,
+          team: cleanTeam,
+          reportBack,
+        }, caller, signal);
+        if (result.ok) startedCount += 1;
+        results.push(result.ok
+          ? { ok: true, sessionId: result.sessionId, title: result.title, correlationId: result.correlationId, depth: result.depth }
+          : { ok: false, code: result.code, error: result.error, ...(result.sessionId !== undefined ? { sessionId: result.sessionId } : {}) });
+      }
+      if (startedCount === 0) {
+        // Keep the confirmation usable so the supervisor does not re-ask for
+        // the same plan after an all-failed attempt.
+        return { ok: false, code: OP_CODES.BATCH_ALL_FAILED, error: `all ${tasks.length} batch spawns failed`, results };
+      }
+      if (needsConfirmation && typeof confirmationId === 'string') {
+        confirmations.delete(confirmationId); // single-use: consumed on success
+      }
+      return {
+        ok: true,
+        startedCount,
+        failedCount: results.length - startedCount,
+        ...(cleanTeam !== undefined ? { team: cleanTeam } : {}),
+        results,
+        hint: 'wait for the whole batch with task_wait({ sessionIds: [...], mode: "all" })',
       };
     },
 

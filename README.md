@@ -9,10 +9,10 @@
 
 [![DSH 0.1.2-alpha.1 verified](https://img.shields.io/badge/DSH-0.1.2--alpha.1%20verified-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![33 unit tests](https://img.shields.io/badge/tests-33%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![55 unit tests](https://img.shields.io/badge/tests-55%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
-[What is this](#what-is-this) · [Quick start](#quick-start) · [Tools](#the-six-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Changelog](CHANGELOG.md) · [中文](README.zh-CN.md)
+[What is this](#what-is-this) · [Quick start](#quick-start) · [Tools](#the-eight-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Changelog](CHANGELOG.md) · [中文](README.zh-CN.md)
 
 </div>
 
@@ -27,14 +27,14 @@ Split this into three tasks and run them in parallel: A researches the approach,
 B builds the prototype, C runs the tests. Summarize for me when they finish.
 ```
 
-What happens behind the scenes: you (plain language) → supervisor session → six `task_*` tools → other top-level sessions ("tasks") inside DSH Desktop. You never watch a single step in between.
+What happens behind the scenes: you (plain language) → supervisor session → decomposition analysis → **an approval card you confirm** → batch-spawned task sessions → each task reports its result back when done → the supervisor summarizes. You never watch a single step in between, but the decision points stay in your hands.
 
 - This is a DSH plugin: **any top-level session** can discover tasks, read progress, spawn tasks and deliver instructions;
 - Spawned tasks **appear in the GUI session list immediately** (the same `api-session/added` event the sidebar consumes);
 - Every cross-task message is stamped with a `coordinator` source — visible and attributable in the target session's transcript;
 - One prerequisite: **DSH Desktop is installed and starts** (the plugin never launches the host for you).
 
-> 📌 Host contract verified on **DSH 0.1.2-alpha.1**; all six capabilities passed real-host end-to-end testing after restart (criteria in [Host contract](docs/PROTOCOL.md)).
+> 📌 Host contract verified on **DSH 0.1.2-alpha.1**; every capability passed real-host end-to-end testing after restart (criteria in [Host contract](docs/PROTOCOL.md)).
 
 ## Quick start
 
@@ -54,7 +54,7 @@ pwsh install.ps1 -Source .
 
 The script does three things: copies the plugin into the profile's `node_modules/` (no `pnpm install`, the lockfile stays untouched), registers the dependency + bundle in the profile manifest, and updates `.package-map.json` — **everything is backed up first** into `backups/<timestamp>/`.
 
-**Restart DSH Desktop** afterwards — any session can then use the six tools.
+**Restart DSH Desktop** afterwards — any session can then use the eight tools and the `/tasks` command.
 
 > 💡 `install.ps1` defaults `-Source` to `$PSScriptRoot/plugin` (workspace layout); when running from the plugin repo itself, **pass `-Source .` explicitly**.
 > Re-running is safe: file copies are idempotent and manifest registration de-duplicates.
@@ -69,16 +69,40 @@ It calls `task_list` and returns the task list (an empty list is a valid answer)
 
 Uninstall: `pwsh install.ps1 -Source . -Uninstall` (also takes effect after restart).
 
-## The six tools
+## The eight tools
 
 | Tool | Purpose |
 |---|---|
 | `task_list` | List coordination-visible tasks with stable session ids, status, titles, todo/goal progress; filterable by `team` |
 | `task_progress` | Read one task in depth: live/cold state, queued messages, conversation tail, todos, goal |
 | `task_send` | Deliver a visible follow-up prompt (`mode: queue` or `steer`; `reference` links an earlier instruction); returns a `messageId` |
-| `task_spawn` | Create + name + kick off a brand-new task (title follows the `MMDD｜type｜topic` rule; groupable via `team`); returns a `correlationId` |
+| `task_spawn` | Create + name + kick off a brand-new task (title follows the `MMDD｜type｜topic` rule; groupable via `team`); returns a `correlationId`; appends the report-back convention by default |
+| `task_confirm` | Present a decomposition/dispatch plan as an **interactive approval card** and block until the user answers; approval mints a single-use `confirmationId` |
+| `task_spawn_batch` | Spawn a whole decomposition plan in one call (`tasks: [{title?, prompt}]` + one `team`); requires the `confirmationId` once the batch reaches the confirmation threshold; one failed item does not abort the rest |
 | `task_wait` | Block until one task becomes idle (or timeout); multi-target (`sessionIds` + `mode: all/any`) |
 | `task_cancel` | Cancel the target's active turn, keeping its queued messages |
+
+### `/tasks` — the no-model fast lane
+
+Read-only lookups can bypass the model entirely: `/tasks` (all tasks), `/tasks team <name>` (one workstream), `/tasks <sessionId>` (one task's progress, short-id prefixes resolve when unique). The command executes directly in the host — zero tokens, instant answer. Anything that *acts* (send/spawn/wait/cancel) still goes through the tools.
+
+## Dispatch confirmation (the anti-black-box gate)
+
+Batch dispatches used to be a silent model decision — not anymore:
+
+1. The supervisor calls `task_confirm({ plan })` with the full decomposition plan (markdown); the user gets a **plan-review card** rendered through the host's `ctx.userQuestions` seam — the same isomorphic path the official `exit_plan_mode` uses, so **no client-side changes are needed**;
+2. Approve → the tool returns a `confirmationId` bound to the calling session; decline → the user's feedback comes back as the tool result; close the card → `confirm-cancelled` (the supervisor stops and waits);
+3. `task_spawn_batch` at or above `confirmBatchThreshold` (default 2) **refuses to run without a valid `confirmationId`** (`confirmation-required`). The credential is single-use and consumed on success; an all-failed batch keeps it so the user is not asked twice for the same plan.
+
+Degradation: with no UI connected, `task_confirm` returns `no-question-channel` and the bundled skill instructs the supervisor to fall back to a plain-text confirmation in chat. Subagent callers get `delegated-caller` (a child agent cannot ask a human).
+
+## Result report-back
+
+Spawned tasks come with a **report-back convention by default** (`reportBack`): the kickoff prompt ends with an instruction to push a result summary (conclusion, output paths, remaining issues) back to the spawning session via `task_send` when the task finishes — with "write the summary into your final reply" as the fallback when the send fails. The supervisor therefore gets **push + `task_wait` as the pull fallback** instead of polling. Pass `reportBack: false` for fire-and-forget tasks you will read with `task_progress` anyway.
+
+## Recursion governance
+
+Spawned coordinators can spawn further tasks — up to `maxSpawnDepth` (default 2) generations from the root session. The durable registry records each task's `depth` and `parentSessionId`; going deeper fails with `spawn-depth-exceeded` and the guidance to use **subagents** for deeper parallelism instead (subagents never consume depth budget).
 
 ## Delivery semantics (the important part)
 
@@ -100,19 +124,21 @@ Conclusion: **no polling needed** — deliver, `task_wait` for idle, then `task_
 
 ## Team workstreams & durable registry
 
-- Pass `team: <workstream name>` to `task_spawn` to group tasks; `task_list({ team })` retrieves the whole group later;
-- Grouping is recorded in a **durable spawn registry** (default `<DSH_HOME or ~/.dsh>/task-coordinator/registry.json`) — it **survives host restarts** (native session listing cannot answer "which tasks are mine and how do they group");
+- Pass `team: <workstream name>` to `task_spawn` / `task_spawn_batch` to group tasks; `task_list({ team })` retrieves the whole group later;
+- Grouping is recorded in a **durable spawn registry** (default `<DSH_HOME or ~/.dsh>/task-coordinator/registry.json`) together with each spawn's title, prompt excerpt, `depth` and `parentSessionId` — it **survives host restarts** (native session listing cannot answer "which tasks are mine and how do they group");
 - Registry writes are near-atomic (temp file + rename); entries are capped by `registryMaxEntries` (default 500, oldest pruned first); a corrupt file is preserved as `*.corrupt-<timestamp>` instead of being silently dropped.
 
 ## Machine-readable error codes
 
-Failures return `{ ok: false, code, error }` — agents branch on `code`, never on prose. Two families: guard denials (`self-send-denied` / `subagent-caller-denied` / `subagent-target-denied` / `target-not-found` / `rate-limited` / `queue-full`…) and operation failures (`bad-request` / `target-busy` / `target-cold` / `spawn-create-failed` / `kickoff-rejected`…). Full table in [Host contract §6](docs/PROTOCOL.md).
+Failures return `{ ok: false, code, error }` — agents branch on `code`, never on prose. Two families: guard denials (`self-send-denied` / `subagent-caller-denied` / `subagent-target-denied` / `target-not-found` / `rate-limited` / `queue-full`…) and operation failures (`bad-request` / `target-busy` / `target-cold` / `spawn-create-failed` / `kickoff-rejected` / `spawn-depth-exceeded` / `confirmation-required` / `confirm-cancelled` / `no-question-channel` / `delegated-caller` / `batch-all-failed`…). Full table in [Host contract §6](docs/PROTOCOL.md).
 
 ## Safety model
 
 - Self-addressing is **always rejected**;
 - Targets must be top-level sessions — subagent-owned sessions are fenced;
 - Subagent callers are denied by default (`allowSubagentUse` to opt in);
+- Batch dispatches above the threshold are impossible without explicit user approval (see above);
+- Recursion depth is capped (`maxSpawnDepth`) so spawn trees cannot grow unbounded;
 - Per-target rate limit (`minSendIntervalMs`) and queue-depth limit (`maxQueuePerTask`) prevent runaway spam;
 - Caller identity is **re-derived from the executing agent context on every tool call** — never self-reported.
 
@@ -129,9 +155,9 @@ Example: `修复｜对账精度` → `0904｜修复｜对账精度`.
 
 ## Bundled skill: task-coordination
 
-The plugin ships one skill (`skills/task-coordination/SKILL.md`) teaching the supervisor *when and how* to orchestrate the tools: delivery semantics, fan-out/supervise/handoff patterns, the naming rule, anti-patterns. Loaded on demand — it costs no context until coordination actually happens.
+The plugin ships one skill (`skills/task-coordination/SKILL.md`) teaching the supervisor *when and how* to orchestrate the tools: delivery semantics, decomposition criteria, confirmation semantics, fan-out/supervise/handoff patterns, recursion governance, the naming rule, anti-patterns. Loaded on demand — it costs no context until coordination actually happens.
 
-Mounting follows the shipped `@openviking/dsh-memory-plugin` precedent — an **isolated** `dsh-skill-filesystem` provider with `providerName: 'task-coordinator'`, `includeDefaultRoots: false`, seeing only this plugin's `skills/` directory. Consequences: hot-reload on edit, no shadowing of project/user skills, disappears on uninstall. If the provider package is unavailable the mount degrades to a warning — **the six tools keep working**.
+Mounting follows the shipped `@openviking/dsh-memory-plugin` precedent — an **isolated** `dsh-skill-filesystem` provider with `providerName: 'task-coordinator'`, `includeDefaultRoots: false`, seeing only this plugin's `skills/` directory. Consequences: hot-reload on edit, no shadowing of project/user skills, disappears on uninstall. If the provider package is unavailable the mount degrades to a warning — **the eight tools keep working**.
 
 ## Configuration (cordis.yml / patch)
 
@@ -148,6 +174,10 @@ Mounting follows the shipped `@openviking/dsh-memory-plugin` precedent — an **
     titleTimeZone: 'Asia/Shanghai'
     registryFile: ''              # empty = <DSH_HOME or ~/.dsh>/task-coordinator/registry.json
     registryMaxEntries: 500
+    maxBatchSpawn: 6              # per-call cap for task_spawn_batch
+    maxSpawnDepth: 2              # spawn generations allowed below the root session
+    confirmBeforeBatch: true      # dispatch confirmation gate
+    confirmBatchThreshold: 2      # batch size (>=) at which the gate engages
     maxQueuePerTask: 5
     minSendIntervalMs: 2000
     waitDefaultTimeoutMs: 120000
@@ -168,7 +198,7 @@ Module layering, DI boundaries and the degradation strategy live in **[docs/ARCH
 
 ```powershell
 node --check *.mjs                      # syntax check
-node --test test/smoke.test.mjs         # 33 unit tests (mocked host)
+node --test test/smoke.test.mjs         # 55 unit tests (mocked host)
 # after installing into a profile (see Quick start):
 node verify-installed.mjs               # installed-location integration check: real host packages + mock ctx
 ```
@@ -183,13 +213,14 @@ dsh-plugin-task-coordinator/
 ├── title.mjs           spawn-title rule (pure module)
 ├── registry.mjs        durable spawn registry (near-atomic writes, corruption-tolerant)
 ├── ops.mjs             session operations · DI factory
-├── tools.mjs           six task_* tool registrations
+├── tools.mjs           eight task_* tool registrations
+├── commands.mjs        /tasks slash command (direct execution, no model turn)
 ├── skills.mjs          isolated skill mount (dynamic import, fire-and-forget)
 ├── skills/task-coordination/   supervisor playbook (shipped with the bundle)
 ├── cordis.patch.yml    isolated plugin-group mount descriptor
 ├── install.ps1         deploy script (copy-based install + automatic backups)
 ├── verify-installed.mjs installed-location integration check
-├── test/smoke.test.mjs 33 unit tests
+├── test/smoke.test.mjs 55 unit tests
 └── docs/               ARCHITECTURE.md · PROTOCOL.md
 ```
 

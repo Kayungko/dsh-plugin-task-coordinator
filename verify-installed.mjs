@@ -32,13 +32,14 @@ assert.equal(typeof defineTool, 'function', 'defineTool export missing');
 assert.equal(typeof createUserMessage, 'function', 'createUserMessage export missing');
 const plugin = await import('./index.mjs');
 assert.equal(typeof plugin.apply, 'function');
-assert.deepEqual(plugin.inject, ['agents', 'tools', 'sessionController']);
+assert.deepEqual(plugin.inject, ['agents', 'tools', 'sessionController', 'commands']);
 
 // 3. mock cordis ctx with a believable session universe
 const sessions = new Map();
 const liveAgents = new Map();
 const registrations = [];
 const calls = [];
+let createCount = 0;
 
 sessions.set('session-super', {
   sessionId: 'session-super',
@@ -82,11 +83,34 @@ const ctx = {
   provides: {},
   effects: [],
   mountedPlugins: [],
+  commandRegistrations: [],
   provide(key, value) { this.provides[key] = value; },
   effect(factory) { this.effects.push(factory); },
   plugin(pluginModule, config) {
     this.mountedPlugins.push([pluginModule, config]);
     return () => {};
+  },
+  commands: {
+    register(definition) {
+      this.commandRegistrations ??= [];
+      ctx.commandRegistrations.push(definition);
+      return () => ctx.commandRegistrations.splice(ctx.commandRegistrations.indexOf(definition), 1);
+    },
+  },
+  // user-questions seam stand-in: auto-approve the first (approve) option,
+  // mirroring the real ctx.get('userQuestions').ask() contract shape.
+  get(name) {
+    if (name !== 'userQuestions') return undefined;
+    return {
+      async ask(request) {
+        return {
+          answers: request.questions.map((question) => ({
+            id: question.id,
+            selected: [question.options[0].label],
+          })),
+        };
+      },
+    };
   },
   tools: {
     register(definition) {
@@ -98,7 +122,8 @@ const ctx = {
     async list() { calls.push('list'); return { items: [...sessions.values()] }; },
     async create(request) {
       calls.push('create');
-      const id = request.sessionId ?? 'session-spawned';
+      createCount += 1;
+      const id = request.sessionId ?? `session-spawned-${createCount}`;
       sessions.set(id, { sessionId: id, updatedAt: Date.now(), running: false, blank: true, cwd: request.cwd, projections: { asOfSeq: 0, values: {} } });
       return { sessionId: id };
     },
@@ -111,6 +136,8 @@ const ctx = {
       // mirror the real Remote facade: signal is dereferenced unconditionally
       signal.throwIfAborted();
       calls.push('prompt');
+      const row = sessions.get(request.sessionId);
+      if (row) row.kickoffPrompt = request.content?.[0]?.text;
       return { accepted: true };
     },
     async cancel(request) { calls.push('cancel'); return { accepted: true }; },
@@ -130,9 +157,11 @@ const ctx = {
 const verifyDir = mkdtempSync(join(tmpdir(), 'task-coord-verify-'));
 const registryFile = join(verifyDir, 'registry.json');
 plugin.apply(ctx, { minSendIntervalMs: 0, registryFile });
-assert.equal(registrations.length, 6, `expected 6 tools, got ${registrations.length}`);
+assert.equal(registrations.length, 8, `expected 8 tools, got ${registrations.length}`);
+assert.equal(ctx.commandRegistrations.length, 1, 'expected the /tasks command');
+assert.equal(ctx.commandRegistrations[0].name, 'tasks');
 assert.ok(ctx.provides.taskCoordinator, 'taskCoordinator service not provided');
-assert.equal(ctx.provides.taskCoordinator.version, '0.3.0');
+assert.equal(ctx.provides.taskCoordinator.version, '0.7.0');
 // the skill mount is fire-and-forget (dynamic import); give it a macrotask
 await new Promise((resolve) => setImmediate(resolve));
 assert.equal(ctx.mountedPlugins.length, 1, 'expected the skill provider mount');
@@ -196,17 +225,109 @@ const spawnResult = await byName.task_spawn.execute({ prompt: 'run the regressio
 assert.equal(spawnResult.ok, true);
 assert.match(spawnResult.title, /^\d{4}｜修复｜回归套件$/);
 assert.equal(spawnResult.team, '验证编组');
+assert.equal(spawnResult.depth, 1, 'root-spawned tasks must be depth 1');
 assert.ok(sessions.has(spawnResult.sessionId));
 assert.ok(typeof spawnResult.correlationId === 'string' && spawnResult.correlationId.length > 0);
 assert.ok(existsSync(registryFile), 'registry file was not written');
 const teamList = await byName.task_list.execute({ team: '验证编组' }, supervisorExec);
 assert.deepEqual(teamList.tasks.map((task) => task.sessionId), [spawnResult.sessionId]);
-console.log('task_spawn         : OK ->', spawnResult.sessionId, 'title:', spawnResult.title, '| team listed:', teamList.tasks.length === 1);
+// report-back convention: kickoff prompt carries the push-back instruction naming the supervisor
+const spawnKickoff = sessions.get(spawnResult.sessionId).kickoffPrompt;
+assert.match(spawnKickoff, /^run the regression suite/);
+assert.match(spawnKickoff, /汇报约定/);
+assert.match(spawnKickoff, /session-super/);
+console.log('task_spawn         : OK ->', spawnResult.sessionId, 'title:', spawnResult.title, '| team listed:', teamList.tasks.length === 1, '| report-back:', /汇报约定/.test(spawnKickoff));
+
+// dispatch confirmation gate: unapproved batch is refused...
+const unapprovedBatch = await byName.task_spawn_batch.execute({
+  tasks: [
+    { title: '探索｜批量甲', prompt: 'batch item one' },
+    { title: '探索｜批量乙', prompt: 'batch item two' },
+  ],
+}, supervisorExec);
+assert.equal(unapprovedBatch.ok, false);
+assert.equal(unapprovedBatch.code, 'confirmation-required');
+// ...so confirm first (approval card flow, auto-approved by the mock seam)
+const confirmResult = await byName.task_confirm.execute({
+  plan: '## 拆分方案\n- 任务1：批量甲（独立）\n- 任务2：批量乙（独立）',
+}, supervisorExec);
+assert.equal(confirmResult.ok, true);
+assert.equal(confirmResult.approved, true);
+assert.ok(confirmResult.confirmationId.startsWith('confirm-'));
+// batch spawn (decomposition execution step) with per-item results + depth
+const batchResult = await byName.task_spawn_batch.execute({
+  tasks: [
+    { title: '探索｜批量甲', prompt: 'batch item one' },
+    { title: '探索｜批量乙', prompt: 'batch item two' },
+  ],
+  team: '批量验证',
+  confirmationId: confirmResult.confirmationId,
+}, supervisorExec);
+assert.equal(batchResult.ok, true);
+assert.equal(batchResult.startedCount, 2);
+assert.equal(batchResult.failedCount, 0);
+assert.equal(batchResult.team, '批量验证');
+for (const item of batchResult.results) {
+  assert.equal(item.ok, true);
+  assert.equal(item.depth, 1);
+  assert.ok(sessions.has(item.sessionId));
+}
+const batchTeamList = await byName.task_list.execute({ team: '批量验证' }, supervisorExec);
+assert.equal(batchTeamList.count, 2);
+// every batch task got the report-back instruction too
+for (const item of batchResult.results) {
+  const kickoff = sessions.get(item.sessionId).kickoffPrompt;
+  assert.match(kickoff, /汇报约定/);
+  assert.match(kickoff, /session-super/);
+}
+// the confirmation is single-use
+const reusedBatch = await byName.task_spawn_batch.execute({
+  tasks: [{ prompt: 'x' }, { prompt: 'y' }],
+  confirmationId: confirmResult.confirmationId,
+}, supervisorExec);
+assert.equal(reusedBatch.code, 'confirmation-required');
+const batchBad = await byName.task_spawn_batch.execute({ tasks: [] }, supervisorExec);
+assert.equal(batchBad.code, 'bad-request');
+console.log('task_confirm       : OK -> approved,', confirmResult.confirmationId, '(single-use enforced)');
+console.log('task_spawn_batch   : OK ->', batchResult.results.map((item) => item.sessionId).join(', '), '| gate + team listed:', batchTeamList.count === 2);
+
+// report-back opt-out: kickoff is exactly the user prompt
+const quietSpawn = await byName.task_spawn.execute({ prompt: 'quiet errand', reportBack: false }, supervisorExec);
+assert.equal(quietSpawn.ok, true);
+assert.equal(sessions.get(quietSpawn.sessionId).kickoffPrompt, 'quiet errand');
+console.log('reportBack: false  : OK -> kickoff stays pristine');
 
 const waitResult = await byName.task_wait.execute({ sessionIds: ['session-worker', spawnResult.sessionId], mode: 'all', timeoutMs: 1000 }, supervisorExec);
 assert.equal(waitResult.settled, true);
 assert.equal(waitResult.count, 2);
 console.log('task_wait (multi)  : OK ->', waitResult.reason);
+
+// slash command: /tasks (direct execution, no model turn)
+const tasksCommand = ctx.commandRegistrations[0];
+const invocationBase = {
+  commandId: 'verify-cmd-1',
+  agent: { id: 'session-super', session: { header: { cwd: '/proj' } } },
+  attachments: [],
+  signal: new AbortController().signal,
+};
+const listCmd = await tasksCommand.handler({ ...invocationBase, rawInput: '' });
+assert.equal(listCmd.kind, 'success');
+assert.match(listCmd.text, /session-worker/);
+const teamCmd = await tasksCommand.handler({ ...invocationBase, rawInput: 'team 验证编组' });
+assert.equal(teamCmd.kind, 'success');
+assert.match(teamCmd.text, new RegExp(spawnResult.sessionId));
+const inspectCmd = await tasksCommand.handler({ ...invocationBase, rawInput: 'session-worker' });
+assert.equal(inspectCmd.kind, 'success');
+assert.match(inspectCmd.text, /Worker task/);
+const shortCmd = await tasksCommand.handler({ ...invocationBase, rawInput: spawnResult.sessionId.replace(/^session-/, '') });
+assert.equal(shortCmd.kind, 'success');
+// ambiguous prefix ('spawned' matches three batch sessions) must be rejected
+const ambiguousCmd = await tasksCommand.handler({ ...invocationBase, rawInput: 'spawned' });
+assert.equal(ambiguousCmd.kind, 'error');
+assert.match(ambiguousCmd.text, /ambiguous/);
+const badCmd = await tasksCommand.handler({ ...invocationBase, rawInput: 'team' });
+assert.equal(badCmd.kind, 'error');
+console.log('slash /tasks       : OK -> list/team/inspect/short-id/ambiguous/usage all settled');
 
 const cancelResult = await byName.task_cancel.execute({ sessionId: 'session-worker' }, supervisorExec);
 assert.equal(cancelResult.ok, true);
