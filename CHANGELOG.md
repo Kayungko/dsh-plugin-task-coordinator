@@ -83,9 +83,9 @@
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
 [Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.7.0...HEAD
-[0.7.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.6.0...v0.7.0
-[0.6.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.5.0...v0.6.0
-[0.5.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.3.0...v0.4.0
+[0.7.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.3.0...v0.7.0
+[0.6.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/commit/5599b2e
+[0.5.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/commit/5599b2e
+[0.4.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/commit/5599b2e
 [0.3.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/releases/tag/v0.2.0
