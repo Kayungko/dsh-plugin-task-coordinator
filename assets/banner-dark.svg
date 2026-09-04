@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 260" width="1200" height="260" role="img" aria-labelledby="t">
+  <title id="t">task-coordinator — cross-task coordination for DeepSeek Harness</title>
+  <!-- mark (bright variant for dark backgrounds) -->
+  <g transform="translate(140 130) scale(0.40) translate(-298 -261)">
+    <circle cx="256" cy="256" r="54" fill="#FFB224"/>
+    <path d="M 388.4 301.6 A 140 140 0 1 0 355 355" fill="none" stroke="#7FA3FF" stroke-width="13" stroke-linecap="round"/>
+    <circle cx="342.2" cy="145.7" r="27" fill="#7FA3FF"/>
+    <circle cx="137.3" cy="330.2" r="21" fill="#7FA3FF"/>
+    <path d="M 327.2 300.5 L 409.4 352" fill="none" stroke="#9AAED2" stroke-width="12" stroke-linecap="round" stroke-dasharray="0.1 26"/>
+    <path d="M 429.8 364.7 L 402.5 363 L 416.3 341 Z" fill="#9AAED2"/>
+    <circle cx="457.8" cy="382.1" r="17" fill="none" stroke="#7FA3FF" stroke-width="10"/>
+  </g>
+  <!-- wordmark -->
+  <text x="270" y="143" font-family="-apple-system, 'Segoe UI', system-ui, Roboto, sans-serif" font-size="72" font-weight="800" letter-spacing="-1.5" fill="#F2F5FB" textLength="572" lengthAdjust="spacingAndGlyphs">task<tspan fill="#FFB224">-</tspan>coordinator</text>
+  <text x="270" y="192" font-family="-apple-system, 'Segoe UI', system-ui, Roboto, sans-serif" font-size="24" font-weight="500" letter-spacing="0.2" fill="#9AA8C4" textLength="572" lengthAdjust="spacing">Cross-task coordination for DeepSeek Harness</text>
+</svg>

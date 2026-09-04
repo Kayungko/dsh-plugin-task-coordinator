@@ -1,5 +1,10 @@
 <div align="center">
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/banner-dark.svg">
+  <img src="./assets/banner-light.svg" alt="task-coordinator" width="600">
+</picture>
+
 **Codex-style cross-task coordination · a supervisor plugin for DeepSeek Harness**
 
 [![DSH 0.1.2-alpha.1 verified](https://img.shields.io/badge/DSH-0.1.2--alpha.1%20verified-16A34A?style=for-the-badge)](docs/PROTOCOL.md)

@@ -1,5 +1,10 @@
 <div align="center">
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/banner-dark.svg">
+  <img src="./assets/banner-light.svg" alt="task-coordinator" width="600">
+</picture>
+
 **Codex 风格的跨任务协调 · DeepSeek Harness 的总控插件**
 
 [![DSH 0.1.2-alpha.1 实测](https://img.shields.io/badge/DSH-0.1.2--alpha.1%20实测-16A34A?style=for-the-badge)](docs/PROTOCOL.md)

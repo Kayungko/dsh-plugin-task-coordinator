@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="t">
+  <title id="t">task-coordinator badge</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1C2650"/>
+      <stop offset="1" stop-color="#0D1426"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="118" fill="url(#bg)"/>
+  <g transform="translate(256 256) scale(0.72) translate(-298 -261)">
+    <circle cx="256" cy="256" r="54" fill="#FFB224"/>
+    <path d="M 388.4 301.6 A 140 140 0 1 0 355 355" fill="none" stroke="#7FA3FF" stroke-width="13" stroke-linecap="round"/>
+    <circle cx="342.2" cy="145.7" r="27" fill="#7FA3FF"/>
+    <circle cx="137.3" cy="330.2" r="21" fill="#7FA3FF"/>
+    <path d="M 327.2 300.5 L 409.4 352" fill="none" stroke="#9AAED2" stroke-width="12" stroke-linecap="round" stroke-dasharray="0.1 26"/>
+    <path d="M 429.8 364.7 L 402.5 363 L 416.3 341 Z" fill="#9AAED2"/>
+    <circle cx="457.8" cy="382.1" r="17" fill="none" stroke="#7FA3FF" stroke-width="10"/>
+  </g>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="t">
+  <title id="t">task-coordinator — supervisor core with orbiting sessions and one spawning trajectory</title>
+  <!-- supervisor core -->
+  <circle cx="256" cy="256" r="54" fill="#FFB224"/>
+  <!-- orbit ring, open at the spawn gate (bottom-right) -->
+  <path d="M 388.4 301.6 A 140 140 0 1 0 355 355" fill="none" stroke="#5B8CFF" stroke-width="13" stroke-linecap="round"/>
+  <!-- sessions on orbit -->
+  <circle cx="342.2" cy="145.7" r="27" fill="#5B8CFF"/>
+  <circle cx="137.3" cy="330.2" r="21" fill="#5B8CFF"/>
+  <!-- spawn trajectory: dotted path, arrowhead, session-in-formation -->
+  <path d="M 327.2 300.5 L 409.4 352" fill="none" stroke="#8CA0C6" stroke-width="12" stroke-linecap="round" stroke-dasharray="0.1 26"/>
+  <path d="M 429.8 364.7 L 402.5 363 L 416.3 341 Z" fill="#8CA0C6"/>
+  <circle cx="457.8" cy="382.1" r="17" fill="none" stroke="#5B8CFF" stroke-width="10"/>
+</svg>
