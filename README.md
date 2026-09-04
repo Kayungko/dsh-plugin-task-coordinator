@@ -88,7 +88,7 @@ Read-only lookups can bypass the model entirely: `/tasks` (all tasks), `/tasks t
 
 ### Copying session ids — one click in the session header
 
-The plugin ships a small **web client module** (`client.js`, declared via `dsh.client` in `package.json`) that occupies the official `conversation.session.header.utilities` slot — the same seam the shipped `session-log-export` package uses. Every session header gets a **「复制 ID」** button that copies the session's full `sessionId` to the clipboard, ready to paste into `task_send`, `task_progress` or `/tasks <id>` on the supervisor side. (The sidebar's per-session context menu is hard-coded in the host and cannot be extended — field-verified — so the header slot is the sanctioned place.)
+The plugin ships a small **web client module** (`client.js`, declared via `dsh.client` in `package.json`) that occupies the official `conversation.session.header.utilities` slot — the same seam the shipped `session-log-export` package uses. Every session header gets a **「复制会话Id」** button (filled pill matching the Session-log button geometry: black-on-white in light mode, white-on-black in dark mode) that copies the session's full `sessionId` to the clipboard, ready to paste into `task_send`, `task_progress` or `/tasks <id>` on the supervisor side. (The sidebar's per-session context menu is hard-coded in the host and cannot be extended — field-verified — so the header slot is the sanctioned place.)
 
 ## Dispatch confirmation (the anti-black-box gate)
 

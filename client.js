@@ -25,18 +25,27 @@ window.__ModuleLoader__.load({
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 		let react = require("react");
 
+		// Filled (solid) design matching the shipped session-log button's
+		// geometry (border-radius 18px / height 32px / 13px text), with an
+		// inverted palette: dark fill + light text in light mode, light fill +
+		// dark text in dark mode, driven by the theme alias tokens so it
+		// follows the host theme registry (light / dark / system) without
+		// media queries.
 		const BUTTON_STYLE = {
 			display: "inline-flex",
 			alignItems: "center",
+			justifyContent: "center",
 			gap: 4,
-			fontSize: 12,
+			height: 32,
+			fontSize: 13,
 			lineHeight: "20px",
-			padding: "2px 8px",
-			borderRadius: 6,
-			border: "1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,0.35))",
-			background: "transparent",
+			padding: "6px 12px",
+			borderRadius: 18,
+			border: "none",
+			background: "var(--dsw-alias-label-primary, #0f1115)",
+			color: "var(--dsw-alias-label-primary-foreground, #fff)",
 			cursor: "pointer",
-			fontFamily: "inherit",
+			fontFamily: "var(--dsw-font-family, inherit)",
 			whiteSpace: "nowrap"
 		};
 
@@ -76,20 +85,13 @@ window.__ModuleLoader__.load({
 					setTimeout(() => setState("idle"), 1500);
 				});
 			};
-			const label = state === "copied" ? "已复制 ✓" : state === "failed" ? "复制失败" : "复制 ID";
+			const label = state === "copied" ? "已复制 ✓" : state === "failed" ? "复制失败" : "复制会话Id";
 			return react.createElement("button", {
 				type: "button",
-				title: `复制会话 ID（${sessionId}）`,
-				"aria-label": "复制会话 ID",
+				title: `复制会话Id（${sessionId}）`,
+				"aria-label": "复制会话Id",
 				onClick,
-				style: {
-					...BUTTON_STYLE,
-					color: state === "copied"
-						? "var(--dsw-alias-label-success, #16A34A)"
-						: state === "failed"
-							? "var(--dsw-alias-label-error, #DC2626)"
-							: "var(--dsw-alias-label-secondary, inherit)"
-				}
+				style: BUTTON_STYLE
 			}, label);
 		}
 
@@ -103,7 +105,7 @@ window.__ModuleLoader__.load({
 				name: "conversation.session.header.utilities",
 				id: "copy-session-id",
 				order: 1,
-				label: () => "复制会话 ID"
+				label: () => "复制会话Id"
 			}, CopySessionIdHeaderAction));
 		}
 		exports.apply = apply;

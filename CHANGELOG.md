@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.3] - 2026-09-04
+
+### Changed
+
+- **复制按钮改版**：文案改为「复制会话Id」；样式由描边改为**面性设计**——亮色模式黑底白字、暗色模式白底黑字（走宿主主题 alias token `--dsw-alias-label-primary` / `--dsw-alias-label-primary-foreground`，自动跟随 light/dark/system）；几何参数对齐「Session 日志」按钮（圆角 18px、高 32px、13px 文字、`--dsw-font-family`）。
+
 ## [0.8.2] - 2026-09-04
 
 ### Fixed
@@ -106,7 +112,8 @@
 
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
-[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.7.0...v0.8.0

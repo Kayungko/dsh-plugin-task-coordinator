@@ -87,7 +87,7 @@ pwsh install.ps1 -Source .
 
 ### 复制会话 ID —— 会话头部一键完成
 
-插件随包一个 **Web 客户端模块**（`client.js`，由 `package.json` 的 `dsh.client` 声明），占用官方 `conversation.session.header.utilities` 槽位——与自带的 `session-log-export` 同一条接缝。每个会话头部右侧会出现「复制 ID」按钮：一键复制当前会话的完整 `sessionId`，直接粘给总控侧的 `task_send`、`task_progress` 或 `/tasks <id>`。（侧栏会话行右键菜单为宿主硬编码，实测不可扩展，故选择有官方先例的头部槽位。）
+插件随包一个 **Web 客户端模块**（`client.js`，由 `package.json` 的 `dsh.client` 声明），占用官方 `conversation.session.header.utilities` 槽位——与自带的 `session-log-export` 同一条接缝。每个会话头部右侧会出现「复制会话Id」按钮（面性胶囊，几何参数与「Session 日志」一致：亮色黑底白字、暗色白底黑字）：一键复制当前会话的完整 `sessionId`，直接粘给总控侧的 `task_send`、`task_progress` 或 `/tasks <id>`。（侧栏会话行右键菜单为宿主硬编码，实测不可扩展，故选择有官方先例的头部槽位。）
 
 ## 派发确认（反信息黑盒闸门）
 
