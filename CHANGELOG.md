@@ -2,6 +2,16 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.9.0] - 2026-09-04
+
+### Added
+
+- **总控触发可靠性**（实测失效场景驱动）：用户在 goal 会话里说「可以随时使用 /task 插件分发子任务会话」但模型未派发（名称无法解析 + 授权非要求）。三层修复：① `task_spawn` / `task_spawn_batch` 工具描述加入总控触发语境（任意措辞、含「/task 插件」类指代，并指向 task-coordination 技能）；② 技能描述 frontmatter 增加口语别名表；③ SKILL.md 新增「指令识别」与「总控指令模板（含 /goal objective 写法）」两节，双 README 新增「怎么指挥总控」。实测佐证：steer 指令点名工具后，该 goal 会话立即派发 3 个子任务会话（team `sgame-dev-batch`，同工作区）。
+
+### Changed
+
+- **确认卡规范对齐宿主**：`task_confirm` 的 plan 现强制 `# ` 一级标题开头——与官方 `exit_plan_mode` 的 plan-review 校验同式（`/^#\s+\S/`）；卡片视觉本就走宿主官方 plan-review 渲染器（与 exit_plan_mode 同款），此改对齐的是内容规范。`task_confirm.plan` 参数描述同步注明。
+
 ## [0.8.4] - 2026-09-04
 
 ### Fixed
@@ -118,7 +128,8 @@
 
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
-[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.4...HEAD
+[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.4...v0.9.0
 [0.8.4]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.1...v0.8.2

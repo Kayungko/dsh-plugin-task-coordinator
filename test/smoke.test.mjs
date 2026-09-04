@@ -484,7 +484,7 @@ test('ops.spawnTask/spawnBatch: reportBack toggle', async () => {
   assert.equal(quiet.ok, true);
   assert.equal(harness.calls.prompt[0].content[0].text, 'solo work');
   // batch applies the convention to every item by default
-  const confirmed = await harness.ops.confirmPlan({ plan: 'plan' }, SUPERVISOR);
+  const confirmed = await harness.ops.confirmPlan({ plan: '# 派发计划' }, SUPERVISOR);
   const batch = await harness.ops.spawnBatch({
     tasks: [{ prompt: 'item one' }, { prompt: 'item two' }],
     confirmationId: confirmed.confirmationId,
@@ -497,7 +497,7 @@ test('ops.spawnTask/spawnBatch: reportBack toggle', async () => {
     assert.match(text, /session-super/);
   }
   // batch opt-out
-  const confirmed2 = await harness.ops.confirmPlan({ plan: 'plan' }, SUPERVISOR);
+  const confirmed2 = await harness.ops.confirmPlan({ plan: '# 派发计划' }, SUPERVISOR);
   const quietBatch = await harness.ops.spawnBatch({
     tasks: [{ prompt: 'item three' }, { prompt: 'item four' }],
     confirmationId: confirmed2.confirmationId,
@@ -607,7 +607,7 @@ test('ops.spawnTask: kickoff failure reports the orphan', async () => {
 test('ops.spawnBatch: creates the whole plan under one team (with confirmation)', async () => {
   const registry = new SpawnRegistry(tempRegistryPath());
   const harness = makeHarness({ registry });
-  const confirmed = await harness.ops.confirmPlan({ plan: '拆成两个独立模块' }, SUPERVISOR);
+  const confirmed = await harness.ops.confirmPlan({ plan: '# 拆成两个独立模块' }, SUPERVISOR);
   assert.equal(confirmed.ok, true);
   assert.equal(confirmed.approved, true);
   assert.ok(confirmed.confirmationId.startsWith('confirm-'));
@@ -641,29 +641,34 @@ test('ops.confirmPlan: decline, cancel and channel errors', async () => {
   // decline with custom feedback
   const declineChannel = async (request) => ({ answers: request.questions.map((question) => ({ id: question.id, selected: ['暂不派发'], custom: '先只做模块A' })) });
   const harnessDecline = makeHarness({ askUser: declineChannel });
-  const declined = await harnessDecline.ops.confirmPlan({ plan: 'plan' }, SUPERVISOR);
+  const declined = await harnessDecline.ops.confirmPlan({ plan: '# 派发计划' }, SUPERVISOR);
   assert.equal(declined.ok, true);
   assert.equal(declined.approved, false);
   assert.equal(declined.feedback, '先只做模块A');
   // decline without custom text falls back to the selected label
   const harnessPlainDecline = makeHarness({ askUser: async (request) => ({ answers: request.questions.map((question) => ({ id: question.id, selected: ['暂不派发'] })) }) });
-  assert.equal((await harnessPlainDecline.ops.confirmPlan({ plan: 'plan' }, SUPERVISOR)).feedback, '暂不派发');
+  assert.equal((await harnessPlainDecline.ops.confirmPlan({ plan: '# 派发计划' }, SUPERVISOR)).feedback, '暂不派发');
   // user closed the card
   const harnessCancel = makeHarness({ askUser: async () => { throw Object.assign(new Error('closed'), { code: 'ASK_CANCELLED' }); } });
-  const cancelled = await harnessCancel.ops.confirmPlan({ plan: 'plan' }, SUPERVISOR);
+  const cancelled = await harnessCancel.ops.confirmPlan({ plan: '# 派发计划' }, SUPERVISOR);
   assert.equal(cancelled.code, 'confirm-cancelled');
   assert.match(cancelled.error, /wait for the user/);
   // no UI connected
   const harnessNoProvider = makeHarness({ askUser: async () => { throw Object.assign(new Error('none'), { code: 'NO_PROVIDER' }); } });
-  assert.equal((await harnessNoProvider.ops.confirmPlan({ plan: 'plan' }, SUPERVISOR)).code, 'no-question-channel');
+  assert.equal((await harnessNoProvider.ops.confirmPlan({ plan: '# 派发计划' }, SUPERVISOR)).code, 'no-question-channel');
   // subagent caller cannot ask a human
   const harnessDelegated = makeHarness({ askUser: async () => { throw Object.assign(new Error('owned'), { code: 'DELEGATED_CALLER' }); } });
-  assert.equal((await harnessDelegated.ops.confirmPlan({ plan: 'plan' }, SUPERVISOR)).code, 'delegated-caller');
+  assert.equal((await harnessDelegated.ops.confirmPlan({ plan: '# 派发计划' }, SUPERVISOR)).code, 'delegated-caller');
   // channel missing entirely
   const harnessNoChannel = makeHarness({ askUser: null });
-  assert.equal((await harnessNoChannel.ops.confirmPlan({ plan: 'plan' }, SUPERVISOR)).code, 'no-question-channel');
+  assert.equal((await harnessNoChannel.ops.confirmPlan({ plan: '# 派发计划' }, SUPERVISOR)).code, 'no-question-channel');
   // invalid plan
   assert.equal((await harness.ops.confirmPlan({ plan: '  ' }, SUPERVISOR)).code, 'bad-request');
+  // host plan-review convention: body must be markdown starting with a # heading
+  const noHeading = await harness.ops.confirmPlan({ plan: '拆成两个独立模块' }, SUPERVISOR);
+  assert.equal(noHeading.code, 'bad-request');
+  assert.match(noHeading.error, /# heading/);
+  assert.equal((await harness.ops.confirmPlan({ plan: '## 二级标题开头' }, SUPERVISOR)).code, 'bad-request');
 });
 
 test('ops.spawnBatch: confirmation gate', async () => {
@@ -674,7 +679,7 @@ test('ops.spawnBatch: confirmation gate', async () => {
   assert.match(gated.error, /task_confirm/);
   // confirmation minted for another caller is not usable
   const other = { sessionId: 'session-other', cwd: '/work' };
-  const foreignConfirm = await harness.ops.confirmPlan({ plan: 'plan' }, other);
+  const foreignConfirm = await harness.ops.confirmPlan({ plan: '# 派发计划' }, other);
   const foreign = await harness.ops.spawnBatch({ tasks: [{ prompt: 'a' }, { prompt: 'b' }], confirmationId: foreignConfirm.confirmationId }, SUPERVISOR);
   assert.equal(foreign.code, 'confirmation-required');
   // below the threshold the gate does not engage
@@ -764,7 +769,7 @@ test('ops.spawnTask: recursion depth is tracked and capped', async () => {
   assert.equal(third.code, 'spawn-depth-exceeded');
   assert.match(third.error, /subagents/);
   // batch spawning obeys the same cap (confirmation acquired first)
-  const depthConfirm = await harness.ops.confirmPlan({ plan: 'plan' }, depth2Caller);
+  const depthConfirm = await harness.ops.confirmPlan({ plan: '# 派发计划' }, depth2Caller);
   const batchThird = await harness.ops.spawnBatch({ tasks: [{ prompt: 'x' }, { prompt: 'y' }], confirmationId: depthConfirm.confirmationId }, depth2Caller);
   assert.equal(batchThird.ok, false);
   assert.equal(batchThird.code, 'batch-all-failed');

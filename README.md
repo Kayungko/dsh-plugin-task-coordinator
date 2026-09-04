@@ -69,6 +69,17 @@ It calls `task_list` and returns the task list (an empty list is a valid answer)
 
 Uninstall: `pwsh install.ps1 -Source . -Uninstall` (also takes effect after restart).
 
+## Directing the supervisor (prompting that actually works)
+
+The model only coordinates when it can map your words to the tools. Vague prompts like "you may use the /task plugin whenever you want" are discretionary — sessions tend to default to working solo (field-verified failure mode). Two rules:
+
+1. **Name the tools, use imperative mood.** Example: "Split the remaining work with `task_spawn_batch` into parallel sub-task sessions (give them a team name); collect results with `task_wait`. Don't do everything in this session."
+2. **In /goal mode the coordination mandate must live inside the goal objective** — every continuation round re-anchors on that text alone. Recommended objective:
+
+> As the supervisor session, take over the remaining development: ① splittable work MUST be dispatched to parallel sub-task sessions via task_spawn_batch (attach a team name) — do not do everything yourself; ② collect results with task_wait and integrate them; ③ sub-task sessions may further parallelize with their own subagents; ④ push to remote main at every milestone.
+
+Loose wordings ("/task plugin", "coordinate things") are recognized too — the bundled skill carries an alias table and the tool descriptions carry trigger context since 0.9.0 — but the imperative template above is the reliable form, especially for goal objectives.
+
 ## The eight tools
 
 | Tool | Purpose |

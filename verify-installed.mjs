@@ -171,7 +171,7 @@ assert.equal(registrations.length, 8, `expected 8 tools, got ${registrations.len
 assert.equal(ctx.commandRegistrations.length, 1, 'expected the /tasks command');
 assert.equal(ctx.commandRegistrations[0].name, 'tasks');
 assert.ok(ctx.provides.taskCoordinator, 'taskCoordinator service not provided');
-assert.equal(ctx.provides.taskCoordinator.version, '0.8.4');
+assert.equal(ctx.provides.taskCoordinator.version, '0.9.0');
 // the skill mount is fire-and-forget (dynamic import); give it a macrotask
 await new Promise((resolve) => setImmediate(resolve));
 assert.equal(ctx.mountedPlugins.length, 1, 'expected the skill provider mount');
@@ -263,7 +263,7 @@ assert.equal(unapprovedBatch.ok, false);
 assert.equal(unapprovedBatch.code, 'confirmation-required');
 // ...so confirm first (approval card flow, auto-approved by the mock seam)
 const confirmResult = await byName.task_confirm.execute({
-  plan: '## 拆分方案\n- 任务1：批量甲（独立）\n- 任务2：批量乙（独立）',
+  plan: '# 拆分方案\n- 任务1：批量甲（独立）\n- 任务2：批量乙（独立）',
 }, supervisorExec);
 assert.equal(confirmResult.ok, true);
 assert.equal(confirmResult.approved, true);

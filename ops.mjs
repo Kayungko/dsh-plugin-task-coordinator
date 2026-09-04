@@ -499,6 +499,12 @@ export function createOps(deps) {
       if (typeof plan !== 'string' || plan.trim().length === 0) {
         return fail(OP_CODES.BAD_REQUEST, 'plan is required (markdown: what gets split into how many tasks and why)');
       }
+      // Host plan-review convention (dsh-plan-mode exit_plan_mode uses the same
+      // check): the reviewed body must be markdown starting with a # heading,
+      // so every card body renders with the same structure as official plans.
+      if (!/^#\s+\S/.test(plan.trim())) {
+        return fail(OP_CODES.BAD_REQUEST, 'plan must be markdown starting with a # heading (host plan-review convention, same as exit_plan_mode)');
+      }
       if (typeof askUser !== 'function') {
         return fail(OP_CODES.NO_QUESTION_CHANNEL, 'no user-questions channel composed; present the plan in plain text and get the go-ahead in chat');
       }

@@ -79,7 +79,7 @@ flowchart LR
 - **`client.js`**：Web 客户端模块（0.8.0）——插件唯一运行在**浏览器侧**的产物。不经 cordis 入口装配，而是由宿主 `dsh-client-modules` 依 `dsh.client` 声明 + `exports["./client"]` 原样装载（`window.__ModuleLoader__` factory 格式），占 `conversation.session.header.utilities` 槽渲染「复制会话Id」按钮（面性胶囊：亮色黑底白字 / 暗色白底黑字，走 `--dsw-alias-label-primary(-foreground)` 主题 token，几何对齐「Session 日志」）；与宿主侧九个模块完全解耦，缺槽位只影响该按钮；
 - **`index.mjs`**：唯一直接 import 宿主包（`dsh-tools` / `dsh-llm`）的装配层；`skills.mjs` 对 `dsh-skill-filesystem` 用**动态 import**；`ctx.get('userQuestions')` 在 `task_confirm` 调用时**惰性解析**（不硬注入，宿主缺该接缝时其余工具不受影响）。
 
-## 机制设计（0.4.0–0.8.4 新增）
+## 机制设计（0.4.0–0.9.0 新增）
 
 ### 派发确认链（0.6.0）
 
@@ -109,6 +109,10 @@ flowchart LR
 ### 部署卫生（0.8.4）
 
 `install.ps1` 复制技能目录必须拷**内容**（`skills\*` → 目标）而非目录本身：PowerShell `Copy-Item` 在目标目录已存在时会把源目录拷进去，0.4.0–0.8.3 由此产生嵌套 `skills/skills/`、正式路径 SKILL.md 从未更新（总控一直加载旧版操作手册）。脚本现拷内容并清理历史嵌套残留。
+
+### 总控触发可靠性（0.9.0）
+
+实测失效模式：用户在 goal 会话里含糊授权（「可以随时使用 /task 插件」）→ 名称无法解析 + 授权非要求 → 模型单干。三层加固：**工具描述**带总控触发语境（`task_spawn`/`task_spawn_batch` 描述点名「拆分/并行/协调任意措辞」并指向技能）、**技能描述**带口语别名表（/task 插件、派发子任务会话…）、**手册与 README** 带指令模板（含 /goal objective 写法）。佐证：点名工具的 steer 指令使该 goal 会话立即派发 3 个子任务会话（同工作区）。确认卡同时把 `plan` 收紧为 `# ` 一级标题开头，与官方 `exit_plan_mode` 的 plan-review 校验同式——渲染器本就是宿主官方同款，视觉一致性内禀，此改对齐内容规范。
 
 ## 降级策略
 

@@ -108,6 +108,10 @@ export function registerTools(ctx, ops, deps, config) {
   disposers.push(ctx.tools.register(defineTool({
     name: 'task_spawn',
     description: 'Create a brand-new task session, name it, and start it with a kickoff prompt. '
+      + 'This is how a supervisor session dispatches work: when the user asks to split work into sub-task sessions, '
+      + 'run things in parallel across sessions, or coordinate multiple tasks (any wording, including "/task plugin" '
+      + 'or "task-coordinator" references), use this tool family instead of doing everything in-session, and load the '
+      + 'task-coordination skill for the orchestration playbook. '
       + 'The new task appears in the session list immediately. Returns the new session id for follow-up coordination. '
       + spawnTitleRule,
     parameters: {
@@ -144,7 +148,7 @@ export function registerTools(ctx, ops, deps, config) {
       plan: {
         type: 'string',
         required: true,
-        description: 'The full dispatch plan in markdown: what gets split into how many task sessions, each task\'s scope and why it is independent. Rendered as the card body — this is what the user reviews.',
+        description: 'The full dispatch plan in markdown: what gets split into how many task sessions, each task\'s scope and why it is independent. Must start with a # heading (the host plan-review convention). Rendered as the card body — this is what the user reviews.',
       },
       question: { type: 'string', description: 'Optional one-line question shown above the plan. Defaults to asking whether to approve the dispatch.' },
     },
@@ -161,6 +165,7 @@ export function registerTools(ctx, ops, deps, config) {
   disposers.push(ctx.tools.register(defineTool({
     name: 'task_spawn_batch',
     description: 'Execute a decomposition plan: create several task sessions in one call, all optionally under one team. '
+      + 'The batch counterpart of task_spawn for parallel fan-out as a supervisor. '
       + 'Use after analyzing the work into independent pieces (no shared files, no producer/consumer dependency between them). '
       + 'Every item\'s prompt must be fully self-contained. One failed item does not abort the rest; the response lists per-item results. '
       + spawnTitleRule,
