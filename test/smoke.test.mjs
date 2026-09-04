@@ -13,6 +13,10 @@ import { createOps } from '../ops.mjs';
 import { registerTools } from '../tools.mjs';
 import { buildSpawnTitle, mmdd, truncateTopic, firstLine } from '../title.mjs';
 import { buildSkillsConfig, SKILL_PROVIDER_NAME, SKILLS_DIR } from '../skills.mjs';
+import { SpawnRegistry } from '../registry.mjs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 /* ------------------------------------------------------------------ */
 /* config                                                              */
@@ -158,16 +162,20 @@ test('skills: isolated provider config serves only the bundled dir', () => {
 test('safety: caller gates', () => {
   const config = resolveConfig();
   assert.equal(checkCaller({ sessionId: 'session-a' }, config), null);
-  assert.match(checkCaller({ sessionId: 'session-a', origin: 'subagent' }, config), /subagent/);
+  const subagentDeny = checkCaller({ sessionId: 'session-a', origin: 'subagent' }, config);
+  assert.equal(subagentDeny.code, 'subagent-caller-denied');
+  assert.match(subagentDeny.message, /subagent/);
   assert.equal(checkCaller({ sessionId: 'session-a', origin: 'subagent' }, resolveConfig({ allowSubagentUse: true })), null);
-  assert.match(checkCaller(null, config), /caller identity/);
+  const unknownDeny = checkCaller(null, config);
+  assert.equal(unknownDeny.code, 'caller-unknown');
+  assert.match(unknownDeny.message, /caller identity/);
 });
 
 test('safety: target gates', () => {
   const caller = { sessionId: 'session-a' };
-  assert.match(checkTarget(caller, undefined), /not found/);
-  assert.match(checkTarget(caller, { sessionId: 'session-a' }), /itself/);
-  assert.match(checkTarget(caller, { sessionId: 'session-b', origin: 'subagent' }), /subagent-owned/);
+  assert.equal(checkTarget(caller, undefined).code, 'target-not-found');
+  assert.equal(checkTarget(caller, { sessionId: 'session-a' }).code, 'self-send-denied');
+  assert.equal(checkTarget(caller, { sessionId: 'session-b', origin: 'subagent' }).code, 'subagent-target-denied');
   assert.equal(checkTarget(caller, { sessionId: 'session-b' }), null);
 });
 
@@ -178,11 +186,11 @@ test('safety: limiter rate + depth', () => {
   const limiter = new SendLimiter(config, () => depth, () => time);
   assert.equal(limiter.check('t1'), null);
   limiter.accept('t1');
-  assert.match(limiter.check('t1'), /rate limited/);
+  assert.equal(limiter.check('t1').code, 'rate-limited');
   time += 5000;
   assert.equal(limiter.check('t1'), null);
   depth = 2;
-  assert.match(limiter.check('t1'), /pending/);
+  assert.equal(limiter.check('t1').code, 'queue-full');
   limiter.forget('t1');
   depth = 0;
   assert.equal(limiter.check('t1'), null);
@@ -288,6 +296,7 @@ function makeHarness(overrides = {}) {
     createUserMessage,
     config,
     limiter,
+    ...(overrides.registry ? { registry: overrides.registry } : {}),
     uuid: () => 'req-test-1',
   });
   return harness;
@@ -384,6 +393,7 @@ test('ops.sendMessage: self-address rejected', async () => {
   addRow(harness, { sessionId: 'session-super' });
   const result = await harness.ops.sendMessage({ targetId: 'session-super', text: 'hi' }, SUPERVISOR);
   assert.equal(result.ok, false);
+  assert.equal(result.code, 'self-send-denied');
   assert.match(result.error, /itself/);
 });
 
@@ -419,6 +429,7 @@ test('ops.sendMessage: busy target maps to retryable error', async () => {
   addLiveAgent(harness, 'session-a', {}).rejectResolve = true;
   const result = await harness.ops.sendMessage({ targetId: 'session-a', text: 'x' }, SUPERVISOR);
   assert.equal(result.ok, false);
+  assert.equal(result.code, 'target-busy');
   assert.match(result.error, /retry/);
 });
 
@@ -447,6 +458,7 @@ test('ops.spawnTask: defaults cwd to caller; title derived from kickoff prompt',
   // no explicit title -> MMDD｜fallback-type｜first-line-of-prompt
   assert.match(result.title, /^\d{4}｜探索｜go$/);
   assert.equal(harness.calls.rename.length, 1);
+  assert.ok(String(result.correlationId).length > 0);
 });
 
 test('ops.spawnTask: kickoff failure reports the orphan', async () => {
@@ -476,6 +488,7 @@ test('ops.spawnTask: kickoff failure reports the orphan', async () => {
   });
   const result = await brokenOps.spawnTask({ prompt: 'go' }, SUPERVISOR);
   assert.equal(result.ok, false);
+  assert.equal(result.code, 'kickoff-rejected');
   assert.equal(result.sessionId, 'session-new');
   assert.match(result.error, /created but the kickoff prompt was rejected/);
 });
@@ -483,25 +496,28 @@ test('ops.spawnTask: kickoff failure reports the orphan', async () => {
 test('ops.waitFor: already idle settles immediately', async () => {
   const harness = makeHarness();
   addLiveAgent(harness, 'session-a', { status: 'idle' });
-  const result = await harness.ops.waitFor('session-a', {}, SUPERVISOR);
+  const result = await harness.ops.waitFor({ sessionId: 'session-a' }, SUPERVISOR);
   assert.equal(result.settled, true);
   assert.match(result.reason, /already idle/);
+  assert.equal(result.targets[0].idle, true);
 });
 
 test('ops.waitFor: cold session settles immediately', async () => {
   const harness = makeHarness();
-  const result = await harness.ops.waitFor('session-ghost', {}, SUPERVISOR);
+  const result = await harness.ops.waitFor({ sessionId: 'session-ghost' }, SUPERVISOR);
   assert.equal(result.settled, true);
-  assert.match(result.reason, /cold-idle/);
+  assert.match(result.reason, /already idle/);
+  assert.equal(result.targets[0].agentState, 'cold-idle');
 });
 
 test('ops.waitFor: times out on never-idle agent', async () => {
   const harness = makeHarness();
   const agent = addLiveAgent(harness, 'session-a', { status: 'running' });
   agent.idlePromise = new Promise(() => {}); // never resolves
-  const result = await harness.ops.waitFor('session-a', { timeoutMs: 50 }, SUPERVISOR);
+  const result = await harness.ops.waitFor({ sessionId: 'session-a', timeoutMs: 50 }, SUPERVISOR);
   assert.equal(result.settled, false);
   assert.match(result.reason, /timed out after 50ms/);
+  assert.match(result.reason, /session-a/);
 });
 
 test('ops.waitFor: settles when agent goes idle', async () => {
@@ -511,11 +527,62 @@ test('ops.waitFor: settles when agent goes idle', async () => {
   agent.idlePromise = new Promise((resolve) => {
     release = resolve;
   });
-  const pending = harness.ops.waitFor('session-a', { timeoutMs: 5000 }, SUPERVISOR);
+  const pending = harness.ops.waitFor({ sessionId: 'session-a', timeoutMs: 5000 }, SUPERVISOR);
   setTimeout(release, 10);
   const result = await pending;
   assert.equal(result.settled, true);
   assert.match(result.reason, /became idle/);
+});
+
+test('ops.waitFor: bad input is rejected with codes', async () => {
+  const harness = makeHarness();
+  const noTarget = await harness.ops.waitFor({}, SUPERVISOR);
+  assert.equal(noTarget.code, 'bad-request');
+  const badMode = await harness.ops.waitFor({ sessionId: 'session-a', mode: 'some' }, SUPERVISOR);
+  assert.equal(badMode.code, 'bad-request');
+});
+
+test('ops.waitFor: multi-target mode all settles only when every target is idle', async () => {
+  const harness = makeHarness();
+  const agentA = addLiveAgent(harness, 'session-a', { status: 'running' });
+  const agentB = addLiveAgent(harness, 'session-b', { status: 'running' });
+  let releaseA;
+  let releaseB;
+  agentA.idlePromise = new Promise((resolve) => { releaseA = resolve; });
+  agentB.idlePromise = new Promise((resolve) => { releaseB = resolve; });
+  const pending = harness.ops.waitFor({ sessionIds: ['session-a', 'session-b'], timeoutMs: 5000 }, SUPERVISOR);
+  setTimeout(releaseA, 5);
+  setTimeout(releaseB, 15);
+  const result = await pending;
+  assert.equal(result.settled, true);
+  assert.equal(result.count, 2);
+  assert.match(result.reason, /all targets became idle/);
+  assert.deepEqual(result.targets.map((target) => target.idle), [true, true]);
+});
+
+test('ops.waitFor: multi-target mode any settles on the first idle', async () => {
+  const harness = makeHarness();
+  const agentA = addLiveAgent(harness, 'session-a', { status: 'running' });
+  const agentB = addLiveAgent(harness, 'session-b', { status: 'running' });
+  let releaseA;
+  agentA.idlePromise = new Promise((resolve) => { releaseA = resolve; });
+  agentB.idlePromise = new Promise(() => {}); // never idle
+  const pending = harness.ops.waitFor({ sessionIds: ['session-a', 'session-b'], mode: 'any', timeoutMs: 5000 }, SUPERVISOR);
+  setTimeout(releaseA, 5);
+  const result = await pending;
+  assert.equal(result.settled, true);
+  assert.match(result.reason, /session-a became idle/);
+});
+
+test('ops.waitFor: multi-target timeout lists the still-running targets', async () => {
+  const harness = makeHarness();
+  const agentA = addLiveAgent(harness, 'session-a', { status: 'running' });
+  const agentB = addLiveAgent(harness, 'session-b', { status: 'running' });
+  agentA.idlePromise = new Promise(() => {});
+  agentB.idlePromise = new Promise(() => {});
+  const result = await harness.ops.waitFor({ sessionIds: ['session-a', 'session-b'], timeoutMs: 30 }, SUPERVISOR);
+  assert.equal(result.settled, false);
+  assert.match(result.reason, /session-a, session-b/);
 });
 
 test('ops.cancelTask: live cancel and cold refusal', async () => {
@@ -526,7 +593,97 @@ test('ops.cancelTask: live cancel and cold refusal', async () => {
   assert.equal(harness.calls.cancel.length, 1);
   const cold = await harness.ops.cancelTask('session-ghost', SUPERVISOR);
   assert.equal(cold.ok, false);
+  assert.equal(cold.code, 'target-cold');
   assert.match(cold.error, /no live agent/);
+});
+
+/* ------------------------------------------------------------------ */
+/* spawn registry (workstream memory)                                  */
+/* ------------------------------------------------------------------ */
+
+function tempRegistryPath() {
+  return join(mkdtempSync(join(tmpdir(), 'task-coord-test-')), 'registry.json');
+}
+
+test('registry: record, get, listTeam, teams', () => {
+  const registry = new SpawnRegistry(tempRegistryPath(), { now: () => 1000 });
+  registry.record('session-a', { team: '重构', title: '0904｜功能｜模块A', promptExcerpt: 'do A' });
+  registry.record('session-b', { team: '重构', promptExcerpt: 'do B' });
+  registry.record('session-c', { promptExcerpt: 'solo' });
+  assert.equal(registry.get('session-a').team, '重构');
+  assert.equal(registry.get('session-a').title, '0904｜功能｜模块A');
+  assert.deepEqual(registry.listTeam('重构'), ['session-a', 'session-b']);
+  assert.deepEqual(registry.teams(), ['重构']);
+  assert.equal(registry.get('session-x'), undefined);
+});
+
+test('registry: persists to disk and reloads', () => {
+  const file = tempRegistryPath();
+  const first = new SpawnRegistry(file, { now: () => 1000 });
+  first.record('session-a', { team: '迁移' });
+  const second = new SpawnRegistry(file);
+  assert.equal(second.get('session-a').team, '迁移');
+  const payload = JSON.parse(readFileSync(file, 'utf8'));
+  assert.equal(payload.version, 1);
+});
+
+test('registry: corrupt file degrades to empty and is preserved', () => {
+  const file = tempRegistryPath();
+  writeFileSync(file, '{ this is not json', 'utf8');
+  const registry = new SpawnRegistry(file, { now: () => 42 });
+  assert.equal(registry.get('session-a'), undefined);
+  registry.record('session-a', { team: 'x' });
+  assert.equal(registry.get('session-a').team, 'x');
+  const reread = new SpawnRegistry(file);
+  assert.equal(reread.get('session-a').team, 'x');
+});
+
+test('registry: prunes oldest beyond maxEntries', () => {
+  const registry = new SpawnRegistry(tempRegistryPath(), { maxEntries: 2, now: () => 1000 });
+  registry.record('session-1', { createdAt: 1 });
+  registry.record('session-2', { createdAt: 2 });
+  registry.record('session-3', { createdAt: 3 });
+  assert.equal(registry.get('session-1'), undefined);
+  assert.equal(registry.get('session-2').createdAt, 2);
+  assert.equal(registry.get('session-3').createdAt, 3);
+});
+
+test('ops.spawnTask: records team durably; list filters by team', async () => {
+  const harness = makeHarness({ registry: new SpawnRegistry(tempRegistryPath()) });
+  const spawned = await harness.ops.spawnTask({ title: '功能｜模块A', prompt: 'do A', team: '支付重构' }, SUPERVISOR);
+  assert.equal(spawned.ok, true);
+  assert.equal(spawned.team, '支付重构');
+  const all = await harness.ops.listTasks({}, SUPERVISOR);
+  const row = all.tasks.find((task) => task.sessionId === spawned.sessionId);
+  assert.equal(row.team, '支付重构');
+  const grouped = await harness.ops.listTasks({ team: '支付重构' }, SUPERVISOR);
+  assert.equal(grouped.team, '支付重构');
+  assert.deepEqual(grouped.tasks.map((task) => task.sessionId), [spawned.sessionId]);
+  const empty = await harness.ops.listTasks({ team: '不存在' }, SUPERVISOR);
+  assert.equal(empty.count, 0);
+});
+
+test('ops.progress: annotates team from the registry', async () => {
+  const registry = new SpawnRegistry(tempRegistryPath());
+  const harness = makeHarness({ registry });
+  addRow(harness, { sessionId: 'session-a' });
+  addLiveAgent(harness, 'session-a', { status: 'idle' });
+  registry.record('session-a', { team: '迁移' });
+  const result = await harness.ops.progress('session-a', SUPERVISOR);
+  assert.equal(result.team, '迁移');
+});
+
+test('ops.sendMessage: reference is quoted visibly and messageId returned', async () => {
+  const harness = makeHarness();
+  addRow(harness, { sessionId: 'session-a' });
+  const agent = addLiveAgent(harness, 'session-a');
+  const result = await harness.ops.sendMessage({ targetId: 'session-a', text: '改成方案 B', reference: 'msg-1' }, SUPERVISOR);
+  assert.equal(result.ok, true);
+  assert.equal(result.reference, 'msg-1');
+  assert.equal(result.messageId, 'msg-1'); // first created message in this harness
+  const delivered = agent.followups[0];
+  assert.ok(delivered.content[0].text.startsWith('[reference: msg-1]'));
+  assert.match(delivered.content[0].text, /改成方案 B/);
 });
 
 /* ------------------------------------------------------------------ */
@@ -550,14 +707,25 @@ test('registerTools: six tools with delegation', async () => {
   const dispose = registerTools(ctx, harness.ops, { defineTool }, resolveConfig());
   assert.deepEqual(registered.map((tool) => tool.name), ['task_list', 'task_progress', 'task_send', 'task_spawn', 'task_wait', 'task_cancel']);
   assert.deepEqual(registered[0].parameters.sessionId, undefined);
+  assert.ok(registered[0].parameters.team); // task_list team filter
   assert.equal(registered[2].parameters.sessionId.required, true);
   assert.deepEqual(registered[2].parameters.mode.enum, ['queue', 'steer']);
+  assert.ok(registered[2].parameters.reference); // task_send correlation
+  assert.ok(registered[3].parameters.team); // task_spawn workstream
+  assert.deepEqual(registered[4].parameters.sessionIds.items, { type: 'string' });
+  assert.deepEqual(registered[4].parameters.mode.enum, ['all', 'any']);
+  assert.notEqual(registered[4].parameters.sessionId.required, true); // now optional (sessionIds alternative)
   // delegation through execute()
   addRow(harness, { sessionId: 'session-a' });
+  addRow(harness, { sessionId: 'session-super' });
   const listResult = await registered[0].execute({}, { agent: { id: 'session-super', session: { header: {} } } });
   assert.equal(listResult.ok, true);
   const denyResult = await registered[2].execute({ sessionId: 'session-super', message: 'hi' }, { agent: { id: 'session-super', session: { header: {} } } });
   assert.equal(denyResult.ok, false);
+  assert.equal(denyResult.code, 'self-send-denied');
+  const waitBad = await registered[4].execute({}, { agent: { id: 'session-super', session: { header: {} } } });
+  assert.equal(waitBad.ok, false);
+  assert.equal(waitBad.code, 'bad-request');
   assert.equal(registered.length, 6);
   dispose();
   assert.equal(registered.length, 0);

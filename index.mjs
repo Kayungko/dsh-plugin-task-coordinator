@@ -13,6 +13,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { resolveConfig } from './config.mjs';
@@ -20,13 +22,22 @@ import { SendLimiter } from './safety.mjs';
 import { createOps } from './ops.mjs';
 import { registerTools } from './tools.mjs';
 import { mountCoordinatorSkills } from './skills.mjs';
+import { SpawnRegistry } from './registry.mjs';
 
 export const name = 'task-coordinator';
 export const inject = ['agents', 'tools', 'sessionController'];
 
+/** Default registry path: <DSH_HOME or ~/.dsh>/task-coordinator/registry.json */
+export function defaultRegistryFile() {
+  const dshHome = process.env.DSH_HOME && process.env.DSH_HOME.trim().length > 0
+    ? process.env.DSH_HOME.trim()
+    : join(homedir(), '.dsh');
+  return join(dshHome, 'task-coordinator', 'registry.json');
+}
+
 export function apply(ctx, input = {}) {
   const config = resolveConfig(input);
-  ctx.provide('taskCoordinator', { config, version: '0.1.0' });
+  ctx.provide('taskCoordinator', { config, version: '0.3.0' });
   if (!config.enabled) {
     ctx.logger?.info('task-coordinator: disabled by config; no tools registered');
     return;
@@ -44,12 +55,19 @@ export function apply(ctx, input = {}) {
     if (!agent) return 0;
     return (agent.inbox?.nextTurn?.length ?? 0) + (agent.inbox?.nextStep?.length ?? 0);
   });
+  const registry = new SpawnRegistry(
+    typeof config.registryFile === 'string' && config.registryFile.trim().length > 0
+      ? config.registryFile.trim()
+      : defaultRegistryFile(),
+    { maxEntries: config.registryMaxEntries },
+  );
   const ops = createOps({
     sessionController,
     agents,
     createUserMessage,
     config,
     limiter,
+    registry,
     uuid: () => `task-coord-${randomUUID()}`,
   });
   const dispose = registerTools(ctx, ops, { defineTool }, config);

@@ -3,7 +3,7 @@
 本文档描述 `dsh-plugin-task-coordinator` 依赖的 DSH 宿主契约与六个 `task_*` 工具的投递语义。来源为插件开发期的宿主源码通读 + 真实宿主端到端实测（**DSH 0.1.2-alpha.1**，2026-09-04 于 `~/.dsh/profiles/desktop`）。
 
 ⚠️ 宿主版本是硬约束：契约按 0.1.2-alpha.1 验证，宿主大版本升级后须重跑 `verify-installed.mjs` 再放行。
-📌 标注 **[0.3.0 新增]** 的章节对应工作区在研版本：工具面语义已定型，回归测试补齐中——引用前以当前代码为准。
+📌 标注 **[0.3.0 新增]** 的章节为 0.3.0 引入（对应回归测试已全绿，见 §10）。
 
 ## 1. 宿主注入面（cordis）
 
@@ -145,7 +145,7 @@
 
 ## 10. 验证记录
 
-- **单元**：33 个测试（`test/smoke.test.mjs`，mock 宿主，`node --test`）——0.2.0 面全绿；0.3.0 新增面的回归补齐中；
+- **单元**：44 个测试（`test/smoke.test.mjs`，mock 宿主，`node --test`）全绿——含 0.3.0 新增面的 11 个回归（注册表持久化/损坏容错/裁剪、team 编组、reference 引用、多目标等待、错误码分支）；
 - **集成**：`verify-installed.mjs` 在**安装位置**用真实 `@deepseek-ai/dsh-tools` / `dsh-llm` / `dsh-skill-filesystem` 包 + mock ctx 跑 `apply()` 全链路（schema 编译、消息构造、6 工具、安全守卫、卸载清理）；
 - **端到端**（重启后真实宿主，0.2.0 面）：六项能力全部实测通过——运行中 `steer` 纠偏、取消后恢复、自环守卫；`task_spawn` kickoff 曾发现 prompt 门面缺 AbortSignal 的缺陷，修复后复验通过（`SPAWN_FIXED_OK`）；
 - spawn 命名规则升级（`MMDD｜类型｜主题`）回归：33/33 单元 + 集成验证通过（实测任务 `0904｜修复｜回归套件`）。

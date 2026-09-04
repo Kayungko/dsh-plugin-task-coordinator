@@ -11,6 +11,8 @@
 import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const require = createRequire(import.meta.url);
@@ -123,10 +125,14 @@ const ctx = {
 };
 
 // 4. apply the plugin for real (with the real defineTool compiling schemas)
-// minSendIntervalMs: 0 so back-to-back verification sends are not rate limited
-plugin.apply(ctx, { minSendIntervalMs: 0 });
+// minSendIntervalMs: 0 so back-to-back verification sends are not rate limited;
+// registryFile: temp dir so the user's real registry is untouched.
+const verifyDir = mkdtempSync(join(tmpdir(), 'task-coord-verify-'));
+const registryFile = join(verifyDir, 'registry.json');
+plugin.apply(ctx, { minSendIntervalMs: 0, registryFile });
 assert.equal(registrations.length, 6, `expected 6 tools, got ${registrations.length}`);
 assert.ok(ctx.provides.taskCoordinator, 'taskCoordinator service not provided');
+assert.equal(ctx.provides.taskCoordinator.version, '0.3.0');
 // the skill mount is fire-and-forget (dynamic import); give it a macrotask
 await new Promise((resolve) => setImmediate(resolve));
 assert.equal(ctx.mountedPlugins.length, 1, 'expected the skill provider mount');
@@ -161,11 +167,19 @@ console.log('task_progress      : OK ->', progressResult.recent.at(-1).text);
 
 const sendResult = await byName.task_send.execute({ sessionId: 'session-worker', message: 'please also cover edge cases' }, supervisorExec);
 assert.equal(sendResult.ok, true);
+assert.ok(typeof sendResult.messageId === 'string' && sendResult.messageId.length > 0, 'messageId missing');
 const delivered = liveAgents.get('session-worker').delivered.at(-1);
 assert.equal(delivered.via, 'followup');
 assert.equal(delivered.message.source.kind, 'coordinator');
 assert.equal(delivered.message.source.senderSessionId, 'session-super');
-console.log('task_send          : OK -> coordinator message delivered, role:', delivered.message.role);
+console.log('task_send          : OK -> coordinator message delivered, messageId:', sendResult.messageId);
+
+const refResult = await byName.task_send.execute({ sessionId: 'session-worker', message: '改成方案 B', reference: sendResult.messageId }, supervisorExec);
+assert.equal(refResult.ok, true);
+assert.equal(refResult.reference, sendResult.messageId);
+const refDelivered = liveAgents.get('session-worker').delivered.at(-1);
+assert.ok(refDelivered.message.content[0].text.startsWith(`[reference: ${sendResult.messageId}]`), 'reference annotation missing');
+console.log('task_send (ref)    : OK -> reference quoted visibly');
 
 const steerResult = await byName.task_send.execute({ sessionId: 'session-worker', message: 'keep api stable', mode: 'steer' }, supervisorExec);
 assert.equal(steerResult.ok, true);
@@ -174,18 +188,25 @@ console.log('task_send (steer)  : OK');
 
 const selfResult = await byName.task_send.execute({ sessionId: 'session-super', message: 'loop?' }, supervisorExec);
 assert.equal(selfResult.ok, false);
+assert.equal(selfResult.code, 'self-send-denied');
 assert.match(selfResult.error, /itself/);
-console.log('self-guard         : OK ->', selfResult.error);
+console.log('self-guard         : OK ->', selfResult.code, '/', selfResult.error);
 
-const spawnResult = await byName.task_spawn.execute({ prompt: 'run the regression suite', title: '修复｜回归套件' }, supervisorExec);
+const spawnResult = await byName.task_spawn.execute({ prompt: 'run the regression suite', title: '修复｜回归套件', team: '验证编组' }, supervisorExec);
 assert.equal(spawnResult.ok, true);
 assert.match(spawnResult.title, /^\d{4}｜修复｜回归套件$/);
+assert.equal(spawnResult.team, '验证编组');
 assert.ok(sessions.has(spawnResult.sessionId));
-console.log('task_spawn         : OK ->', spawnResult.sessionId, 'title:', spawnResult.title, '| visible in list:', (await byName.task_list.execute({}, supervisorExec)).tasks.some((task) => task.sessionId === spawnResult.sessionId));
+assert.ok(typeof spawnResult.correlationId === 'string' && spawnResult.correlationId.length > 0);
+assert.ok(existsSync(registryFile), 'registry file was not written');
+const teamList = await byName.task_list.execute({ team: '验证编组' }, supervisorExec);
+assert.deepEqual(teamList.tasks.map((task) => task.sessionId), [spawnResult.sessionId]);
+console.log('task_spawn         : OK ->', spawnResult.sessionId, 'title:', spawnResult.title, '| team listed:', teamList.tasks.length === 1);
 
-const waitResult = await byName.task_wait.execute({ sessionId: 'session-worker', timeoutMs: 1000 }, supervisorExec);
+const waitResult = await byName.task_wait.execute({ sessionIds: ['session-worker', spawnResult.sessionId], mode: 'all', timeoutMs: 1000 }, supervisorExec);
 assert.equal(waitResult.settled, true);
-console.log('task_wait          : OK ->', waitResult.reason);
+assert.equal(waitResult.count, 2);
+console.log('task_wait (multi)  : OK ->', waitResult.reason);
 
 const cancelResult = await byName.task_cancel.execute({ sessionId: 'session-worker' }, supervisorExec);
 assert.equal(cancelResult.ok, true);

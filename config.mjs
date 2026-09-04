@@ -25,6 +25,13 @@ export const DEFAULTS = Object.freeze({
   titleMaxTopicChars: 16,
   /** IANA time zone for the MMDD date prefix. */
   titleTimeZone: 'Asia/Shanghai',
+  /**
+   * Durable spawn registry (workstream/team memory surviving host restarts).
+   * Default file path: <DSH_HOME or ~/.dsh>/task-coordinator/registry.json
+   */
+  registryFile: '',
+  /** Max spawn records kept in the registry (oldest pruned first). */
+  registryMaxEntries: 500,
   /** Max pending inbox messages a single target may hold before task_send refuses. */
   maxQueuePerTask: 5,
   /** Minimum interval between task_send/task_spawn kickoffs toward one target. */
@@ -56,8 +63,9 @@ export function resolveConfig(input = {}) {
     'excerptChars',
     'progressTailMessages',
     'titleMaxTopicChars',
+    'registryMaxEntries',
   ];
-  const strings = ['titleFallbackType', 'titleTimeZone'];
+  const strings = ['titleFallbackType', 'titleTimeZone', 'registryFile'];
   for (const key of booleans) {
     if (source[key] !== undefined) {
       if (typeof source[key] !== 'boolean') throw new TypeError(`task-coordinator config "${key}" must be boolean`);
@@ -88,6 +96,7 @@ export function resolveConfig(input = {}) {
   }
   if (config.maxQueuePerTask < 1) config.maxQueuePerTask = 1;
   if (config.titleMaxTopicChars < 1) config.titleMaxTopicChars = 1;
+  if (config.registryMaxEntries < 1) config.registryMaxEntries = 1;
   if (config.waitMaxTimeoutMs < config.waitDefaultTimeoutMs) {
     config.waitDefaultTimeoutMs = config.waitMaxTimeoutMs;
   }

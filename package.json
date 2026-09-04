@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-task-coordinator",
-  "version": "0.2.0",
-  "description": "Codex-style cross-task coordination for DeepSeek Harness: list, inspect, spawn, message and steer top-level sessions from a supervisor agent. Ships the task-coordination supervisor skill.",
+  "version": "0.3.0",
+  "description": "Codex-style cross-task coordination for DeepSeek Harness: list, inspect, spawn, message and steer top-level sessions from a supervisor agent, with team workstreams, correlation ids and a durable spawn registry. Ships the task-coordination supervisor skill.",
   "type": "module",
   "main": "index.mjs",
   "exports": {
@@ -12,11 +12,14 @@
     "config.mjs",
     "safety.mjs",
     "title.mjs",
+    "registry.mjs",
     "ops.mjs",
     "tools.mjs",
     "skills.mjs",
     "skills/",
     "cordis.patch.yml",
+    "CHANGELOG.md",
+    "docs/",
     "README.md",
     "README.zh-CN.md",
     "LICENSE",
@@ -29,7 +32,7 @@
     }
   },
   "scripts": {
-    "check": "node --check index.mjs && node --check config.mjs && node --check safety.mjs && node --check title.mjs && node --check ops.mjs && node --check tools.mjs && node --check skills.mjs",
+    "check": "node --check index.mjs && node --check config.mjs && node --check safety.mjs && node --check title.mjs && node --check registry.mjs && node --check ops.mjs && node --check tools.mjs && node --check skills.mjs",
     "test": "node --test test/smoke.test.mjs"
   },
   "peerDependencies": {

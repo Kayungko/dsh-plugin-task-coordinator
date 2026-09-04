@@ -18,11 +18,11 @@ whenToUse: >
 
 | 工具 | 用途 |
 |------|------|
-| `task_list` | 查找任务，取 sessionId；可过滤、可含子代理（默认不含） |
+| `task_list` | 查找任务，取 sessionId；可按 `team` 过滤、可含子代理（默认不含） |
 | `task_progress` | 深入读一个任务：状态、队列中的消息、对话尾部、todos、goal |
-| `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`） |
-| `task_spawn` | 新建任务 + 命名 + 开场提示词，立即出现在会话列表 |
-| `task_wait` | 阻塞直到任务空闲（或超时）；读最终结果/交接前使用 |
+| `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`），可用 `reference` 关联先前指令 |
+| `task_spawn` | 新建任务 + 命名 + 开场提示词，立即出现在会话列表；可用 `team` 编组 |
+| `task_wait` | 阻塞直到任务空闲（或超时）；支持多目标（`sessionIds` + `mode: all/any`） |
 | `task_cancel` | 取消目标的活动轮次，保留其排队消息 |
 
 ## 投递语义（关键）
@@ -31,20 +31,31 @@ whenToUse: >
 - 目标**运行中**：消息排队，在边界被消费——
   - `queue`（默认）：下一个**轮次**边界（当前轮做完后处理）；
   - `steer`：下一个**步骤**边界（更快的中途纠偏）。
+- **投递 ≠ 消费**：`delivered: true` 只表示消息进了收件箱。超时、异常或长时间无响应时，
+  先用 `task_progress` 看队列和对话尾部**对账**（消息是否已被消费、任务是否已按它行动），
+  再决定补发还是继续等——**绝不把不确定的投递当新消息盲发**。
 - 结论：不需要轮询。投递后 `task_wait` 等空闲，再 `task_progress` 读结果。
+
+## 关联与追溯
+
+- `task_send` 返回 `messageId`，`task_spawn` 返回 `correlationId`——记下需要被引用的那一条。
+- 纠偏/续接先前指令时，给 `task_send` 传 `reference: <messageId 或 correlationId>`，
+  引用会以可见注释行随消息送达，目标任务能明确知道"这是对哪条指令的修正"。
 
 ## 编排模式
 
 ### 1. 扇出—等待—汇总（并行派发）
 
 ```
-对每个子工作: task_spawn({ prompt: 完整指令, title: '类型｜主题' })
-对每个子任务: task_wait({ sessionId })
+对每个子工作: task_spawn({ prompt: 完整指令, title: '类型｜主题', team: '本次工作流名' })
+一次等待全部: task_wait({ sessionIds: [...], mode: 'all' })
 对每个子任务: task_progress({ sessionId }) 读最终输出
 汇总成一份结果
 ```
 
-spawn 的 prompt 必须自包含（子任务看不到你的上下文）：写清目标、约束、期望的输出形式。
+- spawn 的 prompt 必须自包含（子任务看不到你的上下文）：写清目标、约束、期望的输出形式。
+- 给同批任务同一个 `team`：之后 `task_list({ team })` 随时找回整组，宿主重启后依然有效。
+- 需要"任何一个先完成就先处理"时用 `mode: 'any'`。
 
 ### 2. 监督—纠偏
 
@@ -83,9 +94,25 @@ task_progress 看进度 → 发现跑偏 →
 - 子任务默认继承你的工作目录；需要别的项目时在 `cwd` 参数里显式指定。
 - `task_wait` 超时未空闲不代表失败：任务还在跑，可再次等待或先做别的。
 
+## 错误码速览
+
+失败返回 `{ ok: false, code, error }`，按 `code` 分支而不是读文案：
+
+| code | 含义 | 建议动作 |
+|------|------|---------|
+| `self-send-denied` | 不能给自己发消息 | 改发给其他任务 |
+| `subagent-caller-denied` / `subagent-target-denied` | 子代理身份被栅栏拦截 | 用顶层会话协调 |
+| `target-not-found` | 目标不存在或已消失 | `task_list` 重新定位 |
+| `rate-limited` | 同一目标限频（默认 2s） | 稍等重试 |
+| `queue-full` | 目标排队已满（默认 5 条） | 先 `task_wait` 让它消费 |
+| `target-busy` | 目标正短暂忙于准入其他工作 | 稍等重试 |
+| `kickoff-rejected` | spawn 的会话已建但开场词被拒 | 用 `task_send` 给该会话补发指令 |
+| `target-cold` | 目标无活动代理，无可取消 | 无需处理 |
+
 ## 反模式
 
 - ❌ 用 `task_send` 轮询进度——用 `task_progress` 读，用 `task_wait` 等。
 - ❌ 给运行中的任务发 `queue` 消息期望立刻生效——需要立刻纠偏用 `steer`。
+- ❌ 超时后不查状态就重发同一条消息——先 `task_progress` 对账，避免重复指令。
 - ❌ spawn 时写一行模糊指令（"帮我处理一下"）——子任务没有上下文，指令必须自包含。
 - ❌ 把长文档整段塞进 spawn 标题——标题只放类型和主题，内容放 prompt。

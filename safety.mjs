@@ -10,19 +10,32 @@
  */
 
 /** @typedef {{ sessionId: string; origin?: string }} TaskRef */
+/** @typedef {{ code: string; message: string }} GuardDenial */
+
+/** Stable machine-readable denial codes (absorbed from SCDP's typed errors). */
+export const DENIAL_CODES = Object.freeze({
+  CALLER_UNKNOWN: 'caller-unknown',
+  SUBAGENT_CALLER_DENIED: 'subagent-caller-denied',
+  TARGET_NOT_FOUND: 'target-not-found',
+  TARGET_INVALID: 'target-invalid',
+  SELF_SEND_DENIED: 'self-send-denied',
+  SUBAGENT_TARGET_DENIED: 'subagent-target-denied',
+  RATE_LIMITED: 'rate-limited',
+  QUEUE_FULL: 'queue-full',
+});
 
 /**
  * Validate the calling agent is allowed to coordinate at all.
  * @param {{ sessionId: string; origin?: string }} caller
  * @param {{ allowSubagentUse: boolean }} config
- * @returns {string | null} rejection reason, or null when allowed
+ * @returns {GuardDenial | null} denial with a stable code, or null when allowed
  */
 export function checkCaller(caller, config) {
   if (!caller || typeof caller.sessionId !== 'string' || caller.sessionId.length === 0) {
-    return 'caller identity unavailable (no agent context)';
+    return { code: DENIAL_CODES.CALLER_UNKNOWN, message: 'caller identity unavailable (no agent context)' };
   }
   if (!config.allowSubagentUse && caller.origin === 'subagent') {
-    return 'subagent sessions are not allowed to use task coordination (config: allowSubagentUse)';
+    return { code: DENIAL_CODES.SUBAGENT_CALLER_DENIED, message: 'subagent sessions are not allowed to use task coordination (config: allowSubagentUse)' };
   }
   return null;
 }
@@ -31,18 +44,18 @@ export function checkCaller(caller, config) {
  * Validate one coordination target for the given caller.
  * @param {TaskRef} caller
  * @param {TaskRef | undefined} target resolved target summary; undefined = not found
- * @returns {string | null} rejection reason, or null when allowed
+ * @returns {GuardDenial | null} denial with a stable code, or null when allowed
  */
 export function checkTarget(caller, target) {
-  if (target === undefined) return 'target session not found';
+  if (target === undefined) return { code: DENIAL_CODES.TARGET_NOT_FOUND, message: 'target session not found' };
   if (typeof target.sessionId !== 'string' || target.sessionId.length === 0) {
-    return 'target session has no id';
+    return { code: DENIAL_CODES.TARGET_INVALID, message: 'target session has no id' };
   }
   if (target.sessionId === caller.sessionId) {
-    return 'refusing to send a message to the calling session itself';
+    return { code: DENIAL_CODES.SELF_SEND_DENIED, message: 'refusing to send a message to the calling session itself' };
   }
   if (target.origin === 'subagent') {
-    return 'target is a subagent-owned session; coordinate with top-level tasks only';
+    return { code: DENIAL_CODES.SUBAGENT_TARGET_DENIED, message: 'target is a subagent-owned session; coordinate with top-level tasks only' };
   }
   return null;
 }
@@ -67,14 +80,17 @@ export class SendLimiter {
 
   /**
    * @param {string} targetId
-   * @returns {string | null} rejection reason, or null when the send may proceed
+   * @returns {GuardDenial | null} denial with a stable code, or null when the send may proceed
    */
   check(targetId) {
     const currentTime = this.now();
     const last = this.lastSentAt.get(targetId);
     if (last !== undefined && currentTime - last < this.config.minSendIntervalMs) {
       const waitMs = this.config.minSendIntervalMs - (currentTime - last);
-      return `rate limited: wait ~${Math.ceil(waitMs / 100) / 10}s before messaging this task again`;
+      return {
+        code: DENIAL_CODES.RATE_LIMITED,
+        message: `rate limited: wait ~${Math.ceil(waitMs / 100) / 10}s before messaging this task again`,
+      };
     }
     let depth;
     try {
@@ -83,7 +99,10 @@ export class SendLimiter {
       return null; // probe failure must never block a send
     }
     if (Number.isFinite(depth) && depth >= this.config.maxQueuePerTask) {
-      return `target already has ${depth} pending message(s) (max ${this.config.maxQueuePerTask}); wait for it to consume them`;
+      return {
+        code: DENIAL_CODES.QUEUE_FULL,
+        message: `target already has ${depth} pending message(s) (max ${this.config.maxQueuePerTask}); wait for it to consume them`,
+      };
     }
     return null;
   }

@@ -36,9 +36,10 @@ export function registerTools(ctx, ops, deps, config) {
 
   disposers.push(ctx.tools.register(defineTool({
     name: 'task_list',
-    description: 'List coordination-visible tasks (top-level sessions) with their stable session ids, run status, titles, todo and goal progress. Use this to discover a task before reading or messaging it.',
+    description: 'List coordination-visible tasks (top-level sessions) with their stable session ids, run status, titles, todo and goal progress. Tasks spawned through task_spawn carry their team when one was given. Use this to discover a task before reading or messaging it.',
     parameters: {
       filter: { type: 'string', description: 'Optional case-insensitive substring matched against session id, title, and cwd.' },
+      team: { type: 'string', description: 'Only list tasks spawned under this team (workstream). Requires the task to be recorded in the spawn registry.' },
       includeSubagents: { type: 'boolean', description: 'Also list subagent-origin sessions. Defaults to false.' },
       limit: { type: 'integer', description: 'Max rows to return, newest first. Defaults to 50.' },
     },
@@ -47,7 +48,7 @@ export function registerTools(ctx, ops, deps, config) {
       try {
         return await ops.listTasks(args, callerFrom(exec), exec?.signal);
       } catch (error) {
-        return { ok: false, error: error?.message ?? String(error) };
+        return { ok: false, code: 'internal', error: error?.message ?? String(error) };
       }
     },
   })));
@@ -63,18 +64,19 @@ export function registerTools(ctx, ops, deps, config) {
       try {
         return await ops.progress(args.sessionId, callerFrom(exec), exec?.signal);
       } catch (error) {
-        return { ok: false, error: error?.message ?? String(error) };
+        return { ok: false, code: 'internal', error: error?.message ?? String(error) };
       }
     },
   })));
 
   disposers.push(ctx.tools.register(defineTool({
     name: 'task_send',
-    description: 'Send a visible follow-up prompt to another task. Mode "queue" (default): starts a new round when the target is idle, otherwise queues at the next turn boundary. Mode "steer": mid-run course correction delivered at the next step boundary. The message appears in the target\'s transcript and is attributed to this coordinating session.',
+    description: 'Send a visible follow-up prompt to another task. Mode "queue" (default): starts a new round when the target is idle, otherwise queues at the next turn boundary. Mode "steer": mid-run course correction delivered at the next step boundary. The message appears in the target\'s transcript and is attributed to this coordinating session. Returns a messageId; delivery means accepted into the inbox, not yet consumed — verify with task_progress before resending.',
     parameters: {
       sessionId: { type: 'string', required: true, description: 'Target task session id.' },
       message: { type: 'string', required: true, description: 'Follow-up prompt text: corrections, new instructions, or handoff context.' },
       mode: { type: 'string', enum: ['queue', 'steer'], description: 'Delivery mode. queue = next turn (default); steer = next step of the running turn.' },
+      reference: { type: 'string', description: 'Optional id of an earlier instruction (a messageId or correlationId returned by task_send/task_spawn) that this message corrects or continues; it is quoted visibly in the delivered message.' },
     },
     output: OUTPUT,
     async execute(args, exec) {
@@ -83,9 +85,10 @@ export function registerTools(ctx, ops, deps, config) {
           targetId: args.sessionId,
           text: args.message,
           mode: args.mode ?? 'queue',
+          reference: args.reference,
         }, callerFrom(exec));
       } catch (error) {
-        return { ok: false, error: error?.message ?? String(error) };
+        return { ok: false, code: 'internal', error: error?.message ?? String(error) };
       }
     },
   })));
@@ -116,6 +119,7 @@ export function registerTools(ctx, ops, deps, config) {
           + 'Keep the topic short and concrete. If unsure of the type, pass only the topic.',
       },
       cwd: { type: 'string', description: 'Working directory for the new task. Defaults to the caller\'s working directory.' },
+      team: { type: 'string', description: 'Optional team (workstream) name grouping related spawned tasks; recorded durably and usable as a task_list filter, so the group survives a host restart.' },
       sessionId: { type: 'string', description: 'Optional explicit session id; creation is idempotent for the same id and cwd.' },
       agentPreset: { type: 'string', description: 'Optional agent preset name for the new task.' },
     },
@@ -124,24 +128,32 @@ export function registerTools(ctx, ops, deps, config) {
       try {
         return await ops.spawnTask(args, callerFrom(exec), exec?.signal);
       } catch (error) {
-        return { ok: false, error: error?.message ?? String(error) };
+        return { ok: false, code: 'internal', error: error?.message ?? String(error) };
       }
     },
   })));
 
   disposers.push(ctx.tools.register(defineTool({
     name: 'task_wait',
-    description: 'Wait until one task becomes idle (its current round finishes) or the timeout expires. Use before reading a final result or handing work over. Returns the settled state and waited time.',
+    description: 'Wait until task(s) become idle (current round finishes) or the timeout expires. Pass one sessionId, or several sessionIds with mode "all" (settle when every target is idle; the fan-out default) or "any" (settle when the first target is idle). Use before reading final results or handing work over. A timeout means the tasks are still running — check task_progress before resending anything.',
     parameters: {
-      sessionId: { type: 'string', required: true, description: 'Target task session id.' },
+      sessionId: { type: 'string', description: 'Single target task session id. Use this or sessionIds.' },
+      sessionIds: { type: 'array', items: { type: 'string' }, description: 'Several target task session ids to wait on together. Use this or sessionId.' },
+      mode: { type: 'string', enum: ['all', 'any'], description: 'Multi-target settle mode. all = every target idle (default); any = first target idle.' },
       timeoutMs: { type: 'integer', description: 'Max milliseconds to wait. Defaults to the configured default and is capped.' },
     },
     output: OUTPUT,
     async execute(args, exec) {
       try {
-        return await ops.waitFor(args.sessionId, { timeoutMs: args.timeoutMs, signal: exec?.signal }, callerFrom(exec));
+        return await ops.waitFor({
+          sessionId: args.sessionId,
+          sessionIds: args.sessionIds,
+          timeoutMs: args.timeoutMs,
+          mode: args.mode ?? 'all',
+          signal: exec?.signal,
+        }, callerFrom(exec));
       } catch (error) {
-        return { ok: false, error: error?.message ?? String(error) };
+        return { ok: false, code: 'internal', error: error?.message ?? String(error) };
       }
     },
   })));
@@ -157,7 +169,7 @@ export function registerTools(ctx, ops, deps, config) {
       try {
         return await ops.cancelTask(args.sessionId, callerFrom(exec));
       } catch (error) {
-        return { ok: false, error: error?.message ?? String(error) };
+        return { ok: false, code: 'internal', error: error?.message ?? String(error) };
       }
     },
   })));
