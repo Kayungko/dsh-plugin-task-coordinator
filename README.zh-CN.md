@@ -9,10 +9,10 @@
 
 [![DSH 0.1.2-rc.1 实测](https://img.shields.io/badge/DSH-0.1.2--rc.1%20实测-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![59 个单元测试](https://img.shields.io/badge/tests-59%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![62 个单元测试](https://img.shields.io/badge/tests-62%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
-[这是什么](#这是什么) · [快速开始](#快速开始) · [八个工具](#八个工具) · [架构设计](docs/ARCHITECTURE.md) · [主机契约](docs/PROTOCOL.md) · [更新日志](CHANGELOG.md) · [English](README.md)
+[这是什么](#这是什么) · [快速开始](#快速开始) · [九个工具](#九个工具) · [架构设计](docs/ARCHITECTURE.md) · [主机契约](docs/PROTOCOL.md) · [更新日志](CHANGELOG.md) · [English](README.md)
 
 </div>
 
@@ -53,7 +53,7 @@ pwsh install.ps1 -Source .
 
 脚本做三件事：把插件复制进 profile 的 `node_modules/`（不跑 `pnpm install`、不碰 lockfile）、在 profile manifest 登记依赖与 bundle、登记 `.package-map.json`——**改前全部自动备份**到 `backups/<时间戳>/`。
 
-装完**重启 DSH Desktop**即可，任何会话都能使用八个工具和 `/tasks` 命令。
+装完**重启 DSH Desktop**即可，任何会话都能使用九个工具和 `/tasks` 命令。
 
 > 💡 `install.ps1` 的默认 `-Source` 是 `$PSScriptRoot/plugin`（工作区布局）；在插件仓库根目录直接运行要**显式传 `-Source .`**。
 > 重复执行是安全的：文件覆盖幂等，manifest 登记自动去重。
@@ -79,7 +79,7 @@ pwsh install.ps1 -Source .
 
 「/task 插件」「协调一下」这类模糊说法也能识别——0.9.0 起技能描述带别名表、工具描述带触发语境——但上面的模板才是可靠写法，goal 的 objective 尤其要用它。
 
-## 八个工具
+## 九个工具
 
 | 工具 | 用途 |
 |---|---|
@@ -88,6 +88,7 @@ pwsh install.ps1 -Source .
 | `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`；`reference` 关联先前指令），返回 `messageId` |
 | `task_spawn` | 创建 + 命名 + 启动新任务（标题遵循 `MMDD｜类型｜主题`；可用 `team` 编组），返回 `correlationId`；默认附带回报约定；新任务默认挂进调用方所在工作区（显式传 `cwd` 则不挂工作区） |
 | `task_confirm` | 把拆分/派发方案做成**交互式审批卡**弹给用户，阻塞直到回答；批准返回单次 `confirmationId` |
+| `task_confirm_select` | 把任务清单做成**多选卡**（宿主中性提问 UI，非琥珀审批卡）：用户勾选要派发哪些（部分派发），可在自定义输入行写调整意见；批准把 `confirmationId` 绑定到选中子集，`task_spawn_batch` 强制校验（夹带未勾选标题报 `confirmation-mismatch`） |
 | `task_spawn_batch` | 一次批量创建整个拆分方案（`tasks: [{title?, prompt}]` + 统一 `team`）；达到确认阈值时必须携带 `confirmationId`；单条失败不中止整批 |
 | `task_wait` | 阻塞直到目标任务空闲（或超时）；支持多目标（`sessionIds` + `mode: all/any`） |
 | `task_cancel` | 取消目标的活动轮次（保留其排队消息） |
@@ -107,6 +108,8 @@ pwsh install.ps1 -Source .
 1. 总控调用 `task_confirm({ plan })`，把完整拆分方案（markdown）做成**计划审批卡**——走宿主 `ctx.userQuestions` 接缝，与官方 `exit_plan_mode` 同构，**零客户端改动**；
 2. 批准 → 返回绑定调用会话的单次 `confirmationId`；拒绝 → 用户意见随工具结果回传；关窗 → `confirm-cancelled`（总控停手等待）；
 3. 达到 `confirmBatchThreshold`（默认 2）的 `task_spawn_batch` **没有有效 `confirmationId` 直接拒绝**（`confirmation-required`）。凭证单次使用、成功派发后消耗；全部失败不消耗——同一方案不会问用户两遍。
+
+**多选变体（0.10.0）**：任务之间可独立取舍时，用 `task_confirm_select({ tasks: [{title, scope}] })`——任务清单渲染进宿主**中性**提问 UI（多选 + 自定义输入行，无琥珀审批卡样式），用户勾选要派发哪些。凭证携带选中子集，`task_spawn_batch` 拒绝任何用户未勾选的标题（`confirmation-mismatch`）。完整方案请先在聊天里给出——通用卡片承载任务清单，不承载计划全文。
 
 降级：无 UI 连接时返回 `no-question-channel`，内置技能指引总控改用聊天文字确认；子代理调用方收到 `delegated-caller`（子代理不能发起人工确认）。
 
@@ -169,9 +172,9 @@ pwsh install.ps1 -Source .
 
 ## 内置技能：task-coordination
 
-插件随包携带一个技能（`skills/task-coordination/SKILL.md`），教总控**何时、如何**编排八个工具：投递语义、拆分判据、确认语义、扇出/监督/交接模式、递归治理、命名规则、反模式。按需加载，不协调就不占上下文。
+插件随包携带一个技能（`skills/task-coordination/SKILL.md`），教总控**何时、如何**编排九个工具：投递语义、拆分判据、确认语义、扇出/监督/交接模式、递归治理、命名规则、反模式。按需加载，不协调就不占上下文。
 
-挂载走隔离 `dsh-skill-filesystem` provider（同 `@openviking/dsh-memory-plugin` 先例）：`providerName: 'task-coordinator'`、`includeDefaultRoots: false`、只见本插件的 `skills/` 目录。效果：编辑热加载、不遮蔽项目/用户技能、随插件卸载一起消失。provider 包不可用时降级为一条 warning，**八个工具照常工作**。
+挂载走隔离 `dsh-skill-filesystem` provider（同 `@openviking/dsh-memory-plugin` 先例）：`providerName: 'task-coordinator'`、`includeDefaultRoots: false`、只见本插件的 `skills/` 目录。效果：编辑热加载、不遮蔽项目/用户技能、随插件卸载一起消失。provider 包不可用时降级为一条 warning，**九个工具照常工作**。
 
 ## 配置（cordis.yml / patch）
 
@@ -227,7 +230,7 @@ dsh-plugin-task-coordinator/
 ├── title.mjs           spawn 命名规则（纯模块）
 ├── registry.mjs        持久 spawn 注册表（近似原子写 · 损坏容错）
 ├── ops.mjs             会话操作 · DI 工厂
-├── tools.mjs           八个 task_* 工具注册
+├── tools.mjs           九个 task_* 工具注册
 ├── commands.mjs        /tasks 斜杠命令（直接执行，不进模型）
 ├── client.js           Web 客户端模块：复制会话 ID 头部按钮（dsh.client）
 ├── skills.mjs          隔离技能挂载（动态 import，fire-and-forget）

@@ -9,10 +9,10 @@
 
 [![DSH 0.1.2-rc.1 verified](https://img.shields.io/badge/DSH-0.1.2--rc.1%20verified-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![59 unit tests](https://img.shields.io/badge/tests-59%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![62 unit tests](https://img.shields.io/badge/tests-62%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
-[What is this](#what-is-this) · [Quick start](#quick-start) · [Tools](#the-eight-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Changelog](CHANGELOG.md) · [中文](README.zh-CN.md)
+[What is this](#what-is-this) · [Quick start](#quick-start) · [Tools](#the-nine-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Changelog](CHANGELOG.md) · [中文](README.zh-CN.md)
 
 </div>
 
@@ -54,7 +54,7 @@ pwsh install.ps1 -Source .
 
 The script does three things: copies the plugin into the profile's `node_modules/` (no `pnpm install`, the lockfile stays untouched), registers the dependency + bundle in the profile manifest, and updates `.package-map.json` — **everything is backed up first** into `backups/<timestamp>/`.
 
-**Restart DSH Desktop** afterwards — any session can then use the eight tools and the `/tasks` command.
+**Restart DSH Desktop** afterwards — any session can then use the nine tools and the `/tasks` command.
 
 > 💡 `install.ps1` defaults `-Source` to `$PSScriptRoot/plugin` (workspace layout); when running from the plugin repo itself, **pass `-Source .` explicitly**.
 > Re-running is safe: file copies are idempotent and manifest registration de-duplicates.
@@ -80,7 +80,7 @@ The model only coordinates when it can map your words to the tools. Vague prompt
 
 Loose wordings ("/task plugin", "coordinate things") are recognized too — the bundled skill carries an alias table and the tool descriptions carry trigger context since 0.9.0 — but the imperative template above is the reliable form, especially for goal objectives.
 
-## The eight tools
+## The nine tools
 
 | Tool | Purpose |
 |---|---|
@@ -89,6 +89,7 @@ Loose wordings ("/task plugin", "coordinate things") are recognized too — the 
 | `task_send` | Deliver a visible follow-up prompt (`mode: queue` or `steer`; `reference` links an earlier instruction); returns a `messageId` |
 | `task_spawn` | Create + name + kick off a brand-new task (title follows the `MMDD｜type｜topic` rule; groupable via `team`); returns a `correlationId`; appends the report-back convention by default; the child attaches to the caller's workspace unless an explicit `cwd` is given |
 | `task_confirm` | Present a decomposition/dispatch plan as an **interactive approval card** and block until the user answers; approval mints a single-use `confirmationId` |
+| `task_confirm_select` | Present the proposed task list as a **multi-select card** (host's neutral question UI — no amber styling): the user checks which tasks to dispatch (partial dispatch) with an optional custom-feedback row; approval binds the `confirmationId` to the selected subset and `task_spawn_batch` enforces it (`confirmation-mismatch` otherwise) |
 | `task_spawn_batch` | Spawn a whole decomposition plan in one call (`tasks: [{title?, prompt}]` + one `team`); requires the `confirmationId` once the batch reaches the confirmation threshold; one failed item does not abort the rest |
 | `task_wait` | Block until one task becomes idle (or timeout); multi-target (`sessionIds` + `mode: all/any`) |
 | `task_cancel` | Cancel the target's active turn, keeping its queued messages |
@@ -108,6 +109,8 @@ Batch dispatches used to be a silent model decision — not anymore:
 1. The supervisor calls `task_confirm({ plan })` with the full decomposition plan (markdown); the user gets a **plan-review card** rendered through the host's `ctx.userQuestions` seam — the same isomorphic path the official `exit_plan_mode` uses, so **no client-side changes are needed**;
 2. Approve → the tool returns a `confirmationId` bound to the calling session; decline → the user's feedback comes back as the tool result; close the card → `confirm-cancelled` (the supervisor stops and waits);
 3. `task_spawn_batch` at or above `confirmBatchThreshold` (default 2) **refuses to run without a valid `confirmationId`** (`confirmation-required`). The credential is single-use and consumed on success; an all-failed batch keeps it so the user is not asked twice for the same plan.
+
+**Multi-select variant (0.10.0)**: when the tasks are independently droppable, `task_confirm_select({ tasks: [{title, scope}] })` renders the list in the host's **neutral** question UI (multi-select + custom input row, no amber plan-review styling) and the user checks which tasks to dispatch. The minted credential carries the selected subset, and `task_spawn_batch` rejects any batch title the user did not check (`confirmation-mismatch`). Present the full plan in chat first — the generic card carries the task list, not the plan body.
 
 Degradation: with no UI connected, `task_confirm` returns `no-question-channel` and the bundled skill instructs the supervisor to fall back to a plain-text confirmation in chat. Subagent callers get `delegated-caller` (a child agent cannot ask a human).
 
@@ -172,7 +175,7 @@ Example: `修复｜对账精度` → `0904｜修复｜对账精度`.
 
 The plugin ships one skill (`skills/task-coordination/SKILL.md`) teaching the supervisor *when and how* to orchestrate the tools: delivery semantics, decomposition criteria, confirmation semantics, fan-out/supervise/handoff patterns, recursion governance, the naming rule, anti-patterns. Loaded on demand — it costs no context until coordination actually happens.
 
-Mounting follows the shipped `@openviking/dsh-memory-plugin` precedent — an **isolated** `dsh-skill-filesystem` provider with `providerName: 'task-coordinator'`, `includeDefaultRoots: false`, seeing only this plugin's `skills/` directory. Consequences: hot-reload on edit, no shadowing of project/user skills, disappears on uninstall. If the provider package is unavailable the mount degrades to a warning — **the eight tools keep working**.
+Mounting follows the shipped `@openviking/dsh-memory-plugin` precedent — an **isolated** `dsh-skill-filesystem` provider with `providerName: 'task-coordinator'`, `includeDefaultRoots: false`, seeing only this plugin's `skills/` directory. Consequences: hot-reload on edit, no shadowing of project/user skills, disappears on uninstall. If the provider package is unavailable the mount degrades to a warning — **the nine tools keep working**.
 
 ## Configuration (cordis.yml / patch)
 
@@ -228,7 +231,7 @@ dsh-plugin-task-coordinator/
 ├── title.mjs           spawn-title rule (pure module)
 ├── registry.mjs        durable spawn registry (near-atomic writes, corruption-tolerant)
 ├── ops.mjs             session operations · DI factory
-├── tools.mjs           eight task_* tool registrations
+├── tools.mjs           nine task_* tool registrations
 ├── commands.mjs        /tasks slash command (direct execution, no model turn)
 ├── client.js           web client module: copy-session-id header button (dsh.client)
 ├── skills.mjs          isolated skill mount (dynamic import, fire-and-forget)

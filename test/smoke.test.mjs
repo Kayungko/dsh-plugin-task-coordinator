@@ -671,6 +671,93 @@ test('ops.confirmPlan: decline, cancel and channel errors', async () => {
   assert.equal((await harness.ops.confirmPlan({ plan: '## 二级标题开头' }, SUPERVISOR)).code, 'bad-request');
 });
 
+test('ops.confirmSelect: multi-select subset approval + batch subset enforcement (0.10.0)', async () => {
+  const registry = new SpawnRegistry(tempRegistryPath());
+  const harness = makeHarness({ registry });
+  // validation
+  assert.equal((await harness.ops.confirmSelect({ tasks: [] }, SUPERVISOR)).code, 'bad-request');
+  assert.equal((await harness.ops.confirmSelect({ tasks: [{ title: '功能｜甲' }, { title: '功能｜甲' }] }, SUPERVISOR)).code, 'bad-request');
+  assert.equal((await harness.ops.confirmSelect({ tasks: [{ scope: '没有标题' }] }, SUPERVISOR)).code, 'bad-request');
+  // default mock channel approves the FIRST option only → subset of 1 out of 3
+  const confirmed = await harness.ops.confirmSelect({
+    tasks: [{ title: '功能｜模块A', scope: '独立甲' }, { title: '功能｜模块B' }, '功能｜模块C'],
+  }, SUPERVISOR);
+  assert.equal(confirmed.ok, true);
+  assert.equal(confirmed.approved, true);
+  assert.deepEqual(confirmed.selected, ['功能｜模块A']);
+  assert.ok(confirmed.confirmationId.startsWith('confirm-'));
+  // the generic question carries multiSelect so the UI renders checkboxes
+  // (asserted through the request the channel received)
+  // batch containing an unapproved title → confirmation-mismatch
+  const mismatch = await harness.ops.spawnBatch({
+    tasks: [{ title: '功能｜模块A', prompt: 'do A' }, { title: '功能｜模块B', prompt: 'do B' }],
+    confirmationId: confirmed.confirmationId,
+  }, SUPERVISOR);
+  assert.equal(mismatch.code, 'confirmation-mismatch');
+  assert.match(mismatch.error, /功能｜模块B/);
+  // untitled batch item cannot be matched to the approved subset either
+  const untitled = await harness.ops.spawnBatch({
+    tasks: [{ prompt: 'no title' }],
+    confirmationId: confirmed.confirmationId,
+  }, SUPERVISOR);
+  assert.equal(untitled.code, 'confirmation-mismatch');
+  // exact subset passes (size 1 < threshold → gate not fired, credential survives)
+  const okBatch = await harness.ops.spawnBatch({
+    tasks: [{ title: '功能｜模块A', prompt: 'do A' }],
+    confirmationId: confirmed.confirmationId,
+  }, SUPERVISOR);
+  assert.equal(okBatch.ok, true);
+  assert.equal(okBatch.startedCount, 1);
+});
+
+test('ops.confirmSelect: feedback, empty selection, cancel, channel errors (0.10.0)', async () => {
+  const harness = makeHarness();
+  // nothing selected but custom feedback given
+  const harnessCustomOnly = makeHarness({ askUser: async (request) => ({ answers: request.questions.map((question) => ({ id: question.id, selected: [], custom: '把 B 和 C 合并成一个' })) }) });
+  const customOnly = await harnessCustomOnly.ops.confirmSelect({ tasks: [{ title: '功能｜甲' }] }, SUPERVISOR);
+  assert.equal(customOnly.approved, false);
+  assert.equal(customOnly.feedback, '把 B 和 C 合并成一个');
+  // nothing selected at all
+  const harnessEmpty = makeHarness({ askUser: async (request) => ({ answers: request.questions.map((question) => ({ id: question.id, selected: [] })) }) });
+  assert.equal((await harnessEmpty.ops.confirmSelect({ tasks: [{ title: '功能｜甲' }] }, SUPERVISOR)).feedback, '未选择任何任务');
+  // user closed the card
+  const harnessCancel = makeHarness({ askUser: async () => { throw Object.assign(new Error('closed'), { code: 'ASK_CANCELLED' }); } });
+  assert.equal((await harnessCancel.ops.confirmSelect({ tasks: [{ title: '功能｜甲' }] }, SUPERVISOR)).code, 'confirm-cancelled');
+  // no channel / no UI
+  const harnessNoChannel = makeHarness({ askUser: null });
+  assert.equal((await harnessNoChannel.ops.confirmSelect({ tasks: [{ title: '功能｜甲' }] }, SUPERVISOR)).code, 'no-question-channel');
+  const harnessNoProvider = makeHarness({ askUser: async () => { throw Object.assign(new Error('none'), { code: 'NO_PROVIDER' }); } });
+  assert.equal((await harnessNoProvider.ops.confirmSelect({ tasks: [{ title: '功能｜甲' }] }, SUPERVISOR)).code, 'no-question-channel');
+  // subagent caller cannot ask a human
+  const harnessDelegated = makeHarness({ askUser: async () => { throw Object.assign(new Error('owned'), { code: 'DELEGATED_CALLER' }); } });
+  assert.equal((await harnessDelegated.ops.confirmSelect({ tasks: [{ title: '功能｜甲' }] }, SUPERVISOR)).code, 'delegated-caller');
+});
+
+test('ops.confirmSelect: gated batch consumes a subset credential (0.10.0)', async () => {
+  const registry = new SpawnRegistry(tempRegistryPath());
+  const harness = makeHarness({
+    registry,
+    askUser: async (request) => ({ answers: request.questions.map((question) => ({ id: question.id, selected: question.options.slice(0, 2).map((option) => option.label) })) }),
+  });
+  const confirmed = await harness.ops.confirmSelect({
+    tasks: [{ title: '功能｜甲' }, { title: '功能｜乙' }, { title: '功能｜丙' }],
+  }, SUPERVISOR);
+  assert.deepEqual(confirmed.selected, ['功能｜甲', '功能｜乙']);
+  // batch at the confirmation threshold consumes the credential on success
+  const batch = await harness.ops.spawnBatch({
+    tasks: [{ title: '功能｜甲', prompt: 'do 甲' }, { title: '功能｜乙', prompt: 'do 乙' }],
+    confirmationId: confirmed.confirmationId,
+  }, SUPERVISOR);
+  assert.equal(batch.ok, true);
+  assert.equal(batch.startedCount, 2);
+  // single-use: the same credential no longer passes the gate
+  const reuse = await harness.ops.spawnBatch({
+    tasks: [{ title: '功能｜甲', prompt: 'do 甲 again' }, { title: '功能｜乙', prompt: 'do 乙 again' }],
+    confirmationId: confirmed.confirmationId,
+  }, SUPERVISOR);
+  assert.equal(reuse.code, 'confirmation-required');
+});
+
 test('ops.spawnBatch: confirmation gate', async () => {
   const harness = makeHarness();
   // missing confirmationId on a gated batch
@@ -1066,7 +1153,7 @@ test('registerTools: eight tools with delegation', async () => {
   // stub defineTool: minimal contract mirror (name/description/parameters/output/execute)
   const defineTool = (options) => options;
   const dispose = registerTools(ctx, harness.ops, { defineTool }, resolveConfig());
-  assert.deepEqual(registered.map((tool) => tool.name), ['task_list', 'task_progress', 'task_send', 'task_spawn', 'task_confirm', 'task_spawn_batch', 'task_wait', 'task_cancel']);
+  assert.deepEqual(registered.map((tool) => tool.name), ['task_list', 'task_progress', 'task_send', 'task_spawn', 'task_confirm', 'task_confirm_select', 'task_spawn_batch', 'task_wait', 'task_cancel']);
   const byName = Object.fromEntries(registered.map((tool) => [tool.name, tool]));
   assert.deepEqual(byName.task_list.parameters.sessionId, undefined);
   assert.ok(byName.task_list.parameters.team); // task_list team filter
@@ -1076,6 +1163,9 @@ test('registerTools: eight tools with delegation', async () => {
   assert.ok(byName.task_spawn.parameters.team); // task_spawn workstream
   assert.ok(byName.task_spawn.parameters.reportBack); // result push-back convention
   assert.equal(byName.task_confirm.parameters.plan.required, true);
+  assert.equal(byName.task_confirm_select.parameters.tasks.required, true); // 0.10.0 multi-select confirmation
+  assert.ok(byName.task_confirm_select.parameters.question);
+  assert.equal(byName.task_confirm_select.parameters.tasks.items.additionalProperties, false); // host schema compiler requires explicit
   assert.equal(byName.task_spawn_batch.parameters.tasks.required, true);
   assert.deepEqual(byName.task_spawn_batch.parameters.tasks.items.type, 'object');
   assert.equal(byName.task_spawn_batch.parameters.tasks.items.additionalProperties, false);
@@ -1103,7 +1193,10 @@ test('registerTools: eight tools with delegation', async () => {
   const confirmBad = await byName.task_confirm.execute({ plan: ' ' }, exec);
   assert.equal(confirmBad.ok, false);
   assert.equal(confirmBad.code, 'bad-request');
-  assert.equal(registered.length, 8);
+  const selectBad = await byName.task_confirm_select.execute({ tasks: [] }, exec);
+  assert.equal(selectBad.ok, false);
+  assert.equal(selectBad.code, 'bad-request');
+  assert.equal(registered.length, 9);
   dispose();
   assert.equal(registered.length, 0);
 });

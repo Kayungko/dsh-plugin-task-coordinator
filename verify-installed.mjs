@@ -167,11 +167,11 @@ const ctx = {
 const verifyDir = mkdtempSync(join(tmpdir(), 'task-coord-verify-'));
 const registryFile = join(verifyDir, 'registry.json');
 plugin.apply(ctx, { minSendIntervalMs: 0, registryFile });
-assert.equal(registrations.length, 8, `expected 8 tools, got ${registrations.length}`);
+assert.equal(registrations.length, 9, `expected 9 tools, got ${registrations.length}`);
 assert.equal(ctx.commandRegistrations.length, 1, 'expected the /tasks command');
 assert.equal(ctx.commandRegistrations[0].name, 'tasks');
 assert.ok(ctx.provides.taskCoordinator, 'taskCoordinator service not provided');
-assert.equal(ctx.provides.taskCoordinator.version, '0.9.0');
+assert.equal(ctx.provides.taskCoordinator.version, '0.10.0');
 // the skill mount is fire-and-forget (dynamic import); give it a macrotask
 await new Promise((resolve) => setImmediate(resolve));
 assert.equal(ctx.mountedPlugins.length, 1, 'expected the skill provider mount');
@@ -303,6 +303,37 @@ assert.equal(reusedBatch.code, 'confirmation-required');
 const batchBad = await byName.task_spawn_batch.execute({ tasks: [] }, supervisorExec);
 assert.equal(batchBad.code, 'bad-request');
 console.log('task_confirm       : OK -> approved,', confirmResult.confirmationId, '(single-use enforced)');
+
+// 0.10.0 multi-select confirmation: the auto-approving mock seam picks the
+// FIRST option, i.e. a one-task subset of the two proposed tasks.
+const selectResult = await byName.task_confirm_select.execute({
+  tasks: [
+    { title: '功能｜选择甲', scope: '独立子任务（用于多选确认验证）' },
+    { title: '功能｜选择乙' },
+  ],
+}, supervisorExec);
+assert.equal(selectResult.ok, true);
+assert.equal(selectResult.approved, true);
+assert.deepEqual(selectResult.selected, ['功能｜选择甲']);
+assert.ok(selectResult.confirmationId.startsWith('confirm-'));
+// subset enforcement: a batch containing the unapproved title is rejected
+const selectMismatch = await byName.task_spawn_batch.execute({
+  tasks: [
+    { title: '功能｜选择甲', prompt: 'selected task' },
+    { title: '功能｜选择乙', prompt: 'unselected task' },
+  ],
+  confirmationId: selectResult.confirmationId,
+}, supervisorExec);
+assert.equal(selectMismatch.ok, false);
+assert.equal(selectMismatch.code, 'confirmation-mismatch');
+// the exact approved subset dispatches fine (credential survives sub-threshold use)
+const subsetBatch = await byName.task_spawn_batch.execute({
+  tasks: [{ title: '功能｜选择甲', prompt: 'selected task' }],
+  confirmationId: selectResult.confirmationId,
+}, supervisorExec);
+assert.equal(subsetBatch.ok, true);
+assert.equal(subsetBatch.startedCount, 1);
+console.log('task_confirm_select: OK -> subset', JSON.stringify(selectResult.selected), '| mismatch rejected | subset dispatched');
 console.log('task_spawn_batch   : OK ->', batchResult.results.map((item) => item.sessionId).join(', '), '| gate + team listed:', batchTeamList.count === 2);
 assert.equal(createRequests[1].workspaceId, 'ws-verify', 'batch item 1 inherits the workspace');
 assert.equal(createRequests[2].workspaceId, 'ws-verify', 'batch item 2 inherits the workspace');

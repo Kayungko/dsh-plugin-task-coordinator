@@ -163,6 +163,38 @@ export function registerTools(ctx, ops, deps, config) {
   })));
 
   disposers.push(ctx.tools.register(defineTool({
+    name: 'task_confirm_select',
+    description: 'Present the proposed task list as a MULTI-SELECT card: the user checks WHICH of the proposed tasks to dispatch (partial dispatch) and can add adjustment feedback via the custom input row. Renders in the host\'s neutral question UI (not the amber plan-review card). '
+      + 'Present the full plan in your chat message BEFORE calling this — the card only carries the task list. '
+      + 'On approval returns { approved: true, selected: [...titles], confirmationId }; task_spawn_batch then accepts ONLY those exact titles (subset enforced). '
+      + 'When the user selects nothing, returns their feedback — revise the list and confirm again.',
+    parameters: {
+      question: { type: 'string', description: 'Optional one-line question shown on the card. Defaults to asking which tasks to dispatch.' },
+      tasks: {
+        type: 'array',
+        required: true,
+        description: 'Proposed tasks as options: one entry per task.',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            title: { type: 'string', required: true, description: 'Task title — use EXACTLY the title you will give this task in task_spawn_batch (subset matching is exact).' },
+            scope: { type: 'string', description: 'One-line scope shown under the title.' },
+          },
+        },
+      },
+    },
+    output: OUTPUT,
+    async execute(args, exec) {
+      try {
+        return await ops.confirmSelect({ question: args.question, tasks: args.tasks }, callerFrom(exec), exec?.agent, exec?.signal);
+      } catch (error) {
+        return { ok: false, code: 'internal', error: error?.message ?? String(error) };
+      }
+    },
+  })));
+
+  disposers.push(ctx.tools.register(defineTool({
     name: 'task_spawn_batch',
     description: 'Execute a decomposition plan: create several task sessions in one call, all optionally under one team. '
       + 'The batch counterpart of task_spawn for parallel fan-out as a supervisor. '

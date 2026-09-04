@@ -19,7 +19,7 @@ flowchart LR
     subgraph plugin["dsh-plugin-task-coordinator · 隔离插件组"]
         direction TB
         index["index.mjs<br/>cordis 入口 · 装配"]
-        tools["tools.mjs<br/>八个 task_* 工具"]
+        tools["tools.mjs<br/>九个 task_* 工具"]
         commands["commands.mjs<br/>/tasks 斜杠命令"]
         ops["ops.mjs<br/>会话操作 · DI 工厂"]
         skills["skills.mjs<br/>隔离技能挂载"]
@@ -79,7 +79,7 @@ flowchart LR
 - **`client.js`**：Web 客户端模块（0.8.0）——插件唯一运行在**浏览器侧**的产物。不经 cordis 入口装配，而是由宿主 `dsh-client-modules` 依 `dsh.client` 声明 + `exports["./client"]` 原样装载（`window.__ModuleLoader__` factory 格式），占 `conversation.session.header.utilities` 槽渲染「复制会话Id」按钮（面性胶囊：亮色黑底白字 / 暗色白底黑字，走 `--dsw-alias-label-primary(-foreground)` 主题 token，几何对齐「Session 日志」）；与宿主侧九个模块完全解耦，缺槽位只影响该按钮；
 - **`index.mjs`**：唯一直接 import 宿主包（`dsh-tools` / `dsh-llm`）的装配层；`skills.mjs` 对 `dsh-skill-filesystem` 用**动态 import**；`ctx.get('userQuestions')` 在 `task_confirm` 调用时**惰性解析**（不硬注入，宿主缺该接缝时其余工具不受影响）。
 
-## 机制设计（0.4.0–0.9.0 新增）
+## 机制设计（0.4.0–0.10.0 新增）
 
 ### 派发确认链（0.6.0）
 
@@ -89,6 +89,8 @@ flowchart LR
 2. **凭证生命周期**：批准时铸 `confirmationId`，存进程内 `Map`（`confirmationId → {callerSessionId, approvedAt}`）。**进程内、不落盘是有意的**——宿主重启后批准记录失效，总控重新确认一次，而不是拿过期批准派发；
 3. **闸门位置**：`spawnBatch` 在校验之后、创建之前检查凭证（存在、属于调用方），成功后消耗；全部失败**不消耗**（同一方案不问第二遍）；
 4. **错误映射**：`UserQuestionError.code` 逐一映射为本插件码表（`ASK_CANCELLED → confirm-cancelled` 等），agent 按码分支。
+
+多选变体（0.10.0）：`task_confirm_select` 用**同一接缝的通用提问渲染**（无 `plan-review` 意图 → 宿主中性样式、无琥珀 warn）：`multiSelect` 单问题 + 选项即任务清单 + 原生自定义输入行；凭证携带**选中子集**，`spawnBatch` 对子集凭证强制批量标题 ⊆ 选中集（`confirmation-mismatch`）。通用 UI 无 markdown 主体，完整方案由总控先写在聊天里。
 
 ### 结果回报约定（0.7.0）
 
@@ -118,7 +120,7 @@ flowchart LR
 
 技能是伴侣，不是契约——`mountCoordinatorSkills` 是 fire-and-forget：
 
-1. `dsh-skill-filesystem` 动态 import 失败 → 降级为一条 warning，八个工具照常注册；
+1. `dsh-skill-filesystem` 动态 import 失败 → 降级为一条 warning，九个工具照常注册；
 2. `ctx.plugin(...)` 挂载失败 → 同样只打 warning；
 3. 宿主无 `ctx.commands`（旧版本）→ `/tasks` 注册降级为 warning，工具面不受影响；
 4. 宿主无 `userQuestions` 接缝或无 UI 连接 → `task_confirm` 返回 `no-question-channel`，其余七个工具不受影响。

@@ -2,6 +2,13 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.10.0] - 2026-09-04
+
+### Added
+
+- **多选确认 / 部分派发（`task_confirm_select`，第 9 个工具）**：任务清单渲染为宿主通用提问 UI 的多选卡（`multiSelect` + 原生自定义输入行）——**中性样式，无琥珀 warn**（用户诉求）；用户勾选要派发哪些任务，批准把 `confirmationId` 绑定到**选中子集**；`task_spawn_batch` 强制批量标题 ⊆ 选中集（精确匹配，夹带未勾选标题报新错误码 `confirmation-mismatch`，无标题项视为未批准）；空选视为调整意见回传。通用 UI 不渲染 markdown 正文，工具描述要求总控先在聊天里给出完整方案。凭证同样单次使用、绑定调用方、进程内存放。
+- 技能手册新增「部分派发」编排模式与 `confirmation-mismatch` 错误码；双 README 工具表扩为九个；`verify-installed.mjs` 增加多选确认全链断言。单元测试 59 → 62。
+
 ## [0.9.0] - 2026-09-04
 
 ### Added
@@ -128,7 +135,8 @@
 
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
-[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.4...v0.9.0
 [0.8.4]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.2...v0.8.3

@@ -32,6 +32,7 @@ export const OP_CODES = Object.freeze({
   SPAWN_DEPTH_EXCEEDED: 'spawn-depth-exceeded',
   BATCH_ALL_FAILED: 'batch-all-failed',
   CONFIRMATION_REQUIRED: 'confirmation-required',
+  CONFIRMATION_MISMATCH: 'confirmation-mismatch',
   CONFIRM_CANCELLED: 'confirm-cancelled',
   CONFIRM_ABORTED: 'confirm-aborted',
   NO_QUESTION_CHANNEL: 'no-question-channel',
@@ -553,6 +554,80 @@ export function createOps(deps) {
       };
     },
 
+    /**
+     * Capability 6d (0.10.0): multi-select dispatch confirmation. Renders the
+     * proposed task list as ONE multi-select question in the host's neutral
+     * question UI (no plan-review intent → no amber warn styling; multiSelect +
+     * the custom input row are generic-UI capabilities). The user checks WHICH
+     * of the proposed tasks to dispatch; approval mints a confirmationId bound
+     * to the selected subset, and spawnBatch enforces the batch stays within it.
+     * The generic UI renders no markdown body, so the supervisor presents the
+     * full plan in chat before calling this (the tool description says so).
+     */
+    async confirmSelect({ question, tasks }, caller, agent, signal) {
+      const callerDeny = checkCaller(caller, config);
+      if (callerDeny) return failDeny(callerDeny);
+      if (!Array.isArray(tasks) || tasks.length === 0) {
+        return fail(OP_CODES.BAD_REQUEST, 'tasks must be a non-empty array of {title, scope?} items (or plain title strings)');
+      }
+      const options = [];
+      const seen = new Set();
+      for (const [index, item] of tasks.entries()) {
+        const title = typeof item === 'string' ? item.trim() : typeof item?.title === 'string' ? item.title.trim() : '';
+        if (title.length === 0) return fail(OP_CODES.BAD_REQUEST, `tasks[${index}].title is required`);
+        if (seen.has(title)) return fail(OP_CODES.BAD_REQUEST, `tasks[${index}].title duplicates "${title}" — option labels must be unique`);
+        seen.add(title);
+        const scope = typeof item === 'string' ? undefined : typeof item?.scope === 'string' && item.scope.trim().length > 0 ? item.scope.trim() : undefined;
+        options.push(scope === undefined ? { label: title } : { label: title, description: scope });
+      }
+      if (typeof askUser !== 'function') {
+        return fail(OP_CODES.NO_QUESTION_CHANNEL, 'no user-questions channel composed; list the tasks in chat and let the user pick by replying');
+      }
+      const selectQuestion = {
+        id: 'task-dispatch-select',
+        question: typeof question === 'string' && question.trim().length > 0
+          ? question.trim()
+          : `共 ${options.length} 个任务，勾选要派发的（未勾选的不派发；可在自定义输入行写调整意见）`,
+        multiSelect: true,
+        options,
+      };
+      let result;
+      try {
+        result = await askUser({ questions: [selectQuestion], agent, signal });
+      } catch (error) {
+        return failQuestionError(error);
+      }
+      if (result === null || result === undefined) {
+        return fail(OP_CODES.NO_QUESTION_CHANNEL, 'no UI is connected to answer interactive questions; list the tasks in chat and get the user\'s pick there');
+      }
+      const answer = Array.isArray(result.answers) ? result.answers.find((entry) => entry?.id === selectQuestion.id) : undefined;
+      const selected = Array.isArray(answer?.selected) ? answer.selected.filter((label) => typeof label === 'string') : [];
+      const custom = typeof answer?.custom === 'string' && answer.custom.trim().length > 0 ? answer.custom.trim() : undefined;
+      if (selected.length === 0) {
+        return {
+          ok: true,
+          approved: false,
+          feedback: custom ?? '未选择任何任务',
+          hint: 'do not dispatch; fold the user\'s feedback into a revised task list and confirm again',
+        };
+      }
+      const confirmationId = `confirm-${uuid()}`;
+      confirmations.set(confirmationId, {
+        callerSessionId: caller.sessionId,
+        approvedAt: Date.now(),
+        taskHint: excerpt(`select ${selected.length}/${options.length}: ${selected.join(', ')}`, 80),
+        selected,
+      });
+      return {
+        ok: true,
+        approved: true,
+        selected,
+        ...(custom !== undefined ? { custom } : {}),
+        confirmationId,
+        hint: 'pass this confirmationId to task_spawn_batch; the batch must contain ONLY the selected tasks (titles match exactly); single-use and bound to your session',
+      };
+    },
+
     /** Consume one approved confirmationId for this caller, if valid. */
     consumeConfirmation(confirmationId, caller) {
       const record = typeof confirmationId === 'string' ? confirmations.get(confirmationId) : undefined;
@@ -584,12 +659,24 @@ export function createOps(deps) {
       }
       // Dispatch confirmation gate: big fan-outs must be user-approved first.
       const needsConfirmation = config.confirmBeforeBatch && tasks.length >= config.confirmBatchThreshold;
-      if (needsConfirmation) {
-        const record = typeof confirmationId === 'string' ? confirmations.get(confirmationId) : undefined;
-        if (!record || record.callerSessionId !== caller.sessionId) {
+      const record = typeof confirmationId === 'string' ? confirmations.get(confirmationId) : undefined;
+      if (needsConfirmation && (!record || record.callerSessionId !== caller.sessionId)) {
+        return fail(
+          OP_CODES.CONFIRMATION_REQUIRED,
+          `batches of ${config.confirmBatchThreshold}+ tasks need user approval: call task_confirm with this plan first, then pass its confirmationId`,
+        );
+      }
+      // Select-form approval (task_confirm_select, 0.10.0): the batch must stay
+      // within the user-checked subset regardless of whether the size gate fired.
+      if (record && record.callerSessionId === caller.sessionId && Array.isArray(record.selected)) {
+        const approved = new Set(record.selected);
+        const unapproved = tasks
+          .map((item) => (typeof item.title === 'string' && item.title.trim().length > 0 ? item.title.trim() : '(untitled)'))
+          .filter((title) => !approved.has(title));
+        if (unapproved.length > 0) {
           return fail(
-            OP_CODES.CONFIRMATION_REQUIRED,
-            `batches of ${config.confirmBatchThreshold}+ tasks need user approval: call task_confirm with this plan first, then pass its confirmationId`,
+            OP_CODES.CONFIRMATION_MISMATCH,
+            `the user only approved: ${record.selected.join(', ')} — not approved in this batch: ${unapproved.join(', ')}. Drop the unapproved items or re-confirm with task_confirm_select`,
           );
         }
       }

@@ -6,7 +6,7 @@ description: >
   或者用户提到"总控/协调多个任务/派一个任务去做/拆成几个会话"时使用。
   用户口中的"/task 插件""task 插件""task-coordinator""dsh-plugin-task-coordinator"
   "分发/派发子任务会话""开几个会话并行"同样指本技能的能力。
-  涵盖八个 task_* 工具的投递语义、拆分决策、编排模式、命名规则、递归治理与安全边界。
+  涵盖九个 task_* 工具的投递语义、拆分决策、编排模式、命名规则、递归治理与安全边界。
 whenToUse: >
   协调两个以上顶层会话任务时；用户要求并行处理多项工作并汇总时；需要自动分析任务该拆成几个
   会话并向用户确认拆分方案时；需要监督一个长任务的进度并纠偏或取消时；需要把上下文交接给
@@ -15,7 +15,7 @@ whenToUse: >
 
 # 跨任务协调操作手册（task_* 工具）
 
-你可以通过八个 `task_*` 工具指挥其他顶层会话（"任务"）。这些消息在目标会话的 transcript
+你可以通过九个 `task_*` 工具指挥其他顶层会话（"任务"）。这些消息在目标会话的 transcript
 中**可见**，来源标记为 `coordinator`。
 
 ## 工具速览
@@ -27,6 +27,7 @@ whenToUse: >
 | `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`），可用 `reference` 关联先前指令 |
 | `task_spawn` | 新建任务 + 命名 + 开场提示词，立即出现在会话列表；可用 `team` 编组；默认带回报约定（`reportBack`）；新任务默认继承调用方所在工作区（传显式 `cwd` 则按指定目录、不挂工作区） |
 | `task_confirm` | **派发前确认**：把拆分方案做成审批卡弹给用户，阻塞直到回答；批准返回单次 `confirmationId` |
+| `task_confirm_select` | **多选确认/部分派发**：任务清单渲染为多选卡（中性样式，非琥珀审批卡），用户勾选要派发哪些；批准返回 `selected` 子集 + `confirmationId`，批量只能派发被勾选的标题（精确匹配）；先在聊天里给出完整方案再调用 |
 | `task_spawn_batch` | **一次创建一批任务**（拆分执行步）：传 `tasks: [{title?, prompt}]` + 统一 `team`（+ 必需的 `confirmationId`）；默认带回报约定 |
 | `task_wait` | 阻塞直到任务空闲（或超时）；支持多目标（`sessionIds` + `mode: all/any`） |
 | `task_cancel` | 取消目标的活动轮次，保留其排队消息 |
@@ -144,6 +145,19 @@ task_progress 看进度 → 发现跑偏 →
 向一个已完成的任务发送带完整上下文的后续指令（`task_send`），它带着自己的历史继续工作；
 比新建任务更省上下文，适合迭代同一主题。
 
+### 5. 部分派发（多选确认，0.10.0）
+
+```
+聊天里给出完整拆分方案 →
+task_confirm_select({ tasks: [{title, scope}…] })  ← 用户勾选要派发的子集（可写调整意见）
+→ 批准: { selected, confirmationId } → task_spawn_batch 只发被勾选的标题（精确匹配，
+  夹带未勾选标题会报 confirmation-mismatch）
+→ 未勾选任何项: 视为调整意见，修订清单后再确认
+```
+
+适用：任务之间可独立取舍、用户可能只想先做一部分。整批"全要/全不要"的审批用
+`task_confirm`（计划全文审批卡）；两种凭证都是单次使用、绑定调用方。
+
 ## task_spawn 命名规则
 
 `title` 只填语义部分 **`类型｜主题`**：
@@ -194,6 +208,7 @@ task_progress 看进度 → 发现跑偏 →
 | `kickoff-rejected` | spawn 的会话已建但开场词被拒 | 用 `task_send` 给该会话补发指令 |
 | `spawn-depth-exceeded` | 超出递归深度上限（默认 2 层） | 改用 subagent 做更深层并行 |
 | `confirmation-required` | 批量派发缺少用户批准 | 先 `task_confirm`，拿 `confirmationId` 再派发 |
+| `confirmation-mismatch` | 批量夹带了多选确认未勾选的任务 | 去掉未勾选项，或重新 `task_confirm_select` |
 | `confirm-cancelled` | 用户关闭了确认卡片 | 停止派发，等用户下一条消息 |
 | `no-question-channel` | 无 UI 连接，弹不了窗 | 降级为聊天文字确认 |
 | `delegated-caller` | 子代理不能发起人工确认 | 把方案和待决事项写进最终结果交回上层 |
