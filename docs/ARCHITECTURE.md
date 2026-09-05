@@ -122,7 +122,7 @@ cwd→工作区升级与既有会话迁移（0.12.0）：将发送的 cwd 与工
 
 ### 界面本地化（0.15.0）
 
-用户可见文案分两线。**浏览器侧**：按钮接入宿主 `LocaleRuntime`（官方 session-log-export 同款通道）——`inject` 不硬声明 locale，防御性访问 `ctx.locale`，老宿主保住中文按钮而非整个模块拒载；`register(NS, {zh,en})` 注册词典 + `translate(NS, key)` 实时解析 + `getSnapshot/subscribe` 驱动 `useSyncExternalStore` 重渲染（语言切换与词典注册都 bump revision）；服务缺失/注册被拒/React 无 uSES 任一情况退回内置中文字典。**宿主侧**：确认卡标签/标题/问题、多选卡、汇报约定开场后缀、`/tasks` 元数据经 `readUiLocale`（读 settings 命名空间 `locale` 字段 `preference`；`settings.get(ns)` 直接返回解析值）每次调用实时解析 `i18n.mjs` 冻结字典——切换语言后下一张卡/下一次开场即生效（`/tasks` 描述挂载时捕获，随下次重挂载）。回退纪律：只认精确 `en`，缺失或不可识别一律 zh——「未设置=跟随浏览器语言」是浏览器侧委托语义，宿主侧不可见，绝不猜测。模型面不变（英文工具描述=模型契约、中文 SKILL 手册、`MMDD｜类型｜主题` 命名约定——文档化协议而非 UI 装饰）。
+用户可见文案分两线。**浏览器侧**：按钮接入宿主 `LocaleRuntime`（官方 session-log-export 同款通道）——`inject` 不硬声明 locale，防御性访问 `ctx.locale`，老宿主保住中文按钮而非整个模块拒载；`register(NS, {zh,en})` 注册词典 + `translate(NS, key)` 实时解析 + `getSnapshot/subscribe` 驱动 `useSyncExternalStore` 重渲染（语言切换与词典注册都 bump revision）；服务缺失/注册被拒/React 无 uSES 任一情况退回内置中文字典。0.16.1 修复真机裸键回归：`inject` 不含 locale → locale 插件可能后装载，apply 一次性读取漏掉服务，宿主又对未注册命名空间发回显裸键的 `t`——改为 `ensureLocale()` 惰性重试注册（服务一被看见即注册，register bump revision 立即刷新已渲染出口）+ `props.t` 裸键防护（`t(key)` 等于 key/`NS.key`/非字符串即回落内置 zh 字典）。**宿主侧**：确认卡标签/标题/问题、多选卡、汇报约定开场后缀、`/tasks` 元数据经 `readUiLocale`（读 settings 命名空间 `locale` 字段 `preference`；`settings.get(ns)` 直接返回解析值）每次调用实时解析 `i18n.mjs` 冻结字典——切换语言后下一张卡/下一次开场即生效（`/tasks` 描述挂载时捕获，随下次重挂载）。回退纪律：只认精确 `en`，缺失或不可识别一律 zh——「未设置=跟随浏览器语言」是浏览器侧委托语义，宿主侧不可见，绝不猜测。模型面不变（英文工具描述=模型契约、中文 SKILL 手册、`MMDD｜类型｜主题` 命名约定——文档化协议而非 UI 装饰）。
 
 ### 客户端模块装载要点（0.8.0–0.8.2）
 

@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.15.0)
+ * dsh-plugin-task-coordinator — client module (0.16.1)
  *
  * Occupies the `conversation.session.header.utilities` slot with a
  * "Copy session id" action, so any session's stable id can be grabbed with
@@ -12,6 +12,12 @@
  * namespace, translations resolve through locale.translate with re-render on
  * every locale/dictionary change (getSnapshot/subscribe is uSES-safe), and
  * any missing piece degrades to the bundled zh strings — never a crash.
+ * 0.16.1: the locale runtime connects LAZILY and retries — the locale plugin
+ * may load after this bundle, and a one-shot read in apply() missed it while
+ * the host still handed the component a `t` prop bound to our namespace that
+ * echoes bare keys for unregistered dictionaries (the "header.action" button
+ * regression). A bare-key guard around props.t backs the retry up, so a
+ * missing dictionary can never render a raw key again.
  *
  * Contract notes (field-tested against DSH Desktop 2.0.5 / core 0.1.2-rc.1):
  * - The client-modules registry reads this file's path from the plugin's
@@ -74,23 +80,57 @@ window.__ModuleLoader__.load({
 		};
 		/** Live LocaleRuntime (register/translate/getSnapshot/subscribe) when present. */
 		let localeRuntime;
+		/** Client cordis ctx, kept so the locale service can be re-read when it loads late. */
+		let hostCtx;
+		/** Whether our dictionaries are known-registered on the live runtime. */
+		let localeRegistered = false;
 		const NO_LOCALE_SNAPSHOT = Object.freeze({ active: "zh", locales: [], revision: 0 });
-		const subscribeLocale = (fn) => (localeRuntime && typeof localeRuntime.subscribe === "function"
-			? localeRuntime.subscribe(fn)
-			: () => {});
-		const getLocaleSnapshot = () => (localeRuntime && typeof localeRuntime.getSnapshot === "function"
-			? localeRuntime.getSnapshot()
-			: NO_LOCALE_SNAPSHOT);
+		/**
+		 * Lazily connect (and reconnect) the host locale runtime: register our
+		 * dictionaries the first moment the service is sighted. The bundle only
+		 * injects ["slots"] (older hosts keep the zh button instead of failing
+		 * module load), so @deepseek-ai/dsh-client-locale may activate AFTER
+		 * this apply() — host source: LocaleRuntime.translate falls back to the
+		 * bare key for missing dictionaries, and bind(ns) hands out a `t` even
+		 * for unregistered namespaces. Late registration is a host-supported
+		 * contract: register bumps the snapshot revision so already-rendered
+		 * outlets re-render and pick up the dictionary. Idempotent: an
+		 * "already has locale" refusal (HMR double-apply) counts as registered.
+		 */
+		const ensureLocale = () => {
+			if (localeRegistered || !hostCtx) return localeRuntime;
+			if (!localeRuntime || typeof localeRuntime.register !== "function") {
+				try { localeRuntime = hostCtx.locale; } catch { localeRuntime = undefined; }
+			}
+			if (localeRuntime && typeof localeRuntime.register === "function") {
+				try {
+					localeRuntime.register(NS, DICTS);
+					localeRegistered = true;
+				} catch (error) {
+					localeRegistered = /already/i.test(String((error && error.message) || error));
+				}
+			}
+			return localeRuntime;
+		};
+		const subscribeLocale = (fn) => {
+			const runtime = ensureLocale();
+			return runtime && typeof runtime.subscribe === "function" ? runtime.subscribe(fn) : () => {};
+		};
+		const getLocaleSnapshot = () => {
+			const runtime = ensureLocale();
+			return runtime && typeof runtime.getSnapshot === "function" ? runtime.getSnapshot() : NO_LOCALE_SNAPSHOT;
+		};
 		/**
 		 * Resolve one key against the live locale, degrading to the bundled zh
 		 * dictionary whenever the runtime is missing or returns the bare key
-		 * (dictionary registration refused). Never throws.
+		 * (dictionary not registered). Never throws, never renders a raw key.
 		 */
 		const translateNow = (key) => {
-			if (localeRuntime && typeof localeRuntime.translate === "function") {
+			const runtime = ensureLocale();
+			if (runtime && typeof runtime.translate === "function") {
 				try {
-					const value = localeRuntime.translate(NS, key);
-					if (typeof value === "string" && value.length > 0 && value !== key) return value;
+					const value = runtime.translate(NS, key);
+					if (typeof value === "string" && value.length > 0 && value !== key && value !== `${NS}.${key}`) return value;
 				} catch {
 					/* fall through to the bundled dictionary */
 				}
@@ -131,10 +171,24 @@ window.__ModuleLoader__.load({
 		function CopySessionIdHeaderAction(props) {
 			const sessionId = String(props.sessionId ?? "");
 			const [state, setState] = react.useState("idle"); // idle | copied | failed
+			ensureLocale(); // a late-arriving locale service registers on first sight
 			// Re-render on every locale switch / dictionary registration; the
 			// guard is constant per bundle environment, so hook order stays stable.
 			const snapshot = useStore ? useStore(subscribeLocale, getLocaleSnapshot) : NO_LOCALE_SNAPSHOT;
-			const t = typeof props.t === "function" ? props.t : translateNow;
+			// Bare-key guard (0.16.1): the host hands slot occupants a `t` bound
+			// to our namespace whenever the registration declares `locale: NS` —
+			// even while our dictionaries are not (yet) registered, in which case
+			// LocaleRuntime.translate echoes the raw key. Treat that echo (and
+			// any non-string/throw) as a miss and fall back to translateNow,
+			// which itself degrades to the bundled zh dictionary.
+			const t = (key) => {
+				if (typeof props.t === "function") {
+					let value;
+					try { value = props.t(key); } catch { value = undefined; }
+					if (typeof value === "string" && value.length > 0 && value !== key && value !== `${NS}.${key}`) return value;
+				}
+				return translateNow(key);
+			};
 			const onClick = () => {
 				void copyText(sessionId).then((ok) => {
 					setState(ok ? "copied" : "failed");
@@ -163,18 +217,10 @@ window.__ModuleLoader__.load({
 		 *   never hard-injected so older hosts keep the button in zh).
 		 */
 		function apply(ctx) {
-			try {
-				localeRuntime = ctx.locale;
-			} catch {
-				localeRuntime = undefined;
-			}
-			if (localeRuntime && typeof localeRuntime.register === "function") {
-				try {
-					localeRuntime.register(NS, DICTS);
-				} catch {
-					/* registration refused: translateNow degrades to the zh dictionary */
-				}
-			}
+			hostCtx = ctx;
+			// Eager first attempt; every render retries until the runtime is
+			// sighted and the dictionaries are registered (see ensureLocale).
+			ensureLocale();
 			ctx.slots.inject("conversation.session.header.utilities", () => ctx.slots.register({
 				name: "conversation.session.header.utilities",
 				id: "copy-session-id",

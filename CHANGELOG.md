@@ -2,6 +2,17 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.16.1] - 2026-09-06
+
+### Fixed
+
+- **头部按钮裸键真机回归**：v0.15.0 的「复制会话Id」按钮在真机中文界面渲染出裸键 `header.action`。双重故障（宿主源码证实）：① 客户端 bundle 的 `inject` 只有 `["slots"]`，`@deepseek-ai/dsh-client-locale` 比按钮后装载时 apply() 拿不到 `ctx.locale`，词典注册被一次性跳过且永不重试；② 宿主仍会为槽位注册声明的 `locale: NS` 命名空间向组件传 `t` prop——`bind(ns)` 对未注册命名空间照发 `t`，而 `LocaleRuntime.translate` 词典缺失时**返回裸键**（dsh-client-locale client.js:1294 `?? key`），组件却无条件信任 `props.t`。修复：`ensureLocale()` 惰性重试注册——保存 ctx 引用、服务一被看见立即注册（宿主契约：register bump revision，已渲染出口拾取迟注册词典实时刷新；HMR 重复 apply 的 "already" 拒绝视为已注册）；`props.t` 裸键防护——`t(key)` 返回非字符串/空/等于 key/等于 `NS.key` 一律回落 `translateNow`（→ 内置 zh 字典）。任一层都保证最坏显示内置中文，绝不再出裸键。
+- 安装态自检补真机回归断言：裸键 echo `t` 必须回落 zh 字典；locale 服务迟到（apply 之后才出现）必须在下一次渲染完成注册并经宿主 runtime 解析 zh/en。v0.15.0 自检因未传 `props.t` 而全绿——正是本回归的漏网盲区。
+
+### Notes
+
+- 纯浏览器侧修复，宿主侧 ops/tools/SKILL 不变；单测保持 89。
+
 ## [0.16.0] - 2026-09-05
 
 ### Added
@@ -206,7 +217,8 @@
 
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
-[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.16.1...HEAD
+[0.16.1]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.13.0...v0.14.0

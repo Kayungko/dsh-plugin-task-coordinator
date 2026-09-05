@@ -263,7 +263,7 @@ assert.equal(registrations.length, 11, `expected 11 tools, got ${registrations.l
 assert.equal(ctx.commandRegistrations.length, 1, 'expected the /tasks command');
 assert.equal(ctx.commandRegistrations[0].name, 'tasks');
 assert.ok(ctx.provides.taskCoordinator, 'taskCoordinator service not provided');
-assert.equal(ctx.provides.taskCoordinator.version, '0.16.0');
+assert.equal(ctx.provides.taskCoordinator.version, '0.16.1');
 // the skill mount is fire-and-forget (dynamic import); give it a macrotask
 await new Promise((resolve) => setImmediate(resolve));
 assert.equal(ctx.mountedPlugins.length, 1, 'expected the skill provider mount');
@@ -614,6 +614,9 @@ assert.equal(clientEntry.id, pkg.name, 'client module id must match package name
 const fakeReact = {
   createElement: (type, props, ...children) => ({ type, props, children }),
   useState: (initial) => [initial, () => {}],
+  // present on the real host's React 18: the component subscribes to locale
+  // snapshot revisions; the stand-in just reads the current snapshot
+  useSyncExternalStore: (subscribe, getSnapshot) => getSnapshot(),
 };
 const clientExports = clientEntry.factory((spec) => {
   assert.equal(spec, 'react', 'client module may only require shared graph deps');
@@ -647,8 +650,40 @@ assert.equal(button.type, 'button');
 assert.match(button.props.title, /session-copy-target/);
 await button.props.onClick();
 assert.deepEqual(wrote, ['session-copy-target']);
+
+// 0.16.1 regression (the v0.15.0 "header.action" bare-key button): the real
+// host hands slot occupants a `t` bound to the registration's `locale` NS even
+// when our dictionaries are NOT registered (the locale plugin can load after
+// this bundle) — LocaleRuntime.translate then echoes the raw key. The button
+// must fall back to the bundled zh dictionary and never render a bare key.
+const bareKeyButton = occupation.component({ sessionId: 'session-copy-target', t: (key) => key });
+assert.equal(bareKeyButton.children[0], '复制会话Id', 'a bare-key-echoing t() must fall back to the bundled zh dictionary');
+assert.equal(bareKeyButton.props.title, '复制会话Id（session-copy-target）');
+
+// Late locale service: the runtime appears AFTER apply() (the real-world load
+// order that broke v0.15.0). The next render must register the dictionaries
+// and resolve through the host runtime — zh first, then a live en switch.
+const lateRuntime = {
+  dicts: new Map(),
+  register(ns, dicts) { this.dicts.set(ns, dicts); return () => {}; },
+  translate(ns, key) { return this.dicts.get(ns)?.[lateActive]?.[key] ?? key; },
+  getSnapshot() { return { active: lateActive, locales: ['zh', 'en'], revision: lateRevision }; },
+  subscribe() { return () => {}; },
+};
+let lateActive = 'zh';
+let lateRevision = 1;
+slotCtx.locale = lateRuntime; // the service shows up late, like the real host
+const lateZh = occupation.component({ sessionId: 's-late', t: (key) => lateRuntime.translate('task-coordinator', key) });
+assert.equal(lateRuntime.dicts.has('task-coordinator'), true, 'late registration must connect on the first render after the service appears');
+assert.equal(lateZh.children[0], '复制会话Id', 'late-registered runtime resolves zh through the host translate');
+lateActive = 'en';
+lateRevision += 1;
+const lateEn = occupation.component({ sessionId: 's-late', t: (key) => lateRuntime.translate('task-coordinator', key) });
+assert.equal(lateEn.children[0], 'Copy Session ID', 'en switch resolves through the host runtime');
+assert.equal(lateEn.props.title, 'Copy Session ID (s-late)', 'en title uses ASCII parentheses off snapshot.active');
 if (navDesc) Object.defineProperty(globalThis, 'navigator', navDesc);
 else delete globalThis.navigator;
 console.log('client module      : OK -> dsh.client declared, bundle loads, slot occupied, copy writes sessionId');
+console.log('client i18n        : OK -> bare-key t() falls back to zh, late locale service registers on first sight, zh/en resolve live');
 
 console.log('\nALL INTEGRATION CHECKS PASSED');
