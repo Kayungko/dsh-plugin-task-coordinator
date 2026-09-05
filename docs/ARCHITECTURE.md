@@ -79,7 +79,7 @@ flowchart LR
 - **`client.js`**：Web 客户端模块（0.8.0）——插件唯一运行在**浏览器侧**的产物。不经 cordis 入口装配，而是由宿主 `dsh-client-modules` 依 `dsh.client` 声明 + `exports["./client"]` 原样装载（`window.__ModuleLoader__` factory 格式），占 `conversation.session.header.utilities` 槽渲染「复制会话Id」按钮（面性胶囊：亮色黑底白字 / 暗色白底黑字，走 `--dsw-alias-label-primary(-foreground)` 主题 token，几何对齐「Session 日志」）；与宿主侧十个模块完全解耦，缺槽位只影响该按钮；
 - **`index.mjs`**：唯一直接 import 宿主包（`dsh-tools` / `dsh-llm`）的装配层；`skills.mjs` 对 `dsh-skill-filesystem` 用**动态 import**；`ctx.get('userQuestions')` 在 `task_confirm` 调用时**惰性解析**（不硬注入，宿主缺该接缝时其余工具不受影响）。
 
-## 机制设计（0.4.0–0.12.0 新增）
+## 机制设计（0.4.0–0.13.0 新增）
 
 ### 派发确认链（0.6.0）
 
@@ -107,6 +107,10 @@ flowchart LR
 宿主 `create` 对 `workspaceId` 与 `cwd` 是**互斥**语义，且只有 `workspaceId` 触发 `workspace.attachSession`。`spawnTask` 因此先解析调用方的工作区成员归属（调用方自身 + `parentSessionId` 祖先链 ≤8 跳，与工作区 `sessionIds` 求交），命中传 `workspaceId`（宿主以工作区路径为 cwd 并挂入），显式 `cwd` 优先、无归属降级为旧语义——子任务与总控在同一工作区侧栏可见。
 
 cwd→工作区升级与既有会话迁移（0.12.0）：将发送的 cwd 与工作区 path **精确匹配**（`normalizeWorkspacePath` 按平台分支 [0.12.1]：win32 分隔符归一+大小写折叠、darwin 仅折叠、POSIX 保留大小写；非 realpath，宿主实体校验才是权威）时改发 `workspaceId`，跨目录派发与未分组总控的子任务不再落入「未分组」；`task_workspace` 工具直连 `workspaceRegistry.get(id)` 活实体的 `attachSession`/`detachSession`（宿主 create 内部同一 API，自带会话头 cwd 与工作区 path 全等校验、幂等），迁移历史未分组会话且**不注入任何消息**。GUI 无此入口（拖拽 = `insertSessionBefore`，仅区内重排序）——插件面是唯一干净通道。
+
+### 子会话模型指定（0.13.0）
+
+`spawnTask` 接受可选 `provider`+`model`（+`reasoningEffort`，成对约束），走两级校验链：**目录预校验**（`llm.resolveCallConfig`，创建会话前拒绝无效路线——零孤儿；服务缺失优雅跳过）→ **创建后、开场前** `sessionController.selectModel` 安装（选择以 `model/selection` 会话事件持久化，重启存活；失败报孤儿 id、绝不用错误模型开场）。关键宿主事实（源码核验，`dsh-api-session-controller` 600-628 行）：`selectModel` 是会话级模型指定的**唯一公开入口**，且会经 `agentDefaultModel.saveSelection` 同步更新应用级默认模型（「最近选择即默认」，GUI 选择器同行为）；真正会话本地的 `selectForNextRequest` 是控制器内部方法、插件不可达——因此选择走公开 API 并在工具描述/手册如实披露该副作用，而非仿写内部行为绕过。
 
 ### 客户端模块装载要点（0.8.0–0.8.2）
 

@@ -9,7 +9,7 @@
 
 [![DSH 0.1.2-rc.1 verified](https://img.shields.io/badge/DSH-0.1.2--rc.1%20verified-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![70 unit tests](https://img.shields.io/badge/tests-70%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![76 unit tests](https://img.shields.io/badge/tests-76%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
 [What is this](#what-is-this) · [Quick start](#quick-start) · [Tools](#the-ten-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Changelog](CHANGELOG.md) · [中文](README.zh-CN.md)
@@ -87,7 +87,7 @@ Loose wordings ("/task plugin", "coordinate things") are recognized too — the 
 | `task_list` | List coordination-visible tasks with stable session ids, status, titles, todo/goal progress; filterable by `team` |
 | `task_progress` | Read one task in depth: live/cold state, queued messages, conversation tail, todos, goal |
 | `task_send` | Deliver a visible follow-up prompt (`mode: queue` or `steer`; `reference` links an earlier instruction); returns a `messageId` |
-| `task_spawn` | Create + name + kick off a brand-new task (title follows the `MMDD｜type｜topic` rule; groupable via `team`); returns a `correlationId`; appends the report-back convention by default; the child attaches to the caller's workspace, and an explicit `cwd` exactly matching a workspace path is upgraded to that workspace's attachment (0.12.0) |
+| `task_spawn` | Create + name + kick off a brand-new task (title follows the `MMDD｜type｜topic` rule; groupable via `team`); returns a `correlationId`; appends the report-back convention by default; the child attaches to the caller's workspace, and an explicit `cwd` exactly matching a workspace path is upgraded to that workspace's attachment (0.12.0); optional `provider`+`model` (+`reasoningEffort`) select the child's LLM route, installed before the kickoff (0.13.0) |
 | `task_confirm` | Present a decomposition/dispatch plan as an **interactive approval card** and block until the user answers; approval mints a single-use `confirmationId` |
 | `task_confirm_select` | Present the proposed task list as a **multi-select card** (host's neutral question UI — no amber styling): the user checks which tasks to dispatch (partial dispatch) with an optional custom-feedback row; approval binds the `confirmationId` to the selected subset and `task_spawn_batch` enforces it (`confirmation-mismatch` otherwise) |
 | `task_spawn_batch` | Spawn a whole decomposition plan in one call (`tasks: [{title?, prompt}]` + one `team`); requires the `confirmationId` once the batch reaches the confirmation threshold; one failed item does not abort the rest |
@@ -106,6 +106,10 @@ The plugin ships a small **web client module** (`client.js`, declared via `dsh.c
 ### Workspace placement & migration (0.12.0)
 
 Spawned children attach to the caller's workspace by default; an explicit `cwd` that exactly matches a workspace path (case- and separator-insensitive) is **upgraded to a workspace attachment** automatically, so cross-directory dispatch no longer drops sessions into the ungrouped bucket. Sessions that landed ungrouped earlier migrate via `task_workspace`: `list` the host workspaces, then `attach` / `detach` by id or exact path. It calls the live workspace entity — the same `attachSession` API the host's `session.create` uses internally — so the session's stored cwd is validated against the workspace path and its conversation is never touched. (The GUI offers no such entry: sidebar dragging calls `insertSessionBefore`, which only reorders sessions already inside a workspace — field-verified.)
+
+### Per-child model selection (0.13.0)
+
+`task_spawn` — and every item of `task_spawn_batch` — accepts an optional `provider` + `model` pair (+ `reasoningEffort`). The route is validated against the host LLM catalog **before** the session is created (`model-unavailable` rejects an invalid pair with zero orphans), then installed through the host's `sessionController.selectModel` **between creation and kickoff**, so the child's very first turn runs on the requested model; the selection persists as a durable session event and survives restarts. Should installation fail after pre-validation, the spawn reports `model-select-failed` with the traceable orphan id and never kicks off on the wrong model. Host semantics, disclosed as-is: installing a session-local model **also updates the app-wide default model** (the GUI picker's "last selection wins" behavior — `selectModel` is the host's only public entry point), so in a mixed-model batch the last child's route becomes the app default.
 
 ## Dispatch confirmation (the anti-black-box gate)
 

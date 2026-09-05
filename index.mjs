@@ -38,7 +38,7 @@ export function defaultRegistryFile() {
 
 export function apply(ctx, input = {}) {
   const config = resolveConfig(input);
-  ctx.provide('taskCoordinator', { config, version: '0.12.1' });
+  ctx.provide('taskCoordinator', { config, version: '0.13.0' });
   if (!config.enabled) {
     ctx.logger?.info('task-coordinator: disabled by config; no tools registered');
     return;
@@ -98,6 +98,19 @@ export function apply(ctx, input = {}) {
       return undefined;
     }
   };
+  // Per-child model selection (0.13.0): optional up-front validation through
+  // the host LLM catalog (ctx.llm.resolveCallConfig — the same resolver
+  // sessionController.selectModel uses). Returns undefined when the service is
+  // absent; ops then relies on selectModel's own validation after creation.
+  const resolveModelConfig = (selection) => {
+    try {
+      const service = typeof ctx.get === 'function' ? ctx.get('llm') : undefined;
+      if (typeof service?.resolveCallConfig !== 'function') return undefined;
+      return service.resolveCallConfig(selection);
+    } catch {
+      return undefined;
+    }
+  };
   const ops = createOps({
     sessionController,
     agents,
@@ -109,6 +122,7 @@ export function apply(ctx, input = {}) {
     askUser,
     listWorkspaces,
     getWorkspace,
+    resolveModelConfig,
   });
   const dispose = registerTools(ctx, ops, { defineTool }, config);
   const disposeCommands = registerCommands(ctx, ops);

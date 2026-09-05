@@ -46,6 +46,8 @@ export const OP_CODES = Object.freeze({
   CANCEL_REJECTED: 'cancel-rejected',
   WORKSPACE_NOT_FOUND: 'workspace-not-found',
   WORKSPACE_OP_FAILED: 'workspace-op-failed',
+  MODEL_UNAVAILABLE: 'model-unavailable',
+  MODEL_SELECT_FAILED: 'model-select-failed',
 });
 
 /** Approve option label for the dispatch-confirmation card (must match exactly). */
@@ -161,7 +163,7 @@ export function findWorkspaceByPath(cwd, listWorkspaces, platform) {
  * @returns {TaskOps}
  */
 export function createOps(deps) {
-  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser, listWorkspaces, getWorkspace } = deps;
+  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser, listWorkspaces, getWorkspace, resolveModelConfig } = deps;
 
   const fail = (code, message) => ({ ok: false, code, error: message });
   const failDeny = (denial) => fail(denial.code, denial.message);
@@ -415,11 +417,41 @@ export function createOps(deps) {
     },
 
     /** Capability 6: spawn a brand-new task; it appears in the session list. */
-    async spawnTask({ title, prompt, cwd, sessionId, agentPreset, team, reportBack }, caller, signal) {
+    async spawnTask({ title, prompt, cwd, sessionId, agentPreset, team, reportBack, provider, model, reasoningEffort }, caller, signal) {
       const callerDeny = checkCaller(caller, config);
       if (callerDeny) return failDeny(callerDeny);
       if (typeof prompt !== 'string' || prompt.trim().length === 0) {
         return fail(OP_CODES.BAD_REQUEST, 'prompt is required to start the new task');
+      }
+      // Per-child model selection (0.13.0): provider+model are a pair; the
+      // optional reasoningEffort only rides along with them. Validated up-front
+      // through the host LLM catalog when available so an invalid route never
+      // creates an orphan session; installed after creation via the host's
+      // sessionController.selectModel (the same API the GUI model picker uses —
+      // note it also updates the app-wide default model, host semantics).
+      const hasProvider = provider !== undefined && provider !== null && String(provider).trim().length > 0;
+      const hasModel = model !== undefined && model !== null && String(model).trim().length > 0;
+      if (hasProvider !== hasModel) {
+        return fail(OP_CODES.BAD_REQUEST, 'provider and model must be supplied together (or both omitted to use the host default)');
+      }
+      const modelSpec = hasProvider
+        ? {
+            provider: String(provider).trim(),
+            model: String(model).trim(),
+            ...(reasoningEffort !== undefined && reasoningEffort !== null && String(reasoningEffort).trim().length > 0
+              ? { reasoningEffort: String(reasoningEffort).trim() }
+              : {}),
+          }
+        : undefined;
+      if (modelSpec && typeof resolveModelConfig === 'function') {
+        const precheck = resolveModelConfig(modelSpec);
+        if (precheck) {
+          try {
+            await precheck;
+          } catch (error) {
+            return fail(OP_CODES.MODEL_UNAVAILABLE, `model selection was rejected by the host catalog: ${error?.message ?? error}`);
+          }
+        }
       }
       // Recursion governance: the child's depth derives from the caller's
       // recorded depth (a never-spawned root session counts as depth 0).
@@ -509,6 +541,25 @@ export function createOps(deps) {
         depth: childDepth,
         parentSessionId: caller.sessionId,
       });
+      // Install the per-child model BEFORE the kickoff so the very first turn
+      // runs on the requested route. A failure leaves a traceable orphan (the
+      // registry record above) and never kicks off on the wrong model.
+      let installedModel;
+      if (modelSpec) {
+        try {
+          const selection = await sessionController.selectModel({ sessionId: newId, ...modelSpec });
+          installedModel = selection?.selected ?? modelSpec;
+        } catch (error) {
+          return {
+            ok: false,
+            code: OP_CODES.MODEL_SELECT_FAILED,
+            error: `session ${newId} was created but the model could not be installed: ${error?.message ?? error} — the kickoff was NOT sent; pick the model manually (or task_cancel the orphan) and task_send the prompt`,
+            sessionId: newId,
+            depth: childDepth,
+            ...(cleanTeam !== undefined ? { team: cleanTeam } : {}),
+          };
+        }
+      }
       const correlationId = uuid();
       // Report-back convention (default on): the kickoff prompt tells the new
       // task to push its result summary back to the spawning session via
@@ -548,6 +599,7 @@ export function createOps(deps) {
         title: appliedTitle,
         ...(cleanTeam !== undefined ? { team: cleanTeam } : {}),
         cwd: effectiveCwd ?? null,
+        ...(installedModel !== undefined ? { model: installedModel } : {}),
         started,
         correlationId,
         depth: childDepth,
@@ -834,6 +886,9 @@ export function createOps(deps) {
           cwd: item.cwd,
           sessionId: item.sessionId,
           agentPreset: item.agentPreset,
+          provider: item.provider,
+          model: item.model,
+          reasoningEffort: item.reasoningEffort,
           team: cleanTeam,
           reportBack,
         }, caller, signal);

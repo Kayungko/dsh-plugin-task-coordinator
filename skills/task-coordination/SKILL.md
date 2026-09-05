@@ -25,7 +25,7 @@ whenToUse: >
 | `task_list` | 查找任务，取 sessionId；可按 `team` 过滤、可含子代理（默认不含） |
 | `task_progress` | 深入读一个任务：状态、队列中的消息、对话尾部、todos、goal |
 | `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`），可用 `reference` 关联先前指令 |
-| `task_spawn` | 新建任务 + 命名 + 开场提示词，立即出现在会话列表；可用 `team` 编组；默认带回报约定（`reportBack`）；新任务默认继承调用方所在工作区；显式 `cwd` 若与某工作区路径精确匹配则自动挂进该工作区（0.12.0），否则按指定目录、不挂工作区 |
+| `task_spawn` | 新建任务 + 命名 + 开场提示词，立即出现在会话列表；可用 `team` 编组；默认带回报约定（`reportBack`）；新任务默认继承调用方所在工作区；显式 `cwd` 若与某工作区路径精确匹配则自动挂进该工作区（0.12.0），否则按指定目录、不挂工作区；可选 `provider`+`model`（+`reasoningEffort`）指定子会话模型（0.13.0）——开场前安装、第一轮即生效，无效路线创建前即拒（注意：宿主语义会同步更新应用级默认模型） |
 | `task_confirm` | **派发前确认**：把拆分方案做成审批卡弹给用户，阻塞直到回答；批准返回 `confirmationId`（默认单次；`reusable: true` 铸**任务级复用凭证**——长线任务首次分析后确认一次即可，后续各里程碑批量复用同一凭证） |
 | `task_confirm_select` | **多选确认/部分派发**：任务清单渲染为多选卡（中性样式，非琥珀审批卡），用户勾选要派发哪些；批准返回 `selected` 子集 + `confirmationId`，批量只能派发被勾选的标题（精确匹配）；先在聊天里给出完整方案再调用 |
 | `task_spawn_batch` | **一次创建一批任务**（拆分执行步）：传 `tasks: [{title?, prompt}]` + 统一 `team`（+ 必需的 `confirmationId`）；默认带回报约定 |
@@ -221,6 +221,8 @@ task_confirm_select({ tasks: [{title, scope}…] })  ← 用户勾选要派发�
 | `batch-all-failed` | 批量派发全部失败 | 看 `results` 里每项的 code 分别处理 |
 | `workspace-not-found` | task_workspace 的目标工作区不存在/不可用 | 先 `action: list` 核对 id 或精确路径 |
 | `workspace-op-failed` | 宿主实体拒绝挂载（常见：会话 cwd 与工作区路径不一致） | 看错误消息里的实际 cwd；不一致就不能挂 |
+| `model-unavailable` | 指定的模型路线被宿主目录预校验拒绝（未创建会话，无孤儿） | 核对 provider/model 拼写；可用路线以 GUI 模型选择器为准 |
+| `model-select-failed` | 会话已创建但模型安装失败（开场未发送） | 结果含孤儿 sessionId：手动选好模型后 task_send 补开场，或 task_cancel |
 | `target-cold` | 目标无活动代理，无可取消 | 无需处理 |
 
 ## 反模式

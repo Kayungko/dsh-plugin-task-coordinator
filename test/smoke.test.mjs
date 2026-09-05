@@ -223,7 +223,7 @@ test('safety: excerpt and blocksToText', () => {
 /* ------------------------------------------------------------------ */
 
 function makeHarness(overrides = {}) {
-  const calls = { create: [], prompt: [], rename: [], cancel: [], resolve: [], list: 0, inspect: [] };
+  const calls = { create: [], prompt: [], rename: [], cancel: [], resolve: [], list: 0, inspect: [], selectModel: [], order: [] };
   const sessions = new Map(); // sessionId -> row
   const liveAgents = new Map(); // sessionId -> mock agent
 
@@ -234,6 +234,7 @@ function makeHarness(overrides = {}) {
     },
     async create(request) {
       calls.create.push(request);
+      calls.order.push('create');
       const id = request.sessionId ?? `session-created-${calls.create.length}`;
       sessions.set(id, {
         sessionId: id,
@@ -255,6 +256,7 @@ function makeHarness(overrides = {}) {
       // mirror the real Remote facade: signal is dereferenced unconditionally
       signal.throwIfAborted();
       calls.prompt.push(request);
+      calls.order.push('prompt');
       const row = sessions.get(request.sessionId);
       if (row) {
         row.blank = false;
@@ -265,6 +267,21 @@ function makeHarness(overrides = {}) {
     async cancel(request) {
       calls.cancel.push(request);
       return { accepted: true };
+    },
+    async selectModel(request) {
+      calls.selectModel.push(request);
+      calls.order.push('selectModel');
+      // mirror the host: an unknown model is rejected as session/model-unavailable
+      if (request.model === 'model-bad') {
+        throw new Error(`model "${request.model}" is not served by provider "${request.provider}"`);
+      }
+      return {
+        selected: {
+          provider: request.provider,
+          model: request.model,
+          ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }),
+        },
+      };
     },
     async resolveAgent(sessionId) {
       calls.resolve.push(sessionId);
@@ -318,6 +335,7 @@ function makeHarness(overrides = {}) {
     ...(overrides.registry ? { registry: overrides.registry } : {}),
     ...(overrides.listWorkspaces ? { listWorkspaces: overrides.listWorkspaces } : {}),
     ...(overrides.getWorkspace ? { getWorkspace: overrides.getWorkspace } : {}),
+    ...(overrides.resolveModelConfig ? { resolveModelConfig: overrides.resolveModelConfig } : {}),
     uuid: () => 'req-test-1',
     askUser,
   });
@@ -678,6 +696,66 @@ test('ops.workspaceOp: failure modes (0.12.0)', async () => {
   // no registry service at all -> not-found, never a crash
   const bare = makeHarness({ listWorkspaces: () => workspaces });
   assert.equal((await bare.ops.workspaceOp({ action: 'attach', sessionId: 's', workspaceId: 'ws-1' }, SUPERVISOR)).code, 'workspace-not-found');
+});
+
+test('ops.spawnTask: model selection — pair validation and effort-only ignored (0.13.0)', async () => {
+  const harness = makeHarness();
+  assert.equal((await harness.ops.spawnTask({ prompt: 'x', provider: 'p' }, SUPERVISOR)).code, 'bad-request');
+  assert.equal((await harness.ops.spawnTask({ prompt: 'x', model: 'm' }, SUPERVISOR)).code, 'bad-request');
+  assert.equal(harness.calls.create.length, 0);
+  // reasoningEffort without provider+model is ignored, not an error
+  const plain = await harness.ops.spawnTask({ prompt: 'x', reasoningEffort: 'high' }, SUPERVISOR);
+  assert.equal(plain.ok, true);
+  assert.equal(harness.calls.selectModel.length, 0);
+});
+
+test('ops.spawnTask: model selection — catalog pre-validation prevents orphans (0.13.0)', async () => {
+  const harness = makeHarness({ resolveModelConfig: () => Promise.reject(new Error('no such model "ghost"')) });
+  const result = await harness.ops.spawnTask({ prompt: 'x', provider: 'p', model: 'ghost' }, SUPERVISOR);
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'model-unavailable');
+  assert.match(result.error, /no such model/);
+  assert.equal(harness.calls.create.length, 0); // nothing was created
+});
+
+test('ops.spawnTask: model selection — installed between create and kickoff (0.13.0)', async () => {
+  const harness = makeHarness({ resolveModelConfig: () => Promise.resolve({}) });
+  const result = await harness.ops.spawnTask({ prompt: 'model work', provider: 'prov-a', model: 'model-x', reasoningEffort: 'high' }, SUPERVISOR);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.model, { provider: 'prov-a', model: 'model-x', reasoningEffort: 'high' });
+  assert.deepEqual(harness.calls.selectModel[0], { sessionId: result.sessionId, provider: 'prov-a', model: 'model-x', reasoningEffort: 'high' });
+  // ordering: the model is installed BEFORE the first turn is kicked off
+  assert.deepEqual(harness.calls.order, ['create', 'selectModel', 'prompt']);
+});
+
+test('ops.spawnTask: model selection — install failure reports the orphan, no kickoff (0.13.0)', async () => {
+  const harness = makeHarness(); // no catalog pre-check available; selectModel mock rejects 'model-bad'
+  const result = await harness.ops.spawnTask({ prompt: 'x', provider: 'p', model: 'model-bad' }, SUPERVISOR);
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'model-select-failed');
+  assert.ok(result.sessionId, 'the created orphan stays traceable');
+  assert.equal(harness.calls.prompt.length, 0); // never kicked off on the wrong model
+});
+
+test('ops.spawnTask: model selection — degrades when the catalog service is absent (0.13.0)', async () => {
+  const harness = makeHarness({ resolveModelConfig: () => undefined });
+  const result = await harness.ops.spawnTask({ prompt: 'x', provider: 'p', model: 'model-x' }, SUPERVISOR);
+  assert.equal(result.ok, true); // selectModel is the authoritative validation then
+  assert.deepEqual(harness.calls.order, ['create', 'selectModel', 'prompt']);
+});
+
+test('ops.spawnBatch: per-item model selections are forwarded (0.13.0)', async () => {
+  const harness = makeHarness({ config: { confirmBeforeBatch: false } });
+  const batch = await harness.ops.spawnBatch({
+    tasks: [
+      { prompt: 'heavy', provider: 'prov-a', model: 'model-big' },
+      { prompt: 'light', provider: 'prov-b', model: 'model-small', reasoningEffort: 'low' },
+    ],
+  }, SUPERVISOR);
+  assert.equal(batch.ok, true);
+  assert.equal(harness.calls.selectModel.length, 2);
+  assert.deepEqual(harness.calls.selectModel.map((request) => request.model), ['model-big', 'model-small']);
+  assert.equal(harness.calls.selectModel[1].reasoningEffort, 'low');
 });
 
 test('ops.spawnTask: kickoff failure reports the orphan', async () => {
@@ -1323,6 +1401,8 @@ test('registerTools: ten tools with delegation', async () => {
   assert.equal(byName.task_confirm.parameters.plan.required, true);
   assert.ok(byName.task_confirm.parameters.reusable); // 0.11.0 mission-scoped approval
   assert.ok(byName.task_confirm_select.parameters.reusable);
+  assert.ok(byName.task_spawn.parameters.provider && byName.task_spawn.parameters.model && byName.task_spawn.parameters.reasoningEffort); // 0.13.0 per-child model
+  assert.ok(byName.task_spawn_batch.parameters.tasks.items.properties.model);
   assert.equal(byName.task_confirm_select.parameters.tasks.required, true); // 0.10.0 multi-select confirmation
   assert.ok(byName.task_confirm_select.parameters.question);
   assert.equal(byName.task_confirm_select.parameters.tasks.items.additionalProperties, false); // host schema compiler requires explicit

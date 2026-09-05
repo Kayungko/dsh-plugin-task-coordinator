@@ -120,6 +120,14 @@ const ctx = {
         },
       } : undefined),
     };
+    if (name === 'llm') return {
+      // catalog pre-validation stand-in (0.13.0): mirror resolveCallConfig
+      async resolveCallConfig(selection) {
+        calls.push('resolveCallConfig');
+        if (selection.model === 'model-ghost') throw new Error(`model "${selection.model}" is not served by provider "${selection.provider}"`);
+        return selection;
+      },
+    };
     if (name !== 'userQuestions') return undefined;
     return {
       async ask(request) {
@@ -164,6 +172,12 @@ const ctx = {
       return { accepted: true };
     },
     async cancel(request) { calls.push('cancel'); return { accepted: true }; },
+    async selectModel(request) {
+      calls.push('selectModel');
+      if (request.model === 'model-bad') throw new Error(`model "${request.model}" is not served by provider "${request.provider}"`);
+      const { sessionId, ...selection } = request;
+      return { selected: selection };
+    },
     async resolveAgent(sessionId) {
       calls.push('resolve');
       const agent = liveAgents.get(sessionId);
@@ -184,7 +198,7 @@ assert.equal(registrations.length, 10, `expected 10 tools, got ${registrations.l
 assert.equal(ctx.commandRegistrations.length, 1, 'expected the /tasks command');
 assert.equal(ctx.commandRegistrations[0].name, 'tasks');
 assert.ok(ctx.provides.taskCoordinator, 'taskCoordinator service not provided');
-assert.equal(ctx.provides.taskCoordinator.version, '0.12.1');
+assert.equal(ctx.provides.taskCoordinator.version, '0.13.0');
 // the skill mount is fire-and-forget (dynamic import); give it a macrotask
 await new Promise((resolve) => setImmediate(resolve));
 assert.equal(ctx.mountedPlugins.length, 1, 'expected the skill provider mount');
@@ -435,6 +449,24 @@ const upgraded = await byName.task_spawn.execute({ prompt: '工作区升级验�
 assert.equal(upgraded.ok, true);
 assert.ok(verifyWorkspace.sessionIds.includes(upgraded.sessionId), 'explicit-cwd spawn upgraded to workspace attachment');
 console.log('task_workspace     : OK -> list/attach/detach + spawn cwd-upgrade verified');
+
+// 0.13.0 per-child model selection: catalog pre-validation, then install via
+// sessionController.selectModel between create and kickoff (order matters).
+const modelSpawn = await byName.task_spawn.execute({ prompt: '模型指定验证', provider: 'prov-verify', model: 'model-ok', reasoningEffort: 'high' }, supervisorExec);
+assert.equal(modelSpawn.ok, true);
+assert.deepEqual(modelSpawn.model, { provider: 'prov-verify', model: 'model-ok', reasoningEffort: 'high' });
+const createAt = calls.lastIndexOf('create');
+const selectAt = calls.lastIndexOf('selectModel');
+const promptAt = calls.lastIndexOf('prompt');
+assert.ok(createAt >= 0 && createAt < selectAt && selectAt < promptAt, 'model installed between create and kickoff');
+// an invalid route is rejected up front — no session is created
+const ghostSpawn = await byName.task_spawn.execute({ prompt: '不应创建', provider: 'prov-verify', model: 'model-ghost' }, supervisorExec);
+assert.equal(ghostSpawn.ok, false);
+assert.equal(ghostSpawn.code, 'model-unavailable');
+assert.equal(ghostSpawn.sessionId, undefined);
+// provider and model are a pair
+assert.equal((await byName.task_spawn.execute({ prompt: '不应创建', provider: 'prov-verify' }, supervisorExec)).code, 'bad-request');
+console.log('model selection    : OK -> installed before kickoff | invalid route rejected up front | pair enforced');
 
 const cancelResult = await byName.task_cancel.execute({ sessionId: 'session-worker' }, supervisorExec);
 assert.equal(cancelResult.ok, true);

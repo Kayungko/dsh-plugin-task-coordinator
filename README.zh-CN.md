@@ -9,7 +9,7 @@
 
 [![DSH 0.1.2-rc.1 实测](https://img.shields.io/badge/DSH-0.1.2--rc.1%20实测-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![70 个单元测试](https://img.shields.io/badge/tests-70%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![76 个单元测试](https://img.shields.io/badge/tests-76%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
 [这是什么](#这是什么) · [快速开始](#快速开始) · [十个工具](#十个工具) · [架构设计](docs/ARCHITECTURE.md) · [主机契约](docs/PROTOCOL.md) · [更新日志](CHANGELOG.md) · [English](README.md)
@@ -86,7 +86,7 @@ pwsh install.ps1 -Source .
 | `task_list` | 列出协调可见的任务（含稳定 sessionId、状态、标题、todo/goal 进度；可按 `team` 过滤） |
 | `task_progress` | 深入读取单个任务：实时/冷状态、排队消息、对话尾部、todos、goal |
 | `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`；`reference` 关联先前指令），返回 `messageId` |
-| `task_spawn` | 创建 + 命名 + 启动新任务（标题遵循 `MMDD｜类型｜主题`；可用 `team` 编组），返回 `correlationId`；默认附带回报约定；新任务默认挂进调用方所在工作区；显式 `cwd` 与某工作区路径精确匹配时自动升级挂载该工作区（0.12.0） |
+| `task_spawn` | 创建 + 命名 + 启动新任务（标题遵循 `MMDD｜类型｜主题`；可用 `team` 编组），返回 `correlationId`；默认附带回报约定；新任务默认挂进调用方所在工作区；显式 `cwd` 与某工作区路径精确匹配时自动升级挂载该工作区（0.12.0）；可选 `provider`+`model`（+`reasoningEffort`）指定子会话模型路线，开场前安装（0.13.0） |
 | `task_confirm` | 把拆分/派发方案做成**交互式审批卡**弹给用户，阻塞直到回答；批准返回单次 `confirmationId` |
 | `task_confirm_select` | 把任务清单做成**多选卡**（宿主中性提问 UI，非琥珀审批卡）：用户勾选要派发哪些（部分派发），可在自定义输入行写调整意见；批准把 `confirmationId` 绑定到选中子集，`task_spawn_batch` 强制校验（夹带未勾选标题报 `confirmation-mismatch`） |
 | `task_spawn_batch` | 一次批量创建整个拆分方案（`tasks: [{title?, prompt}]` + 统一 `team`）；达到确认阈值时必须携带 `confirmationId`；单条失败不中止整批 |
@@ -105,6 +105,10 @@ pwsh install.ps1 -Source .
 ### 工作区归置与迁移（0.12.0）
 
 派生的子任务默认挂进调用方所在工作区；显式 `cwd` 与某工作区路径**精确匹配**（大小写/分隔符不敏感）时自动升级为工作区挂载——跨目录派发不再把会话丢进「未分组」。历史上已落入未分组的会话用 `task_workspace` 迁移：`list` 列出宿主工作区，再按 id 或精确路径 `attach` / `detach`。它直连宿主 workspace 实体——与 `session.create` 内部同一套 `attachSession` API——会话存储的 cwd 会对照工作区路径校验，且**绝不向会话注入消息**。（GUI 没有这个入口：侧栏拖拽走 `insertSessionBefore`，只接受已在工作区内的会话重排序——实测验证。）
+
+### 子会话模型指定（0.13.0）
+
+`task_spawn` 与 `task_spawn_batch` 的每个条目接受可选 `provider` + `model`（+ `reasoningEffort`）组合。路线先经宿主 LLM 目录在创建会话**之前**预校验（无效组合 `model-unavailable` 直接拒绝，零孤儿），再于**创建之后、开场之前**通过宿主 `sessionController.selectModel` 安装——子会话第一轮就跑在指定模型上；选择以持久会话事件写入，重启存活。预校验通过但安装失败时报 `model-select-failed` 并附可追踪的孤儿 sessionId，**绝不用错误模型开场**。宿主语义如实披露：安装会话级模型会**同时更新应用级默认模型**（GUI 模型选择器「最近选择即默认」的同一行为——`selectModel` 是宿主唯一公开入口），混合模型批量中最后一个子会话的路线会成为应用默认。
 
 ## 派发确认（反信息黑盒闸门）
 

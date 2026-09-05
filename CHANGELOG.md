@@ -2,6 +2,18 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.13.0] - 2026-09-05
+
+### Added
+
+- **子会话模型指定**：`task_spawn` 与 `task_spawn_batch` 的每个条目接受可选 `provider` + `model`（+ `reasoningEffort`）为子会话选定 LLM 路线。安装走宿主 `sessionController.selectModel`（GUI 模型选择器同一 API），发生在**创建之后、开场提示词之前**——子会话第一轮就跑在指定模型上；选择以持久 `model/selection` 会话事件写入事件日志（重启存活）。成功载荷以 `model` 回显实际安装的选择。
+- **目录预校验**：宿主 LLM 服务可达时，路线先经 `llm.resolveCallConfig` 在创建会话**之前**校验——无效组合返回 `model-unavailable`，不产生孤儿会话；目录服务缺失时优雅降级为仅靠 `selectModel` 自身校验，若安装仍失败则报 `model-select-failed` 并附可追踪的孤儿 `sessionId`，**绝不用错误模型开场**。
+- 新错误码：`model-unavailable`、`model-select-failed`；`provider`/`model` 成对约束（缺一报 `bad-request`，单独 `reasoningEffort` 忽略）。单元测试 70 → 76。
+
+### Notes
+
+- 宿主语义如实披露：安装会话级模型会**同时更新应用级默认模型**（`agentDefaultModel.saveSelection` → settings `agent-default-model` 命名空间，即 GUI 选择器「最近选择即默认」行为）。混合模型批量中最后一个子会话的路线成为应用默认。`selectModel` 是宿主唯一公开入口（真正会话本地的 `selectForNextRequest` 为控制器内部方法、非服务 API），插件选择如实披露而非绕过。
+
 ## [0.12.1] - 2026-09-05
 
 ### Fixed
@@ -159,7 +171,8 @@
 
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
-[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.10.0...v0.11.0

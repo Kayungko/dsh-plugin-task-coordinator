@@ -113,6 +113,8 @@ export function registerTools(ctx, ops, deps, config) {
       + 'or "task-coordinator" references), use this tool family instead of doing everything in-session, and load the '
       + 'task-coordination skill for the orchestration playbook. '
       + 'The new task appears in the session list immediately. Returns the new session id for follow-up coordination. '
+      + 'Optional provider+model select the child\'s LLM route (installed before the kickoff, so its first turn uses it; '
+      + 'host semantics: this also updates the app-wide default model, like picking a model in the GUI). '
       + spawnTitleRule,
     parameters: {
       prompt: { type: 'string', required: true, description: 'Kickoff prompt: the full initial instruction for the new task.' },
@@ -127,6 +129,9 @@ export function registerTools(ctx, ops, deps, config) {
       reportBack: { type: 'boolean', description: 'Default true: append an instruction telling the new task to push its result summary back to your session via task_send when it finishes. Set false for fire-and-forget tasks you will only read with task_progress.' },
       sessionId: { type: 'string', description: 'Optional explicit session id; creation is idempotent for the same id and cwd.' },
       agentPreset: { type: 'string', description: 'Optional agent preset name for the new task.' },
+      provider: { type: 'string', description: 'LLM provider route for the child session. Supply together with model; omit both to inherit the host default model.' },
+      model: { type: 'string', description: 'Model id interpreted by provider. Supply together with provider; an invalid pair is rejected up front (model-unavailable) without creating the session.' },
+      reasoningEffort: { type: 'string', description: 'Optional reasoning effort for the selected route; only meaningful together with provider+model.' },
     },
     output: OUTPUT,
     async execute(args, exec) {
@@ -217,6 +222,9 @@ export function registerTools(ctx, ops, deps, config) {
             title: { type: 'string', description: 'Semantic title "type｜topic" (MMDD｜ stamped automatically).' },
             prompt: { type: 'string', required: true, description: 'Self-contained kickoff prompt for this task.' },
             cwd: { type: 'string', description: 'Working directory override for this task.' },
+            provider: { type: 'string', description: 'LLM provider route for this child (with model; see task_spawn — installing also updates the app-wide default model).' },
+            model: { type: 'string', description: 'Model id interpreted by provider (with provider).' },
+            reasoningEffort: { type: 'string', description: 'Optional reasoning effort for this child\'s route.' },
           },
         },
       },
