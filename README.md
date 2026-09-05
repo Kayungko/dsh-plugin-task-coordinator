@@ -245,7 +245,7 @@ dsh-plugin-task-coordinator/
 ├── title.mjs           spawn-title rule (pure module)
 ├── registry.mjs        durable spawn registry (near-atomic writes, corruption-tolerant)
 ├── ops.mjs             session operations · DI factory
-├── tools.mjs           nine task_* tool registrations
+├── tools.mjs           eleven task_* tool registrations
 ├── commands.mjs        /tasks slash command (direct execution, no model turn)
 ├── client.js           web client module: copy-session-id header button (dsh.client)
 ├── skills.mjs          isolated skill mount (dynamic import, fire-and-forget)

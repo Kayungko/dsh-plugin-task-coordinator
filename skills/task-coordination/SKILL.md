@@ -45,7 +45,7 @@ whenToUse: >
 用户通常不知道工具名，指令往往含糊。遇到下列说法，指的就是本技能的能力——按本手册行动，
 不要忽略，也不要因为措辞不精确而拒绝执行：
 
-- 「/task 插件」「task 插件」「task-coordinator」「协调插件」→ 指本插件，即八个 `task_*` 工具；
+- 「/task 插件」「task 插件」「task-coordinator」「协调插件」→ 指本插件，即十一个 `task_*` 工具；
 - 「分发/派发子任务会话」「开几个会话并行做」「拆成几个会话」→ `task_spawn` / `task_spawn_batch` 扇出；
 - 「你作为总控会话接手」→ 按总控循环工作：分解 → `task_confirm` → `task_spawn_batch` →
   `task_wait` 收集 → 汇总推进，不要把所有事都自己做；

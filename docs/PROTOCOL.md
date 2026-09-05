@@ -13,7 +13,7 @@
 |---|---|---|
 | `ctx.sessionController` | `@deepseek-ai/dsh-api-session-controller` | 会话生命周期与查询（Remote 门面） |
 | `ctx.agents` | 宿主活体注册表 | `get(sessionId)` 取运行中 agent（状态 / inbox / 投递） |
-| `ctx.tools` | `@deepseek-ai/dsh-tools` | `defineTool` 注册八个工具 |
+| `ctx.tools` | `@deepseek-ai/dsh-tools` | `defineTool` 注册十一个工具 |
 | `ctx.commands` | 命令注册表 | `register` 注册 `/tasks` [0.4.0 新增]；宿主无此注册表时降级为 warning |
 | `ctx.plugin` | cordis 内核 | 挂载隔离技能 provider（可选，失败降级） |
 

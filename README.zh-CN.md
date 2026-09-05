@@ -244,7 +244,7 @@ dsh-plugin-task-coordinator/
 ├── title.mjs           spawn 命名规则（纯模块）
 ├── registry.mjs        持久 spawn 注册表（近似原子写 · 损坏容错）
 ├── ops.mjs             会话操作 · DI 工厂
-├── tools.mjs           九个 task_* 工具注册
+├── tools.mjs           十一个 task_* 工具注册
 ├── commands.mjs        /tasks 斜杠命令（直接执行，不进模型）
 ├── client.js           Web 客户端模块：复制会话 ID 头部按钮（dsh.client）
 ├── skills.mjs          隔离技能挂载（动态 import，fire-and-forget）
