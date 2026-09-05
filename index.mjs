@@ -38,7 +38,7 @@ export function defaultRegistryFile() {
 
 export function apply(ctx, input = {}) {
   const config = resolveConfig(input);
-  ctx.provide('taskCoordinator', { config, version: '0.11.0' });
+  ctx.provide('taskCoordinator', { config, version: '0.12.0' });
   if (!config.enabled) {
     ctx.logger?.info('task-coordinator: disabled by config; no tools registered');
     return;
@@ -86,6 +86,18 @@ export function apply(ctx, input = {}) {
       return [];
     }
   };
+  // task_workspace (0.12.0): live workspace-entity access for attaching or
+  // detaching EXISTING sessions — the same entity API the host's own
+  // session.create calls (attachSession/detachSession). Degrades to undefined
+  // when the registry is missing; the op then reports workspace-not-found.
+  const getWorkspace = (workspaceId) => {
+    try {
+      const service = typeof ctx.get === 'function' ? ctx.get('workspaceRegistry') : undefined;
+      return typeof service?.get === 'function' ? service.get(workspaceId) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
   const ops = createOps({
     sessionController,
     agents,
@@ -96,6 +108,7 @@ export function apply(ctx, input = {}) {
     uuid: () => `task-coord-${randomUUID()}`,
     askUser,
     listWorkspaces,
+    getWorkspace,
   });
   const dispose = registerTools(ctx, ops, { defineTool }, config);
   const disposeCommands = registerCommands(ctx, ops);

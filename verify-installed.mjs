@@ -106,7 +106,20 @@ const ctx = {
   // workspace-registry stand-in: the supervisor lives in one workspace, so
   // spawned children must attach to it (workspaceId in the create request).
   get(name) {
-    if (name === 'workspaceRegistry') return { list: () => [verifyWorkspace] };
+    if (name === 'workspaceRegistry') return {
+      list: () => [verifyWorkspace],
+      // live-entity access (0.12.0 task_workspace): mimics workspace.attachSession /
+      // detachSession membership mutation without the host's cwd validation
+      get: (id) => (id === verifyWorkspace.id ? {
+        attachSession: async (sessionId) => {
+          if (!verifyWorkspace.sessionIds.includes(sessionId)) verifyWorkspace.sessionIds.unshift(sessionId);
+        },
+        detachSession: async (sessionId) => {
+          const at = verifyWorkspace.sessionIds.indexOf(sessionId);
+          if (at >= 0) verifyWorkspace.sessionIds.splice(at, 1);
+        },
+      } : undefined),
+    };
     if (name !== 'userQuestions') return undefined;
     return {
       async ask(request) {
@@ -167,11 +180,11 @@ const ctx = {
 const verifyDir = mkdtempSync(join(tmpdir(), 'task-coord-verify-'));
 const registryFile = join(verifyDir, 'registry.json');
 plugin.apply(ctx, { minSendIntervalMs: 0, registryFile });
-assert.equal(registrations.length, 9, `expected 9 tools, got ${registrations.length}`);
+assert.equal(registrations.length, 10, `expected 10 tools, got ${registrations.length}`);
 assert.equal(ctx.commandRegistrations.length, 1, 'expected the /tasks command');
 assert.equal(ctx.commandRegistrations[0].name, 'tasks');
 assert.ok(ctx.provides.taskCoordinator, 'taskCoordinator service not provided');
-assert.equal(ctx.provides.taskCoordinator.version, '0.11.0');
+assert.equal(ctx.provides.taskCoordinator.version, '0.12.0');
 // the skill mount is fire-and-forget (dynamic import); give it a macrotask
 await new Promise((resolve) => setImmediate(resolve));
 assert.equal(ctx.mountedPlugins.length, 1, 'expected the skill provider mount');
@@ -397,6 +410,31 @@ assert.match(ambiguousCmd.text, /ambiguous/);
 const badCmd = await tasksCommand.handler({ ...invocationBase, rawInput: 'team' });
 assert.equal(badCmd.kind, 'error');
 console.log('slash /tasks       : OK -> list/team/inspect/short-id/ambiguous/usage all settled');
+
+// 0.12.0 task_workspace: list + attach/detach an existing session through the
+// live workspace entity (membership mutation, no conversation touched).
+// NOTE: placed after the slash-command section on purpose — its extra spawn
+// would push the mock id sequence to session-spawned-10 and make the short-id
+// prefix 'spawned-1' ambiguous in the tests above.
+const wsList = await byName.task_workspace.execute({ action: 'list' }, supervisorExec);
+assert.equal(wsList.ok, true);
+assert.equal(wsList.workspaces.length, 1);
+assert.equal(wsList.workspaces[0].id, 'ws-verify');
+const wsAttach = await byName.task_workspace.execute({ action: 'attach', sessionId: 'session-migrate-me', workspacePath: '/proj' }, supervisorExec);
+assert.equal(wsAttach.ok, true);
+assert.ok(verifyWorkspace.sessionIds.includes('session-migrate-me'), 'attached through the entity');
+const wsDetach = await byName.task_workspace.execute({ action: 'detach', sessionId: 'session-migrate-me', workspaceId: 'ws-verify' }, supervisorExec);
+assert.equal(wsDetach.ok, true);
+assert.ok(!verifyWorkspace.sessionIds.includes('session-migrate-me'), 'detached through the entity');
+const wsGhost = await byName.task_workspace.execute({ action: 'attach', sessionId: 's', workspaceId: 'ws-ghost' }, supervisorExec);
+assert.equal(wsGhost.ok, false);
+assert.equal(wsGhost.code, 'workspace-not-found');
+// spawn upgrade: an explicit cwd matching the workspace path attaches instead
+// of dropping the child into the ungrouped bucket
+const upgraded = await byName.task_spawn.execute({ prompt: '工作区升级验证', cwd: '/PROJ/' }, supervisorExec);
+assert.equal(upgraded.ok, true);
+assert.ok(verifyWorkspace.sessionIds.includes(upgraded.sessionId), 'explicit-cwd spawn upgraded to workspace attachment');
+console.log('task_workspace     : OK -> list/attach/detach + spawn cwd-upgrade verified');
 
 const cancelResult = await byName.task_cancel.execute({ sessionId: 'session-worker' }, supervisorExec);
 assert.equal(cancelResult.ok, true);

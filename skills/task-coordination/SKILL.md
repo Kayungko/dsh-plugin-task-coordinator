@@ -6,7 +6,7 @@ description: >
   或者用户提到"总控/协调多个任务/派一个任务去做/拆成几个会话"时使用。
   用户口中的"/task 插件""task 插件""task-coordinator""dsh-plugin-task-coordinator"
   "分发/派发子任务会话""开几个会话并行"同样指本技能的能力。
-  涵盖九个 task_* 工具的投递语义、拆分决策、编排模式、命名规则、递归治理与安全边界。
+  涵盖十个 task_* 工具的投递语义、拆分决策、编排模式、命名规则、递归治理与安全边界。
 whenToUse: >
   协调两个以上顶层会话任务时；用户要求并行处理多项工作并汇总时；需要自动分析任务该拆成几个
   会话并向用户确认拆分方案时；需要监督一个长任务的进度并纠偏或取消时；需要把上下文交接给
@@ -15,7 +15,7 @@ whenToUse: >
 
 # 跨任务协调操作手册（task_* 工具）
 
-你可以通过九个 `task_*` 工具指挥其他顶层会话（"任务"）。这些消息在目标会话的 transcript
+你可以通过十个 `task_*` 工具指挥其他顶层会话（"任务"）。这些消息在目标会话的 transcript
 中**可见**，来源标记为 `coordinator`。
 
 ## 工具速览
@@ -25,12 +25,13 @@ whenToUse: >
 | `task_list` | 查找任务，取 sessionId；可按 `team` 过滤、可含子代理（默认不含） |
 | `task_progress` | 深入读一个任务：状态、队列中的消息、对话尾部、todos、goal |
 | `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`），可用 `reference` 关联先前指令 |
-| `task_spawn` | 新建任务 + 命名 + 开场提示词，立即出现在会话列表；可用 `team` 编组；默认带回报约定（`reportBack`）；新任务默认继承调用方所在工作区（传显式 `cwd` 则按指定目录、不挂工作区） |
+| `task_spawn` | 新建任务 + 命名 + 开场提示词，立即出现在会话列表；可用 `team` 编组；默认带回报约定（`reportBack`）；新任务默认继承调用方所在工作区；显式 `cwd` 若与某工作区路径精确匹配则自动挂进该工作区（0.12.0），否则按指定目录、不挂工作区 |
 | `task_confirm` | **派发前确认**：把拆分方案做成审批卡弹给用户，阻塞直到回答；批准返回 `confirmationId`（默认单次；`reusable: true` 铸**任务级复用凭证**——长线任务首次分析后确认一次即可，后续各里程碑批量复用同一凭证） |
 | `task_confirm_select` | **多选确认/部分派发**：任务清单渲染为多选卡（中性样式，非琥珀审批卡），用户勾选要派发哪些；批准返回 `selected` 子集 + `confirmationId`，批量只能派发被勾选的标题（精确匹配）；先在聊天里给出完整方案再调用 |
 | `task_spawn_batch` | **一次创建一批任务**（拆分执行步）：传 `tasks: [{title?, prompt}]` + 统一 `team`（+ 必需的 `confirmationId`）；默认带回报约定 |
 | `task_wait` | 阻塞直到任务空闲（或超时）；支持多目标（`sessionIds` + `mode: all/any`） |
 | `task_cancel` | 取消目标的活动轮次，保留其排队消息 |
+| `task_workspace` | **工作区迁移**（0.12.0）：`list` 列宿主工作区；`attach`/`detach` 把既有会话挂入/移出工作区（走宿主实体 API，校验会话 cwd 与工作区路径一致，不触碰会话内容）——修复历史落入「未分组」的会话 |
 
 **快速通道**：只想查询、不想消耗模型轮次时，用斜杠命令 `/tasks`（列任务）、
 `/tasks team <名称>`（列编组）、`/tasks <sessionId>`（单任务进度）——直接在 GUI 返回，
@@ -218,6 +219,8 @@ task_confirm_select({ tasks: [{title, scope}…] })  ← 用户勾选要派发�
 | `no-question-channel` | 无 UI 连接，弹不了窗 | 降级为聊天文字确认 |
 | `delegated-caller` | 子代理不能发起人工确认 | 把方案和待决事项写进最终结果交回上层 |
 | `batch-all-failed` | 批量派发全部失败 | 看 `results` 里每项的 code 分别处理 |
+| `workspace-not-found` | task_workspace 的目标工作区不存在/不可用 | 先 `action: list` 核对 id 或精确路径 |
+| `workspace-op-failed` | 宿主实体拒绝挂载（常见：会话 cwd 与工作区路径不一致） | 看错误消息里的实际 cwd；不一致就不能挂 |
 | `target-cold` | 目标无活动代理，无可取消 | 无需处理 |
 
 ## 反模式

@@ -19,7 +19,7 @@ flowchart LR
     subgraph plugin["dsh-plugin-task-coordinator · 隔离插件组"]
         direction TB
         index["index.mjs<br/>cordis 入口 · 装配"]
-        tools["tools.mjs<br/>九个 task_* 工具"]
+        tools["tools.mjs<br/>十个 task_* 工具"]
         commands["commands.mjs<br/>/tasks 斜杠命令"]
         ops["ops.mjs<br/>会话操作 · DI 工厂"]
         skills["skills.mjs<br/>隔离技能挂载"]
@@ -76,10 +76,10 @@ flowchart LR
 - **`ops.mjs`**：工厂函数 `createOps(deps)`，宿主对象（sessionController / agents / createUserMessage / limiter / registry / uuid / askUser）**全部经依赖注入**，离开宿主进程可完整测试；
 - **`tools.mjs`**：连 `defineTool` 都经注入——模型面注册与宿主包解耦；
 - **`commands.mjs`**：`/tasks` 斜杠命令（0.4.0）——仿官方 `dsh-command-goal` 的 `inject=['commands']` + `ctx.commands.register` 模式；宿主无命令注册表时降级为 warning，工具面不受影响；
-- **`client.js`**：Web 客户端模块（0.8.0）——插件唯一运行在**浏览器侧**的产物。不经 cordis 入口装配，而是由宿主 `dsh-client-modules` 依 `dsh.client` 声明 + `exports["./client"]` 原样装载（`window.__ModuleLoader__` factory 格式），占 `conversation.session.header.utilities` 槽渲染「复制会话Id」按钮（面性胶囊：亮色黑底白字 / 暗色白底黑字，走 `--dsw-alias-label-primary(-foreground)` 主题 token，几何对齐「Session 日志」）；与宿主侧九个模块完全解耦，缺槽位只影响该按钮；
+- **`client.js`**：Web 客户端模块（0.8.0）——插件唯一运行在**浏览器侧**的产物。不经 cordis 入口装配，而是由宿主 `dsh-client-modules` 依 `dsh.client` 声明 + `exports["./client"]` 原样装载（`window.__ModuleLoader__` factory 格式），占 `conversation.session.header.utilities` 槽渲染「复制会话Id」按钮（面性胶囊：亮色黑底白字 / 暗色白底黑字，走 `--dsw-alias-label-primary(-foreground)` 主题 token，几何对齐「Session 日志」）；与宿主侧十个模块完全解耦，缺槽位只影响该按钮；
 - **`index.mjs`**：唯一直接 import 宿主包（`dsh-tools` / `dsh-llm`）的装配层；`skills.mjs` 对 `dsh-skill-filesystem` 用**动态 import**；`ctx.get('userQuestions')` 在 `task_confirm` 调用时**惰性解析**（不硬注入，宿主缺该接缝时其余工具不受影响）。
 
-## 机制设计（0.4.0–0.11.0 新增）
+## 机制设计（0.4.0–0.12.0 新增）
 
 ### 派发确认链（0.6.0）
 
@@ -106,6 +106,8 @@ flowchart LR
 
 宿主 `create` 对 `workspaceId` 与 `cwd` 是**互斥**语义，且只有 `workspaceId` 触发 `workspace.attachSession`。`spawnTask` 因此先解析调用方的工作区成员归属（调用方自身 + `parentSessionId` 祖先链 ≤8 跳，与工作区 `sessionIds` 求交），命中传 `workspaceId`（宿主以工作区路径为 cwd 并挂入），显式 `cwd` 优先、无归属降级为旧语义——子任务与总控在同一工作区侧栏可见。
 
+cwd→工作区升级与既有会话迁移（0.12.0）：将发送的 cwd 与工作区 path **精确匹配**（`normalizeWorkspacePath`：分隔符归一/去尾/小写，非 realpath）时改发 `workspaceId`，跨目录派发与未分组总控的子任务不再落入「未分组」；`task_workspace` 工具直连 `workspaceRegistry.get(id)` 活实体的 `attachSession`/`detachSession`（宿主 create 内部同一 API，自带会话头 cwd 与工作区 path 全等校验、幂等），迁移历史未分组会话且**不注入任何消息**。GUI 无此入口（拖拽 = `insertSessionBefore`，仅区内重排序）——插件面是唯一干净通道。
+
 ### 客户端模块装载要点（0.8.0–0.8.2）
 
 两段实测教训沉淀为硬契约：① `dsh.client` 声明 + `exports["./client"]` 之外，**还必须导出 `exports["./package.json"]`**——扫描器经 `createRequire(baseUrl).resolve('<包名>/package.json')` 定位清单，缺该导出会 `ERR_PACKAGE_PATH_NOT_EXPORTED` 且被静默排除（0.8.2 根因）；② bundle 必须是 `window.__ModuleLoader__.load({id, factory})` 注册、原样下发，`apply(ctx)` 在客户端纤维执行、`inject: ["slots"]` 声明依赖。完整五步链见 [PROTOCOL.md §15](PROTOCOL.md)。
@@ -122,7 +124,7 @@ flowchart LR
 
 技能是伴侣，不是契约——`mountCoordinatorSkills` 是 fire-and-forget：
 
-1. `dsh-skill-filesystem` 动态 import 失败 → 降级为一条 warning，九个工具照常注册；
+1. `dsh-skill-filesystem` 动态 import 失败 → 降级为一条 warning，十个工具照常注册；
 2. `ctx.plugin(...)` 挂载失败 → 同样只打 warning；
 3. 宿主无 `ctx.commands`（旧版本）→ `/tasks` 注册降级为 warning，工具面不受影响；
 4. 宿主无 `userQuestions` 接缝或无 UI 连接 → `task_confirm` 返回 `no-question-channel`，其余七个工具不受影响。

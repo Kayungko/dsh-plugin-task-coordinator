@@ -275,7 +275,29 @@ export function registerTools(ctx, ops, deps, config) {
     },
   })));
 
-  ctx.logger?.info(`task-coordinator: registered 8 coordination tools (subagent use ${config.allowSubagentUse ? 'allowed' : 'denied'})`);
+  disposers.push(ctx.tools.register(defineTool({
+    name: 'task_workspace',
+    description: 'List host workspaces or move an EXISTING top-level session into/out of one (attach/detach). '
+      + 'Use it to fix sessions that landed in the ungrouped bucket — e.g. spawned with an explicit cwd before 0.12.0. '
+      + 'Attach goes through the host workspace entity (the same API session.create uses): the session\'s stored cwd must match the workspace path, and the session\'s conversation is never touched. '
+      + 'New spawns rarely need this — task_spawn upgrades an exact cwd match to a workspace attachment automatically.',
+    parameters: {
+      action: { type: 'string', description: 'list | attach | detach. Defaults to list.' },
+      sessionId: { type: 'string', description: 'Session to attach/detach (required for attach/detach).' },
+      workspaceId: { type: 'string', description: 'Target workspace id (see action list). Preferred over workspacePath.' },
+      workspacePath: { type: 'string', description: 'Workspace directory path, matched exactly (case- and separator-insensitive) when workspaceId is omitted.' },
+    },
+    output: OUTPUT,
+    async execute(args, exec) {
+      try {
+        return await ops.workspaceOp(args, callerFrom(exec));
+      } catch (error) {
+        return { ok: false, code: 'internal', error: error?.message ?? String(error) };
+      }
+    },
+  })));
+
+  ctx.logger?.info(`task-coordinator: registered 10 coordination tools (subagent use ${config.allowSubagentUse ? 'allowed' : 'denied'})`);
   return () => {
     for (const dispose of disposers.splice(0)) {
       try {

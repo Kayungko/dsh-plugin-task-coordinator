@@ -44,6 +44,8 @@ export const OP_CODES = Object.freeze({
   TARGET_COLD: 'target-cold',
   WAIT_FAILED: 'wait-failed',
   CANCEL_REJECTED: 'cancel-rejected',
+  WORKSPACE_NOT_FOUND: 'workspace-not-found',
+  WORKSPACE_OP_FAILED: 'workspace-op-failed',
 });
 
 /** Approve option label for the dispatch-confirmation card (must match exactly). */
@@ -108,11 +110,50 @@ export function workspacePathOf(workspaceId, listWorkspaces) {
 }
 
 /**
+ * Normalize a filesystem path for exact workspace matching: separators
+ * unified to backslash, trailing separators stripped (drive roots kept),
+ * lowercased (Windows/NTFS is case-insensitive). Not a general realpath —
+ * the host entity does full validation on attach itself.
+ * @param {string} value - raw path
+ * @returns {string} comparable form
+ */
+export function normalizeWorkspacePath(value) {
+  let path = String(value).trim().replaceAll('/', '\\');
+  // strip trailing separators, but keep drive roots ('D:\') intact
+  while (path.length > 1 && path.endsWith('\\') && !/^[A-Za-z]:\\$/.test(path)) path = path.slice(0, -1);
+  return path.toLowerCase();
+}
+
+/**
+ * Find the workspace whose path exactly matches a directory (0.12.0):
+ * powers the spawn cwd→workspace upgrade and task_workspace path targeting.
+ * Failure-tolerant like the other registry helpers.
+ * @param {string|undefined} cwd - directory to match
+ * @param {Function|undefined} listWorkspaces - lazy host registry snapshot
+ * @returns {object|undefined} the matching workspace snapshot entry
+ */
+export function findWorkspaceByPath(cwd, listWorkspaces) {
+  if (typeof cwd !== 'string' || cwd.trim().length === 0) return undefined;
+  if (typeof listWorkspaces !== 'function') return undefined;
+  let workspaces;
+  try {
+    workspaces = listWorkspaces();
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(workspaces)) return undefined;
+  const target = normalizeWorkspacePath(cwd);
+  return workspaces.find(
+    (workspace) => typeof workspace?.path === 'string' && normalizeWorkspacePath(workspace.path) === target,
+  );
+}
+
+/**
  * @param {object} deps
  * @returns {TaskOps}
  */
 export function createOps(deps) {
-  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser, listWorkspaces } = deps;
+  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser, listWorkspaces, getWorkspace } = deps;
 
   const fail = (code, message) => ({ ok: false, code, error: message });
   const failDeny = (denial) => fail(denial.code, denial.message);
@@ -392,24 +433,42 @@ export function createOps(deps) {
       const request = {};
       if (typeof sessionId === 'string' && sessionId.length > 0) request.sessionId = sessionId;
       if (typeof agentPreset === 'string' && agentPreset.length > 0) request.agentPreset = agentPreset;
-      // Workspace inheritance: an explicit cwd overrides everything (legacy
-      // semantics); otherwise the child attaches to the caller's workspace so
-      // spawned tasks stay visible beside their supervisor instead of landing
-      // in the ungrouped bucket. The host derives cwd from the workspace path
-      // and rejects requests carrying both fields.
+      // Workspace inheritance: an explicit cwd overrides caller-workspace
+      // membership (legacy semantics); otherwise the child attaches to the
+      // caller's workspace so spawned tasks stay visible beside their
+      // supervisor instead of landing in the ungrouped bucket. The host
+      // derives cwd from the workspace path and rejects requests carrying
+      // both fields.
+      // cwd→workspace upgrade (0.12.0): whenever the cwd we would send is
+      // exactly a workspace's path, send workspaceId instead — the host
+      // attaches the child to that workspace and derives the same cwd, so
+      // explicit-cwd spawns (and supervisors that are themselves ungrouped)
+      // no longer drop children into the ungrouped bucket.
       const explicitCwd = typeof cwd === 'string' && cwd.length > 0 ? cwd : undefined;
       let effectiveCwd;
       if (explicitCwd) {
-        request.cwd = explicitCwd;
-        effectiveCwd = explicitCwd;
+        const byPath = findWorkspaceByPath(explicitCwd, listWorkspaces);
+        if (byPath?.id) {
+          request.workspaceId = byPath.id;
+          effectiveCwd = byPath.path ?? explicitCwd;
+        } else {
+          request.cwd = explicitCwd;
+          effectiveCwd = explicitCwd;
+        }
       } else {
         const workspaceId = resolveCallerWorkspaceId(caller.sessionId, registry, listWorkspaces);
         if (workspaceId) {
           request.workspaceId = workspaceId;
           effectiveCwd = workspacePathOf(workspaceId, listWorkspaces) ?? caller.cwd;
         } else if (caller.cwd) {
-          request.cwd = caller.cwd;
-          effectiveCwd = caller.cwd;
+          const byPath = findWorkspaceByPath(caller.cwd, listWorkspaces);
+          if (byPath?.id) {
+            request.workspaceId = byPath.id;
+            effectiveCwd = byPath.path ?? caller.cwd;
+          } else {
+            request.cwd = caller.cwd;
+            effectiveCwd = caller.cwd;
+          }
         }
       }
       let created;
@@ -646,6 +705,65 @@ export function createOps(deps) {
       if (!record || record.callerSessionId !== caller.sessionId) return false;
       confirmations.delete(confirmationId);
       return true;
+    },
+
+    /**
+     * task_workspace (0.12.0): list host workspaces or move an EXISTING
+     * top-level session into/out of one. Attach/detach go through the live
+     * workspace entity — the same API the host's session.create uses
+     * internally (workspace.attachSession validates the session's stored cwd
+     * against the workspace path). Never injects a message into the session.
+     */
+    async workspaceOp({ action, sessionId, workspaceId, workspacePath }, caller) {
+      const callerDeny = checkCaller(caller, config);
+      if (callerDeny) return failDeny(callerDeny);
+      const mode = typeof action === 'string' && action.trim().length > 0 ? action.trim().toLowerCase() : 'list';
+      if (!['list', 'attach', 'detach'].includes(mode)) {
+        return fail(OP_CODES.BAD_REQUEST, `unknown action '${action}' (expected list | attach | detach)`);
+      }
+      if (mode === 'list') {
+        let workspaces;
+        try {
+          workspaces = typeof listWorkspaces === 'function' ? listWorkspaces() : [];
+        } catch {
+          workspaces = [];
+        }
+        if (!Array.isArray(workspaces)) workspaces = [];
+        return {
+          ok: true,
+          action: 'list',
+          workspaces: workspaces.map((workspace) => ({
+            id: workspace?.id,
+            path: workspace?.path,
+            ...(typeof workspace?.title === 'string' ? { title: workspace.title } : {}),
+            sessionIds: Array.isArray(workspace?.sessionIds) ? [...workspace.sessionIds] : [],
+          })),
+        };
+      }
+      if (typeof sessionId !== 'string' || sessionId.trim().length === 0) {
+        return fail(OP_CODES.BAD_REQUEST, `action '${mode}' requires sessionId`);
+      }
+      const cleanSessionId = sessionId.trim();
+      // Resolve the target workspace: explicit id wins, else exact path match.
+      let targetId = typeof workspaceId === 'string' && workspaceId.trim().length > 0 ? workspaceId.trim() : undefined;
+      if (!targetId) {
+        const byPath = findWorkspaceByPath(workspacePath, listWorkspaces);
+        if (byPath?.id) targetId = byPath.id;
+      }
+      if (!targetId) {
+        return fail(OP_CODES.WORKSPACE_NOT_FOUND, 'no workspace matched: pass workspaceId (see action list) or an exact workspacePath');
+      }
+      const entity = typeof getWorkspace === 'function' ? getWorkspace(targetId) : undefined;
+      const method = mode === 'attach' ? 'attachSession' : 'detachSession';
+      if (!entity || typeof entity[method] !== 'function') {
+        return fail(OP_CODES.WORKSPACE_NOT_FOUND, `workspace '${targetId}' is not available from the host registry`);
+      }
+      try {
+        await entity[method](cleanSessionId);
+      } catch (error) {
+        return fail(OP_CODES.WORKSPACE_OP_FAILED, `${mode} failed: ${error?.message ?? error}`);
+      }
+      return { ok: true, action: mode, sessionId: cleanSessionId, workspaceId: targetId };
     },
 
     /**

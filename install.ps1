@@ -108,4 +108,4 @@ if (Test-Path $PackageMapPath) {
 
 Write-Host ''
 Write-Host 'done. Restart DSH Desktop to load the new bundle.'
-Write-Host 'After restart, any session can call: task_list / task_progress / task_send / task_spawn / task_wait / task_cancel'
+Write-Host 'After restart, any session can call: task_list / task_progress / task_send / task_spawn / task_confirm / task_confirm_select / task_spawn_batch / task_wait / task_cancel / task_workspace'

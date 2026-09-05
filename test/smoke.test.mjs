@@ -317,6 +317,7 @@ function makeHarness(overrides = {}) {
     limiter,
     ...(overrides.registry ? { registry: overrides.registry } : {}),
     ...(overrides.listWorkspaces ? { listWorkspaces: overrides.listWorkspaces } : {}),
+    ...(overrides.getWorkspace ? { getWorkspace: overrides.getWorkspace } : {}),
     uuid: () => 'req-test-1',
     askUser,
   });
@@ -570,6 +571,97 @@ test('resolveCallerWorkspaceId: pure-function edge cases', async () => {
   assert.equal(resolveCallerWorkspaceId('session-x', null, () => [{ sessionIds: ['session-x'] }]), undefined); // no id
   assert.equal(resolveCallerWorkspaceId('session-x', null, () => { throw new Error('boom'); }), undefined);
   assert.equal(resolveCallerWorkspaceId('', null, () => [{ id: 'ws', sessionIds: [''] }]), undefined);
+});
+
+test('normalizeWorkspacePath / findWorkspaceByPath: pure-function edge cases (0.12.0)', async () => {
+  const { normalizeWorkspacePath, findWorkspaceByPath } = await import('../ops.mjs');
+  assert.equal(normalizeWorkspacePath('D:/git/Proj/'), 'd:\\git\\proj');
+  assert.equal(normalizeWorkspacePath('  d:\\git\\PROJ '), 'd:\\git\\proj');
+  assert.equal(normalizeWorkspacePath('D:\\'), 'd:\\'); // drive root kept
+  assert.equal(normalizeWorkspacePath('/a/'), '\\a');
+  assert.equal(findWorkspaceByPath(undefined, () => [{ id: 'ws', path: '/a' }]), undefined);
+  assert.equal(findWorkspaceByPath('/a', undefined), undefined);
+  assert.equal(findWorkspaceByPath('/b', () => [{ id: 'ws', path: '/a' }]), undefined);
+  assert.equal(findWorkspaceByPath('/a/', () => [{ id: 'ws', path: '/a' }])?.id, 'ws');
+  assert.equal(findWorkspaceByPath('D:\\git\\PROJ', () => [{ id: 'ws', path: 'd:/git/proj/' }])?.id, 'ws');
+  assert.equal(findWorkspaceByPath('/a', () => { throw new Error('boom'); }), undefined);
+});
+
+test('ops.spawnTask: cwd→workspace upgrade — exact path match attaches (0.12.0)', async () => {
+  const workspaces = [{ id: 'ws-proj', path: 'D:\\git\\Proj', sessionIds: [] }];
+  const harness = makeHarness({ listWorkspaces: () => workspaces });
+  // explicit cwd with different case / separators / trailing slash still matches
+  const spawned = await harness.ops.spawnTask({ prompt: 'work', cwd: 'd:/git/proj/' }, SUPERVISOR);
+  assert.equal(spawned.ok, true);
+  assert.equal(harness.calls.create[0].workspaceId, 'ws-proj');
+  assert.equal(harness.calls.create[0].cwd, undefined); // host derives cwd from the workspace path
+  // a non-matching explicit cwd keeps legacy ungrouped semantics
+  const plain = await harness.ops.spawnTask({ prompt: 'work', cwd: 'D:\\git\\Other' }, SUPERVISOR);
+  assert.equal(plain.ok, true);
+  assert.equal(harness.calls.create[1].cwd, 'D:\\git\\Other');
+  assert.equal(harness.calls.create[1].workspaceId, undefined);
+});
+
+test('ops.spawnTask: ungrouped supervisor upgrades children by its own cwd (0.12.0)', async () => {
+  // caller is not a member of any workspace, but its cwd IS a workspace path
+  const workspaces = [{ id: 'ws-home', path: '/work', sessionIds: ['someone-else'] }];
+  const harness = makeHarness({ listWorkspaces: () => workspaces });
+  const spawned = await harness.ops.spawnTask({ prompt: 'child work' }, SUPERVISOR);
+  assert.equal(spawned.ok, true);
+  assert.equal(harness.calls.create[0].workspaceId, 'ws-home');
+  assert.equal(harness.calls.create[0].cwd, undefined);
+});
+
+test('ops.workspaceOp: list / attach / detach through the live entity (0.12.0)', async () => {
+  const workspaces = [{ id: 'ws-sgame', path: 'D:\\git\\SgameAIPipeline', title: 'SgameAIPipeline', sessionIds: ['session-old'] }];
+  const entityCalls = [];
+  const entity = {
+    attachSession: async (sessionId) => {
+      entityCalls.push(['attach', sessionId]);
+      workspaces[0].sessionIds = [sessionId, ...workspaces[0].sessionIds];
+    },
+    detachSession: async (sessionId) => {
+      entityCalls.push(['detach', sessionId]);
+      workspaces[0].sessionIds = workspaces[0].sessionIds.filter((id) => id !== sessionId);
+    },
+  };
+  const harness = makeHarness({ listWorkspaces: () => workspaces, getWorkspace: (id) => (id === 'ws-sgame' ? entity : undefined) });
+  const listed = await harness.ops.workspaceOp({ action: 'list' }, SUPERVISOR);
+  assert.equal(listed.ok, true);
+  assert.deepEqual(listed.workspaces[0], { id: 'ws-sgame', path: 'D:\\git\\SgameAIPipeline', title: 'SgameAIPipeline', sessionIds: ['session-old'] });
+  // attach by path with case/separator/trailing variance
+  const attached = await harness.ops.workspaceOp({ action: 'attach', sessionId: 'session-new', workspacePath: 'd:/git/sgameaipipeline/' }, SUPERVISOR);
+  assert.equal(attached.ok, true);
+  assert.equal(attached.workspaceId, 'ws-sgame');
+  assert.deepEqual(entityCalls[0], ['attach', 'session-new']);
+  // attach by explicit id; then detach (undo path)
+  const byId = await harness.ops.workspaceOp({ action: 'attach', sessionId: 'session-x', workspaceId: 'ws-sgame' }, SUPERVISOR);
+  assert.equal(byId.ok, true);
+  const detached = await harness.ops.workspaceOp({ action: 'detach', sessionId: 'session-x', workspaceId: 'ws-sgame' }, SUPERVISOR);
+  assert.equal(detached.ok, true);
+  assert.deepEqual(entityCalls.map(([op]) => op), ['attach', 'attach', 'detach']);
+  // default action is list
+  const implicit = await harness.ops.workspaceOp({}, SUPERVISOR);
+  assert.equal(implicit.action, 'list');
+});
+
+test('ops.workspaceOp: failure modes (0.12.0)', async () => {
+  const workspaces = [{ id: 'ws-1', path: '/ws1', sessionIds: [] }];
+  const strict = {
+    attachSession: async () => { throw new Error("cannot attach session 'session-bad' to workspace '/ws1': its cwd resolves to '/elsewhere'"); },
+    detachSession: async () => {},
+  };
+  const harness = makeHarness({ listWorkspaces: () => workspaces, getWorkspace: (id) => (id === 'ws-1' ? strict : undefined) });
+  assert.equal((await harness.ops.workspaceOp({ action: 'teleport' }, SUPERVISOR)).code, 'bad-request');
+  assert.equal((await harness.ops.workspaceOp({ action: 'attach' }, SUPERVISOR)).code, 'bad-request'); // no sessionId
+  assert.equal((await harness.ops.workspaceOp({ action: 'attach', sessionId: 's', workspacePath: '/nope' }, SUPERVISOR)).code, 'workspace-not-found');
+  assert.equal((await harness.ops.workspaceOp({ action: 'attach', sessionId: 's', workspaceId: 'ws-ghost' }, SUPERVISOR)).code, 'workspace-not-found');
+  const rejected = await harness.ops.workspaceOp({ action: 'attach', sessionId: 'session-bad', workspaceId: 'ws-1' }, SUPERVISOR);
+  assert.equal(rejected.code, 'workspace-op-failed');
+  assert.match(rejected.error, /cwd resolves to/); // host validation message preserved
+  // no registry service at all -> not-found, never a crash
+  const bare = makeHarness({ listWorkspaces: () => workspaces });
+  assert.equal((await bare.ops.workspaceOp({ action: 'attach', sessionId: 's', workspaceId: 'ws-1' }, SUPERVISOR)).code, 'workspace-not-found');
 });
 
 test('ops.spawnTask: kickoff failure reports the orphan', async () => {
@@ -1188,7 +1280,7 @@ test('commands: registerCommands registers, executes and degrades', async () => 
 /* tools registration                                                  */
 /* ------------------------------------------------------------------ */
 
-test('registerTools: eight tools with delegation', async () => {
+test('registerTools: ten tools with delegation', async () => {
   const harness = makeHarness();
   const registered = [];
   const ctx = {
@@ -1203,7 +1295,7 @@ test('registerTools: eight tools with delegation', async () => {
   // stub defineTool: minimal contract mirror (name/description/parameters/output/execute)
   const defineTool = (options) => options;
   const dispose = registerTools(ctx, harness.ops, { defineTool }, resolveConfig());
-  assert.deepEqual(registered.map((tool) => tool.name), ['task_list', 'task_progress', 'task_send', 'task_spawn', 'task_confirm', 'task_confirm_select', 'task_spawn_batch', 'task_wait', 'task_cancel']);
+  assert.deepEqual(registered.map((tool) => tool.name), ['task_list', 'task_progress', 'task_send', 'task_spawn', 'task_confirm', 'task_confirm_select', 'task_spawn_batch', 'task_wait', 'task_cancel', 'task_workspace']);
   const byName = Object.fromEntries(registered.map((tool) => [tool.name, tool]));
   assert.deepEqual(byName.task_list.parameters.sessionId, undefined);
   assert.ok(byName.task_list.parameters.team); // task_list team filter
@@ -1248,7 +1340,10 @@ test('registerTools: eight tools with delegation', async () => {
   const selectBad = await byName.task_confirm_select.execute({ tasks: [] }, exec);
   assert.equal(selectBad.ok, false);
   assert.equal(selectBad.code, 'bad-request');
-  assert.equal(registered.length, 9);
+  const wsList = await byName.task_workspace.execute({}, exec);
+  assert.equal(wsList.ok, true);
+  assert.equal(wsList.action, 'list');
+  assert.equal(registered.length, 10);
   dispose();
   assert.equal(registered.length, 0);
 });

@@ -2,6 +2,17 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.12.0] - 2026-09-05
+
+### Added
+
+- **工作区迁移（`task_workspace`，第 10 个工具）**：`list` 列出宿主工作区；`attach` / `detach` 把**既有**顶层会话挂入/移出工作区——直连宿主 workspace 实体（`attachSession` / `detachSession`，与 `session.create` 内部同一 API），自带 cwd 与工作区路径一致性校验，**不向会话注入任何消息**。修复历史显式 `cwd` 派发落入「未分组」的会话（GUI 无此入口：拖拽走 `insertSessionBefore`，只接受已在区内的会话）。新错误码 `workspace-not-found` / `workspace-op-failed`。
+
+### Changed
+
+- **spawn cwd→工作区自动升级**：`task_spawn` / `task_spawn_batch` 将要发送的 cwd 与某工作区路径**精确匹配**（大小写/分隔符/尾分隔符归一）时，改发 `workspaceId`——宿主挂载工作区并派生同一 cwd，子任务不再落入未分组；未命中时保持旧语义。未分组的总控（自身 cwd 即工作区路径）派发的子任务同样自动归组。
+- 技能手册、双 README、PROTOCOL、ARCHITECTURE 同步；单元测试 64 → 69；`verify-installed.mjs` 增加 task_workspace 全链与 spawn 升级断言。
+
 ## [0.11.0] - 2026-09-04
 
 ### Added
@@ -141,7 +152,8 @@
 
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
-[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.8.4...v0.9.0
