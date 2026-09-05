@@ -9,7 +9,7 @@
 
 [![DSH 0.1.2-rc.1 verified](https://img.shields.io/badge/DSH-0.1.2--rc.1%20verified-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![69 unit tests](https://img.shields.io/badge/tests-69%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![70 unit tests](https://img.shields.io/badge/tests-70%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
 [What is this](#what-is-this) · [Quick start](#quick-start) · [Tools](#the-ten-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Changelog](CHANGELOG.md) · [中文](README.zh-CN.md)

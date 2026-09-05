@@ -574,31 +574,47 @@ test('resolveCallerWorkspaceId: pure-function edge cases', async () => {
 });
 
 test('normalizeWorkspacePath / findWorkspaceByPath: pure-function edge cases (0.12.0)', async () => {
-  const { normalizeWorkspacePath, findWorkspaceByPath } = await import('../ops.mjs');
-  assert.equal(normalizeWorkspacePath('D:/git/Proj/'), 'd:\\git\\proj');
-  assert.equal(normalizeWorkspacePath('  d:\\git\\PROJ '), 'd:\\git\\proj');
-  assert.equal(normalizeWorkspacePath('D:\\'), 'd:\\'); // drive root kept
-  assert.equal(normalizeWorkspacePath('/a/'), '\\a');
+  const { findWorkspaceByPath } = await import('../ops.mjs');
   assert.equal(findWorkspaceByPath(undefined, () => [{ id: 'ws', path: '/a' }]), undefined);
   assert.equal(findWorkspaceByPath('/a', undefined), undefined);
   assert.equal(findWorkspaceByPath('/b', () => [{ id: 'ws', path: '/a' }]), undefined);
-  assert.equal(findWorkspaceByPath('/a/', () => [{ id: 'ws', path: '/a' }])?.id, 'ws');
-  assert.equal(findWorkspaceByPath('D:\\git\\PROJ', () => [{ id: 'ws', path: 'd:/git/proj/' }])?.id, 'ws');
+  assert.equal(findWorkspaceByPath('/a/', () => [{ id: 'ws', path: '/a' }])?.id, 'ws'); // trailing-sep normalization is portable
   assert.equal(findWorkspaceByPath('/a', () => { throw new Error('boom'); }), undefined);
 });
 
+test('normalizeWorkspacePath: platform branches (0.12.1)', async () => {
+  const { normalizeWorkspacePath, findWorkspaceByPath } = await import('../ops.mjs');
+  // win32: separators unified, case folded, drive root kept
+  assert.equal(normalizeWorkspacePath('D:/git/Proj/', 'win32'), 'd:\\git\\proj');
+  assert.equal(normalizeWorkspacePath('  d:\\git\\PROJ ', 'win32'), 'd:\\git\\proj');
+  assert.equal(normalizeWorkspacePath('D:\\', 'win32'), 'd:\\');
+  // darwin: case folded (default volumes are case-insensitive), separators untouched
+  assert.equal(normalizeWorkspacePath('/Git/Proj/', 'darwin'), '/git/proj');
+  // linux: case preserved, backslash is a regular filename character
+  assert.equal(normalizeWorkspacePath('/Git/Proj/', 'linux'), '/Git/Proj');
+  assert.equal(normalizeWorkspacePath('/Git\\Proj', 'linux'), '/Git\\Proj');
+  // case-variant directories only collide on case-insensitive platforms
+  const list = () => [{ id: 'ws', path: '/Git/Proj' }];
+  assert.equal(findWorkspaceByPath('/git/proj', list, 'darwin')?.id, 'ws');
+  assert.equal(findWorkspaceByPath('/git/proj', list, 'linux'), undefined);
+  assert.equal(findWorkspaceByPath('/Git/Proj/', list, 'linux')?.id, 'ws');
+  // win32 cross-separator + case variance matches
+  assert.equal(findWorkspaceByPath('d:/GIT/proj/', () => [{ id: 'ws', path: 'D:\\git\\PROJ' }], 'win32')?.id, 'ws');
+});
+
 test('ops.spawnTask: cwd→workspace upgrade — exact path match attaches (0.12.0)', async () => {
-  const workspaces = [{ id: 'ws-proj', path: 'D:\\git\\Proj', sessionIds: [] }];
+  const workspaces = [{ id: 'ws-proj', path: '/git/proj', sessionIds: [] }];
   const harness = makeHarness({ listWorkspaces: () => workspaces });
-  // explicit cwd with different case / separators / trailing slash still matches
-  const spawned = await harness.ops.spawnTask({ prompt: 'work', cwd: 'd:/git/proj/' }, SUPERVISOR);
+  // explicit cwd with a trailing separator still matches (portable form;
+  // case/separator variance is covered per-platform in the pure-function test)
+  const spawned = await harness.ops.spawnTask({ prompt: 'work', cwd: '/git/proj/' }, SUPERVISOR);
   assert.equal(spawned.ok, true);
   assert.equal(harness.calls.create[0].workspaceId, 'ws-proj');
   assert.equal(harness.calls.create[0].cwd, undefined); // host derives cwd from the workspace path
   // a non-matching explicit cwd keeps legacy ungrouped semantics
-  const plain = await harness.ops.spawnTask({ prompt: 'work', cwd: 'D:\\git\\Other' }, SUPERVISOR);
+  const plain = await harness.ops.spawnTask({ prompt: 'work', cwd: '/git/other' }, SUPERVISOR);
   assert.equal(plain.ok, true);
-  assert.equal(harness.calls.create[1].cwd, 'D:\\git\\Other');
+  assert.equal(harness.calls.create[1].cwd, '/git/other');
   assert.equal(harness.calls.create[1].workspaceId, undefined);
 });
 
@@ -613,7 +629,7 @@ test('ops.spawnTask: ungrouped supervisor upgrades children by its own cwd (0.12
 });
 
 test('ops.workspaceOp: list / attach / detach through the live entity (0.12.0)', async () => {
-  const workspaces = [{ id: 'ws-sgame', path: 'D:\\git\\SgameAIPipeline', title: 'SgameAIPipeline', sessionIds: ['session-old'] }];
+  const workspaces = [{ id: 'ws-proja', path: '/proj/a', title: 'ProjA', sessionIds: ['session-old'] }];
   const entityCalls = [];
   const entity = {
     attachSession: async (sessionId) => {
@@ -625,19 +641,19 @@ test('ops.workspaceOp: list / attach / detach through the live entity (0.12.0)',
       workspaces[0].sessionIds = workspaces[0].sessionIds.filter((id) => id !== sessionId);
     },
   };
-  const harness = makeHarness({ listWorkspaces: () => workspaces, getWorkspace: (id) => (id === 'ws-sgame' ? entity : undefined) });
+  const harness = makeHarness({ listWorkspaces: () => workspaces, getWorkspace: (id) => (id === 'ws-proja' ? entity : undefined) });
   const listed = await harness.ops.workspaceOp({ action: 'list' }, SUPERVISOR);
   assert.equal(listed.ok, true);
-  assert.deepEqual(listed.workspaces[0], { id: 'ws-sgame', path: 'D:\\git\\SgameAIPipeline', title: 'SgameAIPipeline', sessionIds: ['session-old'] });
-  // attach by path with case/separator/trailing variance
-  const attached = await harness.ops.workspaceOp({ action: 'attach', sessionId: 'session-new', workspacePath: 'd:/git/sgameaipipeline/' }, SUPERVISOR);
+  assert.deepEqual(listed.workspaces[0], { id: 'ws-proja', path: '/proj/a', title: 'ProjA', sessionIds: ['session-old'] });
+  // attach by path with a trailing-separator variance
+  const attached = await harness.ops.workspaceOp({ action: 'attach', sessionId: 'session-new', workspacePath: '/proj/a/' }, SUPERVISOR);
   assert.equal(attached.ok, true);
-  assert.equal(attached.workspaceId, 'ws-sgame');
+  assert.equal(attached.workspaceId, 'ws-proja');
   assert.deepEqual(entityCalls[0], ['attach', 'session-new']);
   // attach by explicit id; then detach (undo path)
-  const byId = await harness.ops.workspaceOp({ action: 'attach', sessionId: 'session-x', workspaceId: 'ws-sgame' }, SUPERVISOR);
+  const byId = await harness.ops.workspaceOp({ action: 'attach', sessionId: 'session-x', workspaceId: 'ws-proja' }, SUPERVISOR);
   assert.equal(byId.ok, true);
-  const detached = await harness.ops.workspaceOp({ action: 'detach', sessionId: 'session-x', workspaceId: 'ws-sgame' }, SUPERVISOR);
+  const detached = await harness.ops.workspaceOp({ action: 'detach', sessionId: 'session-x', workspaceId: 'ws-proja' }, SUPERVISOR);
   assert.equal(detached.ok, true);
   assert.deepEqual(entityCalls.map(([op]) => op), ['attach', 'attach', 'detach']);
   // default action is list

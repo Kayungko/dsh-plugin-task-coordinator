@@ -2,6 +2,13 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.12.1] - 2026-09-05
+
+### Fixed
+
+- **路径归一平台分支**（市场分发自查）：0.12.0 的 `normalizeWorkspacePath` 无条件小写化并把 `/` 折叠为 `\`——这是 Windows 假设，在大小写敏感文件系统（Linux）上可能把仅大小写不同的两个目录误判为同一工作区。现按 `process.platform` 分支：win32 分隔符归一 + 大小写折叠（NTFS 不敏感）+ 盘符根保留；darwin 仅大小写折叠（默认卷不敏感）；POSIX 保留大小写、反斜杠视为普通文件名字符。归一仅是**预筛**，宿主实体 attach 时的 realpath 全等校验仍是最终权威。
+- 测试夹具去环境化：单测/安装态验证不再出现真实项目路径与 Windows 专属断言（平台行为由显式传 `platform` 参数的纯函数测试覆盖，全套件可在 POSIX CI 跑通）。单元测试 69 → 70。
+
 ## [0.12.0] - 2026-09-05
 
 ### Added
@@ -152,7 +159,8 @@
 
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
-[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.9.0...v0.10.0

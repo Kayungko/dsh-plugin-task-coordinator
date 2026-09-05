@@ -110,18 +110,25 @@ export function workspacePathOf(workspaceId, listWorkspaces) {
 }
 
 /**
- * Normalize a filesystem path for exact workspace matching: separators
- * unified to backslash, trailing separators stripped (drive roots kept),
- * lowercased (Windows/NTFS is case-insensitive). Not a general realpath —
- * the host entity does full validation on attach itself.
+ * Normalize a filesystem path for exact workspace matching. Platform-aware
+ * (0.12.1): win32 unifies separators to backslash, strips trailing
+ * separators (drive roots kept) and folds case (NTFS is case-insensitive);
+ * darwin folds case only (default volumes are case-insensitive); POSIX keeps
+ * case and treats backslash as a regular filename character. Not a general
+ * realpath — the host entity does full validation on attach itself.
  * @param {string} value - raw path
+ * @param {string} [platform] - override for tests; defaults to process.platform
  * @returns {string} comparable form
  */
-export function normalizeWorkspacePath(value) {
-  let path = String(value).trim().replaceAll('/', '\\');
-  // strip trailing separators, but keep drive roots ('D:\') intact
-  while (path.length > 1 && path.endsWith('\\') && !/^[A-Za-z]:\\$/.test(path)) path = path.slice(0, -1);
-  return path.toLowerCase();
+export function normalizeWorkspacePath(value, platform = process.platform) {
+  let path = String(value).trim();
+  if (platform === 'win32') {
+    path = path.replaceAll('/', '\\');
+    while (path.length > 1 && path.endsWith('\\') && !/^[A-Za-z]:\\$/.test(path)) path = path.slice(0, -1);
+    return path.toLowerCase();
+  }
+  while (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+  return platform === 'darwin' ? path.toLowerCase() : path;
 }
 
 /**
@@ -130,9 +137,10 @@ export function normalizeWorkspacePath(value) {
  * Failure-tolerant like the other registry helpers.
  * @param {string|undefined} cwd - directory to match
  * @param {Function|undefined} listWorkspaces - lazy host registry snapshot
+ * @param {string} [platform] - normalization override for tests
  * @returns {object|undefined} the matching workspace snapshot entry
  */
-export function findWorkspaceByPath(cwd, listWorkspaces) {
+export function findWorkspaceByPath(cwd, listWorkspaces, platform) {
   if (typeof cwd !== 'string' || cwd.trim().length === 0) return undefined;
   if (typeof listWorkspaces !== 'function') return undefined;
   let workspaces;
@@ -142,9 +150,9 @@ export function findWorkspaceByPath(cwd, listWorkspaces) {
     return undefined;
   }
   if (!Array.isArray(workspaces)) return undefined;
-  const target = normalizeWorkspacePath(cwd);
+  const target = normalizeWorkspacePath(cwd, platform);
   return workspaces.find(
-    (workspace) => typeof workspace?.path === 'string' && normalizeWorkspacePath(workspace.path) === target,
+    (workspace) => typeof workspace?.path === 'string' && normalizeWorkspacePath(workspace.path, platform) === target,
   );
 }
 

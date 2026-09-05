@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-task-coordinator",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "Codex-style cross-task coordination for DeepSeek Harness: list, inspect, spawn, message and steer top-level sessions from a supervisor agent, with team workstreams, correlation ids, batch spawning, interactive dispatch confirmation (task_confirm approval cards, reusable mission-scoped approvals), multi-select partial dispatch (task_confirm_select), workspace migration for existing sessions (task_workspace), default result report-back from spawned tasks, recursion-depth governance, workspace inheritance, a durable spawn registry, a /tasks slash command and a copy-session-id header button. Ships the task-coordination supervisor skill.",
   "type": "module",
   "main": "index.mjs",

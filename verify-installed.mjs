@@ -184,7 +184,7 @@ assert.equal(registrations.length, 10, `expected 10 tools, got ${registrations.l
 assert.equal(ctx.commandRegistrations.length, 1, 'expected the /tasks command');
 assert.equal(ctx.commandRegistrations[0].name, 'tasks');
 assert.ok(ctx.provides.taskCoordinator, 'taskCoordinator service not provided');
-assert.equal(ctx.provides.taskCoordinator.version, '0.12.0');
+assert.equal(ctx.provides.taskCoordinator.version, '0.12.1');
 // the skill mount is fire-and-forget (dynamic import); give it a macrotask
 await new Promise((resolve) => setImmediate(resolve));
 assert.equal(ctx.mountedPlugins.length, 1, 'expected the skill provider mount');
@@ -431,7 +431,7 @@ assert.equal(wsGhost.ok, false);
 assert.equal(wsGhost.code, 'workspace-not-found');
 // spawn upgrade: an explicit cwd matching the workspace path attaches instead
 // of dropping the child into the ungrouped bucket
-const upgraded = await byName.task_spawn.execute({ prompt: '工作区升级验证', cwd: '/PROJ/' }, supervisorExec);
+const upgraded = await byName.task_spawn.execute({ prompt: '工作区升级验证', cwd: '/proj/' }, supervisorExec);
 assert.equal(upgraded.ok, true);
 assert.ok(verifyWorkspace.sessionIds.includes(upgraded.sessionId), 'explicit-cwd spawn upgraded to workspace attachment');
 console.log('task_workspace     : OK -> list/attach/detach + spawn cwd-upgrade verified');

@@ -106,7 +106,7 @@ flowchart LR
 
 宿主 `create` 对 `workspaceId` 与 `cwd` 是**互斥**语义，且只有 `workspaceId` 触发 `workspace.attachSession`。`spawnTask` 因此先解析调用方的工作区成员归属（调用方自身 + `parentSessionId` 祖先链 ≤8 跳，与工作区 `sessionIds` 求交），命中传 `workspaceId`（宿主以工作区路径为 cwd 并挂入），显式 `cwd` 优先、无归属降级为旧语义——子任务与总控在同一工作区侧栏可见。
 
-cwd→工作区升级与既有会话迁移（0.12.0）：将发送的 cwd 与工作区 path **精确匹配**（`normalizeWorkspacePath`：分隔符归一/去尾/小写，非 realpath）时改发 `workspaceId`，跨目录派发与未分组总控的子任务不再落入「未分组」；`task_workspace` 工具直连 `workspaceRegistry.get(id)` 活实体的 `attachSession`/`detachSession`（宿主 create 内部同一 API，自带会话头 cwd 与工作区 path 全等校验、幂等），迁移历史未分组会话且**不注入任何消息**。GUI 无此入口（拖拽 = `insertSessionBefore`，仅区内重排序）——插件面是唯一干净通道。
+cwd→工作区升级与既有会话迁移（0.12.0）：将发送的 cwd 与工作区 path **精确匹配**（`normalizeWorkspacePath` 按平台分支 [0.12.1]：win32 分隔符归一+大小写折叠、darwin 仅折叠、POSIX 保留大小写；非 realpath，宿主实体校验才是权威）时改发 `workspaceId`，跨目录派发与未分组总控的子任务不再落入「未分组」；`task_workspace` 工具直连 `workspaceRegistry.get(id)` 活实体的 `attachSession`/`detachSession`（宿主 create 内部同一 API，自带会话头 cwd 与工作区 path 全等校验、幂等），迁移历史未分组会话且**不注入任何消息**。GUI 无此入口（拖拽 = `insertSessionBefore`，仅区内重排序）——插件面是唯一干净通道。
 
 ### 客户端模块装载要点（0.8.0–0.8.2）
 
