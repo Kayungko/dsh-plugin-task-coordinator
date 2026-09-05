@@ -23,6 +23,7 @@
 
 import { blocksToText, checkCaller, checkTarget, excerpt } from './safety.mjs';
 import { buildSpawnTitle } from './title.mjs';
+import { uiStrings } from './i18n.mjs';
 
 /** Operation-level failure codes (guard denials carry their own codes). */
 export const OP_CODES = Object.freeze({
@@ -51,10 +52,14 @@ export const OP_CODES = Object.freeze({
   CATALOG_UNAVAILABLE: 'catalog-unavailable',
 });
 
-/** Approve option label for the dispatch-confirmation card (must match exactly). */
+/**
+ * Approve option label for the dispatch-confirmation card (must match exactly).
+ * zh baseline (0.15.0): the live card labels follow the host locale preference
+ * through i18n.mjs; these constants remain the zh reference for docs/tests.
+ */
 export const CONFIRM_APPROVE_LABEL = '按计划派发（推荐）';
 
-/** Decline option label for the dispatch-confirmation card. */
+/** Decline option label for the dispatch-confirmation card (zh baseline). */
 export const CONFIRM_DECLINE_LABEL = '暂不派发';
 
 /**
@@ -199,11 +204,15 @@ export async function describeModelRoutes(provider, listProviders, listModels) {
  * @returns {TaskOps}
  */
 export function createOps(deps) {
-  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser, listWorkspaces, getWorkspace, resolveModelConfig, listModelProviders, listProviderModels } = deps;
+  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser, listWorkspaces, getWorkspace, resolveModelConfig, listModelProviders, listProviderModels, readUiLocale } = deps;
 
   const fail = (code, message) => ({ ok: false, code, error: message });
   const failDeny = (denial) => fail(denial.code, denial.message);
   const shortId = (sessionId) => String(sessionId).replace(/^session-/, '').slice(0, 8);
+  // UI strings follow the host locale preference, read live per call (0.15.0):
+  // switching the GUI language applies from the next card/kickoff onward, no
+  // remount needed. Absent reader or preference keeps the historical zh set.
+  const currentStrings = () => uiStrings(typeof readUiLocale === 'function' ? readUiLocale() : undefined);
 
   /**
    * Approved-but-unused dispatch confirmations (confirmationId -> record).
@@ -604,7 +613,7 @@ export function createOps(deps) {
       // only pull. The registry excerpt keeps the user's original prompt.
       const wantsReport = reportBack !== false;
       const kickoffText = wantsReport
-        ? `${prompt.trim()}\n\n---\n汇报约定：完成（或确认无法完成）后，用 task_send 把结果摘要发回会话 ${caller.sessionId}（内容：结论、产出路径、遗留问题）。若发送失败，把摘要完整写进你的最终回复。`
+        ? `${prompt.trim()}\n\n---\n${currentStrings().reportBackSuffix(caller.sessionId)}`
         : prompt.trim();
       let started = false;
       try {
@@ -668,15 +677,16 @@ export function createOps(deps) {
       // Plan-review narrowing (verified against dsh-user-questions + client
       // PlanReviewPanel): single question, no multiSelect, <=2 options, detail
       // present, and the approve label must name one option exactly.
-      const approveLabel = CONFIRM_APPROVE_LABEL;
+      const strings = currentStrings();
+      const approveLabel = strings.confirmApproveLabel;
       const reviewQuestion = {
         id: 'task-dispatch-review',
-        header: '派发确认',
-        question: typeof question === 'string' && question.trim().length > 0 ? question.trim() : '批准该拆分方案并开始派发？',
+        header: strings.confirmHeader,
+        question: typeof question === 'string' && question.trim().length > 0 ? question.trim() : strings.confirmQuestionDefault,
         detail: plan.trim(),
         options: [
-          { label: approveLabel, description: '总控将按上述方案批量派发任务' },
-          { label: CONFIRM_DECLINE_LABEL, description: '取消本次派发；在聊天里说明调整意见' },
+          { label: approveLabel, description: strings.confirmApproveDescription },
+          { label: strings.confirmDeclineLabel, description: strings.confirmDeclineDescription },
         ],
         intent: { kind: 'plan-review', approve: approveLabel },
       };
@@ -713,7 +723,7 @@ export function createOps(deps) {
       return {
         ok: true,
         approved: false,
-        feedback: typeof answer?.custom === 'string' && answer.custom.trim().length > 0 ? answer.custom.trim() : (selected[0] ?? CONFIRM_DECLINE_LABEL),
+        feedback: typeof answer?.custom === 'string' && answer.custom.trim().length > 0 ? answer.custom.trim() : (selected[0] ?? strings.confirmDeclineLabel),
         hint: 'do not dispatch; fold the user\'s feedback into a revised plan and confirm again',
       };
     },
@@ -747,11 +757,12 @@ export function createOps(deps) {
       if (typeof askUser !== 'function') {
         return fail(OP_CODES.NO_QUESTION_CHANNEL, 'no user-questions channel composed; list the tasks in chat and let the user pick by replying');
       }
+      const selectStrings = currentStrings();
       const selectQuestion = {
         id: 'task-dispatch-select',
         question: typeof question === 'string' && question.trim().length > 0
           ? question.trim()
-          : `共 ${options.length} 个任务，勾选要派发的（未勾选的不派发；可在自定义输入行写调整意见）`,
+          : selectStrings.selectQuestionDefault(options.length),
         multiSelect: true,
         options,
       };
@@ -771,7 +782,7 @@ export function createOps(deps) {
         return {
           ok: true,
           approved: false,
-          feedback: custom ?? '未选择任何任务',
+          feedback: custom ?? selectStrings.selectEmptyFeedback,
           hint: 'do not dispatch; fold the user\'s feedback into a revised task list and confirm again',
         };
       }

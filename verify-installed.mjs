@@ -14,6 +14,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { resolveUiLocale, uiStrings } from './i18n.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -221,7 +222,7 @@ assert.equal(registrations.length, 11, `expected 11 tools, got ${registrations.l
 assert.equal(ctx.commandRegistrations.length, 1, 'expected the /tasks command');
 assert.equal(ctx.commandRegistrations[0].name, 'tasks');
 assert.ok(ctx.provides.taskCoordinator, 'taskCoordinator service not provided');
-assert.equal(ctx.provides.taskCoordinator.version, '0.14.0');
+assert.equal(ctx.provides.taskCoordinator.version, '0.15.0');
 // the skill mount is fire-and-forget (dynamic import); give it a macrotask
 await new Promise((resolve) => setImmediate(resolve));
 assert.equal(ctx.mountedPlugins.length, 1, 'expected the skill provider mount');
@@ -502,6 +503,17 @@ assert.equal(catalog.providers[0].id, 'prov-verify');
 assert.deepEqual(catalog.providers[0].models[0], { id: 'model-ok', name: 'OK Model', efforts: ['high'], defaultEffort: 'high' });
 assert.match(catalog.hint, /task_spawn/);
 console.log('task_models        : OK -> live catalog projection (ids + efforts + default)');
+
+// 0.15.0 UI localization: zh/en dictionaries + preference resolution ship with
+// the installed bundle (the static import above proves i18n.mjs deployed). The
+// mock host composes no settings service, so every card/kickoff in this run
+// already proved the graceful zh default end-to-end (汇报约定 asserts above).
+assert.deepEqual([resolveUiLocale('en'), resolveUiLocale('zh'), resolveUiLocale(undefined), resolveUiLocale('fr')], ['en', 'zh', 'zh', 'zh']);
+assert.equal(uiStrings('en').confirmApproveLabel, 'Dispatch as planned (Recommended)');
+assert.match(uiStrings('en').reportBackSuffix('session-x'), /^Reporting convention: .*session session-x via task_send/);
+assert.match(uiStrings('zh').reportBackSuffix('session-x'), /^汇报约定：/);
+assert.equal(uiStrings('en').tasksCommandDescription, 'View coordination tasks and team groupings (direct query, no model turn)');
+console.log('i18n               : OK -> zh/en dictionaries, locale resolution, graceful zh default');
 
 const cancelResult = await byName.task_cancel.execute({ sessionId: 'session-worker' }, supervisorExec);
 assert.equal(cancelResult.ok, true);

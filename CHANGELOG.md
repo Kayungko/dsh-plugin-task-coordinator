@@ -2,6 +2,20 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.15.0] - 2026-09-05
+
+### Added
+
+- **界面文案跟随宿主语言（zh/en）**：所有用户可见字符串接入宿主官方语言通道（`@deepseek-ai/dsh-client-locale`——GUI「设置 → 通用 → 语言」同一来源，持久化于 settings 命名空间 `locale` 字段 `preference`）：
+  - **浏览器侧按钮**（复制会话Id/已复制 ✓/复制失败 ↔ Copy Session ID/Copied ✓/Copy failed）向 client locale runtime 注册词典（NS `task-coordinator`）并经 `translate` 实时解析，语言切换即重渲染（`getSnapshot/subscribe`，uSES 安全）——官方 session-log-export 按钮同款接线；locale 服务缺失/注册被拒/React 过老任一情况退回内置中文字典，永不崩溃。
+  - **宿主侧字符串**经新纯模块 `i18n.mjs` 每次调用实时解析：派发确认卡（标题/问题/「按计划派发（推荐）」↔「Dispatch as planned (Recommended)」/「暂不派发」↔「Not now」/选项说明）、多选卡默认问题与空选反馈、开场汇报约定后缀、`/tasks` 命令描述与提示（挂载时捕获）。切换语言后下一张卡/下一次开场即生效，无需重启。
+  - **回退纪律**：只认精确 `en`；偏好缺失或不可识别一律保持历史中文——「未设置=跟随浏览器」是浏览器侧委托语义，宿主侧不可见，绝不猜测未内置的语言。
+- 单元测试 80 → 87。
+
+### Notes
+
+- 模型面不变：工具描述仍是英文模型契约、SKILL 手册仍是中文、会话命名沿用 `MMDD｜类型｜主题` 约定——三者是文档化协议而非 UI 装饰。
+
 ## [0.14.0] - 2026-09-05
 
 ### Added
@@ -179,7 +193,8 @@
 
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
-[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.12.0...v0.12.1

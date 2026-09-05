@@ -13,6 +13,8 @@
  *   /tasks <sessionId>    -> progress summary of one task (short id prefix ok)
  */
 
+import { uiStrings } from './i18n.mjs';
+
 export const TASKS_USAGE = 'Usage: /tasks [team <name> | <sessionId>]';
 
 /**
@@ -109,17 +111,20 @@ export function renderProgress(result) {
  * commands registry (never breaks the tools).
  * @param {object} ctx cordis context (uses ctx.commands)
  * @param {ReturnType<import('./ops.mjs').createOps>} ops
+ * @param {ReturnType<import('./i18n.mjs').uiStrings>} [strings] UI-string
+ *   dictionary for the command metadata (0.15.0; captured at mount — the
+ *   description follows the locale preference read when the plugin loads)
  * @returns {() => void} disposer
  */
-export function registerCommands(ctx, ops) {
+export function registerCommands(ctx, ops, strings = uiStrings('zh')) {
   if (!ctx.commands || typeof ctx.commands.register !== 'function') {
     ctx.logger?.warn?.('task-coordinator: ctx.commands unavailable; /tasks not registered');
     return () => {};
   }
   const dispose = ctx.commands.register({
     name: 'tasks',
-    description: '查看协调任务与工作流编组（直接查询，不进模型）',
-    input: { hint: '[team <名称> | <sessionId>]' },
+    description: strings.tasksCommandDescription,
+    input: { hint: strings.tasksCommandHint },
     async handler(invocation) {
       const caller = callerFromInvocation(invocation);
       const parsed = parseTasksCommand(invocation?.rawInput);

@@ -9,7 +9,7 @@
 
 [![DSH 0.1.2-rc.1 verified](https://img.shields.io/badge/DSH-0.1.2--rc.1%20verified-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![80 unit tests](https://img.shields.io/badge/tests-80%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![87 unit tests](https://img.shields.io/badge/tests-87%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
 [What is this](#what-is-this) · [Quick start](#quick-start) · [Tools](#the-eleven-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Changelog](CHANGELOG.md) · [中文](README.zh-CN.md)
@@ -113,6 +113,10 @@ Spawned children attach to the caller's workspace by default; an explicit `cwd` 
 `task_spawn` — and every item of `task_spawn_batch` — accepts an optional `provider` + `model` pair (+ `reasoningEffort`). The route is validated against the host LLM catalog **before** the session is created (`model-unavailable` rejects an invalid pair with zero orphans), then installed through the host's `sessionController.selectModel` **between creation and kickoff**, so the child's very first turn runs on the requested model; the selection persists as a durable session event and survives restarts. Should installation fail after pre-validation, the spawn reports `model-select-failed` with the traceable orphan id and never kicks off on the wrong model. Host semantics, disclosed as-is: installing a session-local model **also updates the app-wide default model** (the GUI picker's "last selection wins" behavior — `selectModel` is the host's only public entry point), so in a mixed-model batch the last child's route becomes the app default.
 
 Marketplace reality: **every user connects different providers/models**, so ids are never hardcoded and never guessed — `task_models` projects the host's **live** model catalog (the same source the GUI model picker renders) into the exact ids `task_spawn` accepts, including per-model reasoning efforts and the app-wide default; providers whose catalog listing fails are reported in isolation (`failedProviders`). A rejected `model-unavailable` spawn carries an actionable hint too: the error lists what the requested provider actually serves (or the routable providers when the provider itself is unknown). On host builds without `modelCatalog()`, `task_models` degrades to `catalog-unavailable` and the error hints remain the fallback.
+
+### Localized UI strings (0.15.0)
+
+User-facing strings follow the host's Language preference (Settings → General → Language; the durable `locale.preference`, zh/en — the same channel the official session-log button uses). The browser-side header button registers dictionaries with the live client locale runtime and re-renders on every language switch; host-side surfaces (dispatch-confirmation cards, the report-back kickoff suffix, `/tasks` metadata) resolve through `i18n.mjs` per call, so a switch applies from the next card/kickoff without a restart. An absent or unknown preference keeps the historical Chinese strings — the host side cannot see the "follow the browser" delegation, so the plugin never guesses a language it does not ship. Model-facing surfaces stay as documented: tool descriptions are the English model contract, the SKILL manual is Chinese, and titles follow the `MMDD｜类型｜主题` convention.
 
 ## Dispatch confirmation (the anti-black-box gate)
 
@@ -244,6 +248,7 @@ dsh-plugin-task-coordinator/
 ├── safety.mjs          guards + rate limiter + denial codes (pure module)
 ├── title.mjs           spawn-title rule (pure module)
 ├── registry.mjs        durable spawn registry (near-atomic writes, corruption-tolerant)
+├── i18n.mjs            zh/en UI-string dictionaries · host-locale resolution
 ├── ops.mjs             session operations · DI factory
 ├── tools.mjs           eleven task_* tool registrations
 ├── commands.mjs        /tasks slash command (direct execution, no model turn)

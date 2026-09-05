@@ -9,7 +9,7 @@
 
 [![DSH 0.1.2-rc.1 实测](https://img.shields.io/badge/DSH-0.1.2--rc.1%20实测-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![80 个单元测试](https://img.shields.io/badge/tests-80%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![87 个单元测试](https://img.shields.io/badge/tests-87%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
 [这是什么](#这是什么) · [快速开始](#快速开始) · [十一个工具](#十一个工具) · [架构设计](docs/ARCHITECTURE.md) · [主机契约](docs/PROTOCOL.md) · [更新日志](CHANGELOG.md) · [English](README.md)
@@ -112,6 +112,10 @@ pwsh install.ps1 -Source .
 `task_spawn` 与 `task_spawn_batch` 的每个条目接受可选 `provider` + `model`（+ `reasoningEffort`）组合。路线先经宿主 LLM 目录在创建会话**之前**预校验（无效组合 `model-unavailable` 直接拒绝，零孤儿），再于**创建之后、开场之前**通过宿主 `sessionController.selectModel` 安装——子会话第一轮就跑在指定模型上；选择以持久会话事件写入，重启存活。预校验通过但安装失败时报 `model-select-failed` 并附可追踪的孤儿 sessionId，**绝不用错误模型开场**。宿主语义如实披露：安装会话级模型会**同时更新应用级默认模型**（GUI 模型选择器「最近选择即默认」的同一行为——`selectModel` 是宿主唯一公开入口），混合模型批量中最后一个子会话的路线会成为应用默认。
 
 市场现实：**每个用户接入的 provider/model 都不一样**，所以 id 从不写死、也不该靠猜——`task_models` 把宿主**活体模型目录**（GUI 模型选择器渲染的同一数据源）投影为 `task_spawn` 可直接使用的精确 id：provider 分组、model id、逐模型的 reasoning effort、应用级默认选择；目录列举失败的 provider 单点隔离上报（`failedProviders`）。`model-unavailable` 的拒绝错误同样自带可行动提示：列出该 provider 实际提供的模型（provider 本身不认识时列出全部可路由 provider）。宿主版本没有 `modelCatalog()` 时 `task_models` 降级为 `catalog-unavailable`，错误提示仍是兜底。
+
+### 界面文案跟随宿主语言（0.15.0）
+
+用户可见文案跟随宿主语言偏好（设置 → 通用 → 语言；持久化 `locale.preference`，zh/en——官方 Session 日志按钮同一通道）。浏览器侧头部按钮向活体 client locale runtime 注册词典并实时翻译，切换语言立即重渲染；宿主侧界面（派发确认卡、汇报约定开场后缀、`/tasks` 元数据）经 `i18n.mjs` 每次调用实时解析——切换语言后下一张卡/下一次开场即生效，无需重启。偏好缺失或不可识别时保持历史中文文案（宿主侧感知不到「未设置=跟随浏览器」的委托语义），绝不猜测未内置的语言。模型面维持文档化协议不变：工具描述为英文模型契约、SKILL 手册为中文、标题遵循 `MMDD｜类型｜主题` 约定。
 
 ## 派发确认（反信息黑盒闸门）
 
@@ -243,6 +247,7 @@ dsh-plugin-task-coordinator/
 ├── safety.mjs          守卫 + 限流器 + 拒绝码（纯模块）
 ├── title.mjs           spawn 命名规则（纯模块）
 ├── registry.mjs        持久 spawn 注册表（近似原子写 · 损坏容错）
+├── i18n.mjs            界面文案字典（zh/en · 跟随宿主语言偏好）
 ├── ops.mjs             会话操作 · DI 工厂
 ├── tools.mjs           十一个 task_* 工具注册
 ├── commands.mjs        /tasks 斜杠命令（直接执行，不进模型）

@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-task-coordinator",
-  "version": "0.14.0",
-  "description": "Codex-style cross-task coordination for DeepSeek Harness: list, inspect, spawn, message and steer top-level sessions from a supervisor agent, with team workstreams, correlation ids, batch spawning, interactive dispatch confirmation (task_confirm approval cards, reusable mission-scoped approvals), multi-select partial dispatch (task_confirm_select), workspace migration for existing sessions (task_workspace), per-child model selection with live model-route discovery (task_models), default result report-back from spawned tasks, recursion-depth governance, workspace inheritance, a durable spawn registry, a /tasks slash command and a copy-session-id header button. Ships the task-coordination supervisor skill.",
+  "version": "0.15.0",
+  "description": "Codex-style cross-task coordination for DeepSeek Harness: list, inspect, spawn, message and steer top-level sessions from a supervisor agent, with team workstreams, correlation ids, batch spawning, interactive dispatch confirmation (task_confirm approval cards, reusable mission-scoped approvals), multi-select partial dispatch (task_confirm_select), workspace migration for existing sessions (task_workspace), per-child model selection with live model-route discovery (task_models), localized user-facing UI strings following the host language preference (zh/en), default result report-back from spawned tasks, recursion-depth governance, workspace inheritance, a durable spawn registry, a /tasks slash command and a copy-session-id header button. Ships the task-coordination supervisor skill.",
   "type": "module",
   "main": "index.mjs",
   "exports": {
@@ -15,6 +15,7 @@
     "safety.mjs",
     "title.mjs",
     "registry.mjs",
+    "i18n.mjs",
     "ops.mjs",
     "tools.mjs",
     "commands.mjs",
@@ -39,7 +40,7 @@
     }
   },
   "scripts": {
-    "check": "node --check index.mjs && node --check config.mjs && node --check safety.mjs && node --check title.mjs && node --check registry.mjs && node --check ops.mjs && node --check tools.mjs && node --check commands.mjs && node --check skills.mjs && node --check client.js",
+    "check": "node --check index.mjs && node --check config.mjs && node --check safety.mjs && node --check title.mjs && node --check registry.mjs && node --check i18n.mjs && node --check ops.mjs && node --check tools.mjs && node --check commands.mjs && node --check skills.mjs && node --check client.js",
     "test": "node --test test/smoke.test.mjs"
   },
   "peerDependencies": {

@@ -31,6 +31,7 @@ flowchart LR
             config["config.mjs<br/>配置解析"]
             safety["safety.mjs<br/>守卫 + 限流器"]
             title["title.mjs<br/>spawn 命名规则"]
+            i18n["i18n.mjs<br/>界面文案字典（zh/en）"]
         end
 
         index --> tools --> ops
@@ -40,6 +41,8 @@ flowchart LR
         index --> registry --> ops
         ops --> safety
         ops --> title
+        ops --> i18n
+        commands --> i18n
     end
 
     sc["ctx.sessionController<br/>list/create/prompt/cancel/<br/>rename/resolveAgent/inspect"]
@@ -73,13 +76,14 @@ flowchart LR
 
 - **纯模块**（`config.mjs` / `safety.mjs` / `title.mjs`）：零宿主 import，全部单测覆盖——59 个单元测试的主体；
 - **`registry.mjs`**：持久 spawn 注册表（团队工作流的跨重启记忆）。读写永不抛错：损坏/缺失降级为空注册表，损坏文件保留为 `*.corrupt-<ts>`；写入近似原子（临时文件 + 重命名）；容量上限裁剪（`registryMaxEntries`）；0.5.0 起每条记录还带 `depth` 与 `parentSessionId`（递归治理的依据）；
+- **`i18n.mjs`**：界面文案字典（zh/en）与语言解析（0.15.0，纯模块零宿主 import）。`resolveUiLocale` 只认精确 `en`，其余一律落 zh（绝不猜测未内置的语言）；`uiStrings(locale)` 返回冻结字典——确认卡标签/标题/问题、多选卡文案、汇报约定后缀、`/tasks` 元数据。宿主侧每次调用实时读 settings `locale.preference`，切语言无需重启；
 - **`ops.mjs`**：工厂函数 `createOps(deps)`，宿主对象（sessionController / agents / createUserMessage / limiter / registry / uuid / askUser）**全部经依赖注入**，离开宿主进程可完整测试；
 - **`tools.mjs`**：连 `defineTool` 都经注入——模型面注册与宿主包解耦；
 - **`commands.mjs`**：`/tasks` 斜杠命令（0.4.0）——仿官方 `dsh-command-goal` 的 `inject=['commands']` + `ctx.commands.register` 模式；宿主无命令注册表时降级为 warning，工具面不受影响；
 - **`client.js`**：Web 客户端模块（0.8.0）——插件唯一运行在**浏览器侧**的产物。不经 cordis 入口装配，而是由宿主 `dsh-client-modules` 依 `dsh.client` 声明 + `exports["./client"]` 原样装载（`window.__ModuleLoader__` factory 格式），占 `conversation.session.header.utilities` 槽渲染「复制会话Id」按钮（面性胶囊：亮色黑底白字 / 暗色白底黑字，走 `--dsw-alias-label-primary(-foreground)` 主题 token，几何对齐「Session 日志」）；与宿主侧十一个模块完全解耦，缺槽位只影响该按钮；
 - **`index.mjs`**：唯一直接 import 宿主包（`dsh-tools` / `dsh-llm`）的装配层；`skills.mjs` 对 `dsh-skill-filesystem` 用**动态 import**；`ctx.get('userQuestions')` 在 `task_confirm` 调用时**惰性解析**（不硬注入，宿主缺该接缝时其余工具不受影响）。
 
-## 机制设计（0.4.0–0.14.0 新增）
+## 机制设计（0.4.0–0.15.0 新增）
 
 ### 派发确认链（0.6.0）
 
@@ -113,6 +117,10 @@ cwd→工作区升级与既有会话迁移（0.12.0）：将发送的 cwd 与工
 `spawnTask` 接受可选 `provider`+`model`（+`reasoningEffort`，成对约束），走两级校验链：**目录预校验**（`llm.resolveCallConfig`，创建会话前拒绝无效路线——零孤儿；服务缺失优雅跳过）→ **创建后、开场前** `sessionController.selectModel` 安装（选择以 `model/selection` 会话事件持久化，重启存活；失败报孤儿 id、绝不用错误模型开场）。关键宿主事实（源码核验，`dsh-api-session-controller` 600-628 行）：`selectModel` 是会话级模型指定的**唯一公开入口**，且会经 `agentDefaultModel.saveSelection` 同步更新应用级默认模型（「最近选择即默认」，GUI 选择器同行为）；真正会话本地的 `selectForNextRequest` 是控制器内部方法、插件不可达——因此选择走公开 API 并在工具描述/手册如实披露该副作用，而非仿写内部行为绕过。
 
 路线发现（0.14.0）：市场分发下**每个部署接入的 provider/model 都不同**，id 从不写死、不靠猜——`task_models` 调 Remote 门面的公开方法 `sessionController.modelCatalog()`（2722 行；内部 `buildModelCatalog` 聚合 `llm.listProviders/listModels/resolveModelInfo`，1933-1980 行，GUI 模型选择器同源），投影为精确可用 id（provider 分组/model/efforts/应用级默认/单点失败隔离）。`model-unavailable` 错误经 `describeModelRoutes` 附「该 provider 实际提供的模型」或「可路由 provider 列表」提示——失败容忍契约：目录依赖任何异常只退回原始错误，绝不遮蔽拒绝原因。老宿主无 `modelCatalog` 时降级 `catalog-unavailable`。
+
+### 界面本地化（0.15.0）
+
+用户可见文案分两线。**浏览器侧**：按钮接入宿主 `LocaleRuntime`（官方 session-log-export 同款通道）——`inject` 不硬声明 locale，防御性访问 `ctx.locale`，老宿主保住中文按钮而非整个模块拒载；`register(NS, {zh,en})` 注册词典 + `translate(NS, key)` 实时解析 + `getSnapshot/subscribe` 驱动 `useSyncExternalStore` 重渲染（语言切换与词典注册都 bump revision）；服务缺失/注册被拒/React 无 uSES 任一情况退回内置中文字典。**宿主侧**：确认卡标签/标题/问题、多选卡、汇报约定开场后缀、`/tasks` 元数据经 `readUiLocale`（读 settings 命名空间 `locale` 字段 `preference`；`settings.get(ns)` 直接返回解析值）每次调用实时解析 `i18n.mjs` 冻结字典——切换语言后下一张卡/下一次开场即生效（`/tasks` 描述挂载时捕获，随下次重挂载）。回退纪律：只认精确 `en`，缺失或不可识别一律 zh——「未设置=跟随浏览器语言」是浏览器侧委托语义，宿主侧不可见，绝不猜测。模型面不变（英文工具描述=模型契约、中文 SKILL 手册、`MMDD｜类型｜主题` 命名约定——文档化协议而非 UI 装饰）。
 
 ### 客户端模块装载要点（0.8.0–0.8.2）
 

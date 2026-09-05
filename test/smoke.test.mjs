@@ -15,6 +15,7 @@ import { buildSpawnTitle, mmdd, truncateTopic, firstLine } from '../title.mjs';
 import { buildSkillsConfig, SKILL_PROVIDER_NAME, SKILLS_DIR } from '../skills.mjs';
 import { SpawnRegistry } from '../registry.mjs';
 import { parseTasksCommand, registerCommands, renderTaskList, renderProgress, callerFromInvocation } from '../commands.mjs';
+import { resolveUiLocale, uiStrings, UI_LOCALES } from '../i18n.mjs';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -358,6 +359,7 @@ function makeHarness(overrides = {}) {
     ...(overrides.resolveModelConfig ? { resolveModelConfig: overrides.resolveModelConfig } : {}),
     ...(overrides.listModelProviders ? { listModelProviders: overrides.listModelProviders } : {}),
     ...(overrides.listProviderModels ? { listProviderModels: overrides.listProviderModels } : {}),
+    ...(overrides.readUiLocale ? { readUiLocale: overrides.readUiLocale } : {}),
     uuid: () => 'req-test-1',
     askUser,
   });
@@ -1443,6 +1445,90 @@ test('commands: registerCommands registers, executes and degrades', async () => 
   const noop = registerCommands({ logger: null }, harness.ops);
   assert.equal(typeof noop, 'function');
   noop();
+});
+
+/* ------------------------------------------------------------------ */
+/* i18n: host-side UI strings follow the locale preference (0.15.0)     */
+/* ------------------------------------------------------------------ */
+
+test('i18n: resolveUiLocale never guesses an unshipped language', () => {
+  assert.deepEqual(UI_LOCALES, ['zh', 'en']);
+  assert.equal(resolveUiLocale('en'), 'en');
+  assert.equal(resolveUiLocale('zh'), 'zh');
+  assert.equal(resolveUiLocale(undefined), 'zh');
+  assert.equal(resolveUiLocale('fr'), 'zh');
+  assert.equal(resolveUiLocale(42), 'zh');
+});
+
+test('i18n: dictionaries carry the exact card labels and interpolate', () => {
+  assert.equal(uiStrings('en').confirmApproveLabel, 'Dispatch as planned (Recommended)');
+  assert.equal(uiStrings('en').confirmDeclineLabel, 'Not now');
+  assert.equal(uiStrings().confirmDeclineLabel, '暂不派发'); // default = historical zh
+  assert.equal(uiStrings('zh').confirmApproveLabel, '按计划派发（推荐）');
+  assert.match(uiStrings('en').reportBackSuffix('session-x'), /^Reporting convention: .*session session-x via task_send/);
+  assert.match(uiStrings('zh').reportBackSuffix('session-x'), /^汇报约定：.*发回会话 session-x/);
+  assert.match(uiStrings('en').selectQuestionDefault(3), /^3 proposed task\(s\)/);
+  assert.match(uiStrings('zh').selectQuestionDefault(3), /^共 3 个任务/);
+});
+
+test('i18n: report-back kickoff suffix follows uiLocale', async () => {
+  const harness = makeHarness({ readUiLocale: () => 'en' });
+  await harness.ops.spawnTask({ prompt: 'do the work' }, SUPERVISOR);
+  const kickoff = harness.calls.prompt.at(-1).content[0].text;
+  assert.match(kickoff, /^do the work\n\n---\nReporting convention: when done \(or confirmed blocked\), send a result summary back to session session-super via task_send/);
+});
+
+test('i18n: confirmPlan renders the en card and approves via the en label', async () => {
+  let captured;
+  const harness = makeHarness({
+    readUiLocale: () => 'en',
+    askUser: async (request) => {
+      captured = request.questions[0];
+      return { answers: [{ id: captured.id, selected: ['Dispatch as planned (Recommended)'] }] };
+    },
+  });
+  const result = await harness.ops.confirmPlan({ plan: '# en plan' }, SUPERVISOR);
+  assert.equal(captured.header, 'Dispatch confirmation');
+  assert.equal(captured.question, 'Approve this decomposition and start dispatching?');
+  assert.deepEqual(captured.options.map((option) => option.label), ['Dispatch as planned (Recommended)', 'Not now']);
+  assert.equal(captured.intent.approve, 'Dispatch as planned (Recommended)');
+  assert.equal(result.approved, true);
+});
+
+test('i18n: confirmPlan decline fallback uses the en label', async () => {
+  const harness = makeHarness({
+    readUiLocale: () => 'en',
+    askUser: async (request) => ({ answers: request.questions.map((question) => ({ id: question.id, selected: [] })) }),
+  });
+  const declined = await harness.ops.confirmPlan({ plan: '# en plan' }, SUPERVISOR);
+  assert.equal(declined.approved, false);
+  assert.equal(declined.feedback, 'Not now');
+});
+
+test('i18n: confirmSelect en question and empty-selection feedback', async () => {
+  let captured;
+  const harness = makeHarness({
+    readUiLocale: () => 'en',
+    askUser: async (request) => {
+      captured = request.questions[0];
+      return { answers: [{ id: captured.id, selected: [] }] };
+    },
+  });
+  const result = await harness.ops.confirmSelect({ tasks: [{ title: 'feat｜A' }, { title: 'feat｜B' }] }, SUPERVISOR);
+  assert.match(captured.question, /^2 proposed task\(s\) — check the ones to dispatch/);
+  assert.equal(result.approved, false);
+  assert.equal(result.feedback, 'No task selected');
+});
+
+test('i18n: /tasks metadata follows the mounted strings', () => {
+  const captured = [];
+  const ctx = { commands: { register: (definition) => { captured.push(definition); return () => {}; } } };
+  registerCommands(ctx, null, uiStrings('en'));
+  assert.equal(captured[0].description, 'View coordination tasks and team groupings (direct query, no model turn)');
+  assert.deepEqual(captured[0].input, { hint: '[team <name> | <sessionId>]' });
+  registerCommands(ctx, null); // default stays the historical zh metadata
+  assert.equal(captured[1].description, '查看协调任务与工作流编组（直接查询，不进模型）');
+  assert.deepEqual(captured[1].input, { hint: '[team <名称> | <sessionId>]' });
 });
 
 /* ------------------------------------------------------------------ */

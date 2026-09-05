@@ -24,6 +24,7 @@ import { registerTools } from './tools.mjs';
 import { registerCommands } from './commands.mjs';
 import { mountCoordinatorSkills } from './skills.mjs';
 import { SpawnRegistry } from './registry.mjs';
+import { resolveUiLocale, uiStrings } from './i18n.mjs';
 
 export const name = 'task-coordinator';
 export const inject = ['agents', 'tools', 'sessionController', 'commands'];
@@ -38,7 +39,7 @@ export function defaultRegistryFile() {
 
 export function apply(ctx, input = {}) {
   const config = resolveConfig(input);
-  ctx.provide('taskCoordinator', { config, version: '0.14.0' });
+  ctx.provide('taskCoordinator', { config, version: '0.15.0' });
   if (!config.enabled) {
     ctx.logger?.info('task-coordinator: disabled by config; no tools registered');
     return;
@@ -131,6 +132,24 @@ export function apply(ctx, input = {}) {
       return undefined;
     }
   };
+  // UI localization (0.15.0): host-side user-visible strings (confirmation
+  // cards, report-back kickoff suffix, /tasks metadata) follow the host
+  // Language preference — the durable settings namespace "locale" (field
+  // "preference": "zh" | "en") owned by @deepseek-ai/dsh-client-locale, the
+  // same value the GUI's Settings → General → Language row writes. Read live
+  // per call, so switching the language applies from the next card/kickoff
+  // onward. Absent settings service, unregistered namespace or unknown
+  // preference keeps the historical zh strings — the host side cannot see the
+  // browser-language delegation an absent preference means on the client.
+  const readUiLocale = () => {
+    try {
+      const service = typeof ctx.get === 'function' ? ctx.get('settings') : undefined;
+      const stored = typeof service?.get === 'function' ? service.get('locale') : undefined;
+      return resolveUiLocale(stored?.preference);
+    } catch {
+      return 'zh';
+    }
+  };
   const ops = createOps({
     sessionController,
     agents,
@@ -145,9 +164,10 @@ export function apply(ctx, input = {}) {
     resolveModelConfig,
     listModelProviders,
     listProviderModels,
+    readUiLocale,
   });
   const dispose = registerTools(ctx, ops, { defineTool }, config);
-  const disposeCommands = registerCommands(ctx, ops);
+  const disposeCommands = registerCommands(ctx, ops, uiStrings(readUiLocale()));
   ctx.effect(() => () => {
     dispose();
     disposeCommands();
