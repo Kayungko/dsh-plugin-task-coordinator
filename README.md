@@ -9,7 +9,7 @@
 
 [![DSH 0.1.2-rc.1 verified](https://img.shields.io/badge/DSH-0.1.2--rc.1%20verified-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![87 unit tests](https://img.shields.io/badge/tests-87%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![89 unit tests](https://img.shields.io/badge/tests-89%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
 [What is this](#what-is-this) · [Quick start](#quick-start) · [Tools](#the-eleven-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Changelog](CHANGELOG.md) · [中文](README.zh-CN.md)
@@ -93,7 +93,7 @@ Loose wordings ("/task plugin", "coordinate things") are recognized too — the 
 | `task_spawn_batch` | Spawn a whole decomposition plan in one call (`tasks: [{title?, prompt}]` + one `team`); requires the `confirmationId` once the batch reaches the confirmation threshold; one failed item does not abort the rest |
 | `task_wait` | Block until one task becomes idle (or timeout); multi-target (`sessionIds` + `mode: all/any`) |
 | `task_cancel` | Cancel the target's active turn, keeping its queued messages |
-| `task_workspace` | List host workspaces, or `attach` / `detach` an **existing** session (migrate sessions that landed in the ungrouped bucket); goes through the live workspace entity and never touches the session's conversation |
+| `task_workspace` | List host workspaces, `attach` / `detach` an **existing** session (fix the ungrouped bucket), or `migrate` it to a **different** workspace (0.16.0): clones the full history into a new session born with the target cwd, attaches the clone, archives the original and returns the new id; refuses running sessions (`task_wait` first). Goes through the live workspace entity and never touches a session's conversation |
 | `task_models` | List the **exact model routes this deployment serves** — provider/model/reasoning-effort ids from the host's live catalog (the GUI picker's source) plus the app-wide default; consult before spawning with `provider`+`model`, never guess ids (0.14.0) |
 
 ### `/tasks` — the no-model fast lane
@@ -107,6 +107,8 @@ The plugin ships a small **web client module** (`client.js`, declared via `dsh.c
 ### Workspace placement & migration (0.12.0)
 
 Spawned children attach to the caller's workspace by default; an explicit `cwd` that exactly matches a workspace path (case- and separator-insensitive) is **upgraded to a workspace attachment** automatically, so cross-directory dispatch no longer drops sessions into the ungrouped bucket. Sessions that landed ungrouped earlier migrate via `task_workspace`: `list` the host workspaces, then `attach` / `detach` by id or exact path. It calls the live workspace entity — the same `attachSession` API the host's `session.create` uses internally — so the session's stored cwd is validated against the workspace path and its conversation is never touched. (The GUI offers no such entry: sidebar dragging calls `insertSessionBefore`, which only reorders sessions already inside a workspace — field-verified.)
+
+True cross-workspace moves (0.16.0): `attach` can never move a session whose stored cwd differs from the workspace path — the host validates and refuses, and no host API rewrites an existing session's cwd. `action: migrate` does the real move: it reads the complete replay-validated log (`sessionQuery.readSession`, without making the source live), seeds a NEW session born with the target workspace path as its cwd (`sessions.create` + `flush` — the same primitive the host's own `fork()` uses internally; `fork()` itself deliberately preserves the source cwd/workspace and cannot retarget), attaches the clone, durably archives the original (`workspaceRegistry.archiveSession`), and carries the plugin registry record (team/depth/parent/title) over to the new id — team filtering and recursion governance survive the move. The task continues under the returned `sessionId`; message that id, never the archived original. Running sources are refused (`migrate-busy` — the clone seeds from the persisted log, so settle the turn with `task_wait` first); a source whose cwd already matches the target is refused with an `attach` hint; every partial failure reports whether an orphan clone exists and whether the original was NOT archived.
 
 ### Per-child model selection (0.13.0) & route discovery (0.14.0)
 

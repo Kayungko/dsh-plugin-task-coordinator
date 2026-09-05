@@ -9,7 +9,7 @@
 
 [![DSH 0.1.2-rc.1 实测](https://img.shields.io/badge/DSH-0.1.2--rc.1%20实测-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![87 个单元测试](https://img.shields.io/badge/tests-87%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![89 个单元测试](https://img.shields.io/badge/tests-89%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
 [这是什么](#这是什么) · [快速开始](#快速开始) · [十一个工具](#十一个工具) · [架构设计](docs/ARCHITECTURE.md) · [主机契约](docs/PROTOCOL.md) · [更新日志](CHANGELOG.md) · [English](README.md)
@@ -92,7 +92,7 @@ pwsh install.ps1 -Source .
 | `task_spawn_batch` | 一次批量创建整个拆分方案（`tasks: [{title?, prompt}]` + 统一 `team`）；达到确认阈值时必须携带 `confirmationId`；单条失败不中止整批 |
 | `task_wait` | 阻塞直到目标任务空闲（或超时）；支持多目标（`sessionIds` + `mode: all/any`） |
 | `task_cancel` | 取消目标的活动轮次（保留其排队消息） |
-| `task_workspace` | 列出宿主工作区，或把**既有**会话挂入/移出工作区（迁移落入「未分组」的会话）；直连宿主 workspace 实体，不触碰会话内容 |
+| `task_workspace` | 列出宿主工作区，把**既有**会话挂入/移出工作区（归置落入「未分组」的会话），或 `migrate` **跨工作区真迁移**（0.16.0）：克隆完整历史到以目标路径为 cwd 出生的新会话、挂载克隆、归档原会话、返回新 id；运行中的会话拒迁（先 `task_wait`）。直连宿主 workspace 实体，不触碰会话内容 |
 | `task_models` | 列出**本部署实际接入**的模型路线——provider/model/reasoning-effort 精确 id（宿主活体目录，GUI 选择器同源）+ 应用级默认；指定子会话模型前先查这里，永远不要猜 id（0.14.0） |
 
 ### `/tasks` —— 不进模型的快速通道
@@ -106,6 +106,8 @@ pwsh install.ps1 -Source .
 ### 工作区归置与迁移（0.12.0）
 
 派生的子任务默认挂进调用方所在工作区；显式 `cwd` 与某工作区路径**精确匹配**（大小写/分隔符不敏感）时自动升级为工作区挂载——跨目录派发不再把会话丢进「未分组」。历史上已落入未分组的会话用 `task_workspace` 迁移：`list` 列出宿主工作区，再按 id 或精确路径 `attach` / `detach`。它直连宿主 workspace 实体——与 `session.create` 内部同一套 `attachSession` API——会话存储的 cwd 会对照工作区路径校验，且**绝不向会话注入消息**。（GUI 没有这个入口：侧栏拖拽走 `insertSessionBefore`，只接受已在工作区内的会话重排序——实测验证。）
+
+跨工作区真迁移（0.16.0）：`attach` 永远挪不动存储 cwd 与工作区路径不一致的会话——宿主校验会拒绝，且没有任何宿主 API 会改写既有会话的 cwd。`action: migrate` 做真正的搬家：读取完整且经重放校验的会话日志（`sessionQuery.readSession`，不激活源会话），以目标工作区路径为 cwd 种子创建一个**新**会话（`sessions.create` + `flush`——宿主自家 `fork()` 内部同款原语；`fork()` 本身刻意保留源 cwd/工作区，不能改道），挂载克隆、持久归档原会话（`workspaceRegistry.archiveSession`），并把插件注册表记录（team/深度/父链/标题）平移到新 id——编组过滤与递归治理存活迁移。任务在返回的 `sessionId` 下继续：对新 id 发消息，旧 id 已归档。运行中的源会话拒迁（`migrate-busy`——克隆只带得走已持久化日志，先用 `task_wait` 收口）；源 cwd 已等于目标路径时拒绝并提示改用 `attach`；任何部分失败都会明确报告是否产生了孤儿克隆、原会话是否**未**被归档。
 
 ### 子会话模型指定（0.13.0）与路线发现（0.14.0）
 

@@ -45,6 +45,12 @@ let createCount = 0;
 // The supervisor session is a member of exactly one workspace; every spawn it
 // performs must therefore carry workspaceId (host create: workspaceId XOR cwd).
 const verifyWorkspace = { id: 'ws-verify', path: '/proj', sessionIds: ['session-super'] };
+// 0.16.0 migrate fixtures: a second workspace added mid-run (so the earlier
+// single-workspace assertions stay valid), the seeded-create captures and the
+// durable-archive journal.
+const migrateTargets = [];
+const migrateCreateRequests = [];
+const archivedSessions = [];
 
 sessions.set('session-super', {
   sessionId: 'session-super',
@@ -108,7 +114,7 @@ const ctx = {
   // spawned children must attach to it (workspaceId in the create request).
   get(name) {
     if (name === 'workspaceRegistry') return {
-      list: () => [verifyWorkspace],
+      list: () => [verifyWorkspace, ...migrateTargets],
       // live-entity access (0.12.0 task_workspace): mimics workspace.attachSession /
       // detachSession membership mutation without the host's cwd validation
       get: (id) => (id === verifyWorkspace.id ? {
@@ -119,7 +125,42 @@ const ctx = {
           const at = verifyWorkspace.sessionIds.indexOf(sessionId);
           if (at >= 0) verifyWorkspace.sessionIds.splice(at, 1);
         },
+      } : migrateTargets.some((ws) => ws.id === id) ? {
+        // 0.16.0 migrate target entity: the clone (born with this workspace's
+        // path as cwd) attaches here
+        attachSession: async (sessionId) => {
+          const target = migrateTargets.find((ws) => ws.id === id);
+          if (target && !target.sessionIds.includes(sessionId)) target.sessionIds.unshift(sessionId);
+        },
+        detachSession: async () => {},
       } : undefined),
+      // 0.16.0 migrate: durable archive of the original session
+      archiveSession: async (sessionId) => { archivedSessions.push(sessionId); },
+    };
+    if (name === 'sessionQuery') return {
+      // 0.16.0 migrate: complete replay-validated log, source NOT made live
+      async readSession(sessionId) {
+        calls.push('readSession');
+        if (sessionId === 'session-migrate-me') {
+          return {
+            session: { id: sessionId, cwd: '/elsewhere', createdAt: 999, agentPreset: 'preset-verify' },
+            events: [{ type: 'turn/start', seq: 0 }, { type: 'turn/end', seq: 1 }],
+          };
+        }
+        if (sessionId === 'session-same-cwd') {
+          return { session: { id: sessionId, cwd: '/proj2', createdAt: 1 }, events: [] };
+        }
+        throw new Error(`session "${sessionId}" not found`);
+      },
+    };
+    if (name === 'sessions') return {
+      // 0.16.0 migrate: seeded creation — the clone is born with meta.cwd
+      create(id, options) {
+        calls.push('sessions.create');
+        migrateCreateRequests.push(options ?? {});
+        return { id: `session-migrated-${migrateCreateRequests.length}` };
+      },
+      async flush() { calls.push('sessions.flush'); },
     };
     if (name === 'llm') return {
       // catalog pre-validation stand-in (0.13.0): mirror resolveCallConfig
@@ -222,7 +263,7 @@ assert.equal(registrations.length, 11, `expected 11 tools, got ${registrations.l
 assert.equal(ctx.commandRegistrations.length, 1, 'expected the /tasks command');
 assert.equal(ctx.commandRegistrations[0].name, 'tasks');
 assert.ok(ctx.provides.taskCoordinator, 'taskCoordinator service not provided');
-assert.equal(ctx.provides.taskCoordinator.version, '0.15.0');
+assert.equal(ctx.provides.taskCoordinator.version, '0.16.0');
 // the skill mount is fire-and-forget (dynamic import); give it a macrotask
 await new Promise((resolve) => setImmediate(resolve));
 assert.equal(ctx.mountedPlugins.length, 1, 'expected the skill provider mount');
@@ -473,6 +514,37 @@ const upgraded = await byName.task_spawn.execute({ prompt: '工作区升级验�
 assert.equal(upgraded.ok, true);
 assert.ok(verifyWorkspace.sessionIds.includes(upgraded.sessionId), 'explicit-cwd spawn upgraded to workspace attachment');
 console.log('task_workspace     : OK -> list/attach/detach + spawn cwd-upgrade verified');
+
+// 0.16.0 task_workspace migrate: true cross-workspace move — the clone +
+// attach + archive route over the five host primitives (readSession →
+// sessions.create+flush → target attachSession → archiveSession).
+migrateTargets.push({ id: 'ws-verify2', path: '/proj2', sessionIds: [] });
+const migrateResult = await byName.task_workspace.execute(
+  { action: 'migrate', sessionId: 'session-migrate-me', workspaceId: 'ws-verify2' },
+  supervisorExec,
+);
+assert.equal(migrateResult.ok, true, `migrate must succeed: ${migrateResult.error ?? ''}`);
+assert.equal(migrateResult.sessionId, 'session-migrated-1', 'result reports the NEW session id');
+assert.equal(migrateResult.migratedFrom, 'session-migrate-me');
+assert.equal(migrateResult.workspaceId, 'ws-verify2');
+assert.equal(migrateResult.archived, true);
+assert.equal(migrateCreateRequests[0].meta.cwd, '/proj2', 'clone born with the TARGET workspace path');
+assert.equal(migrateCreateRequests[0].meta.createdAt, 999, 'original createdAt preserved');
+assert.equal(migrateCreateRequests[0].meta.agentPreset, 'preset-verify', 'original agentPreset preserved');
+assert.equal(migrateCreateRequests[0].seed.length, 2, 'the complete log is seeded');
+assert.ok(migrateTargets[0].sessionIds.includes('session-migrated-1'), 'clone attached to the target workspace');
+assert.deepEqual(archivedSessions, ['session-migrate-me'], 'original durably archived');
+// a source whose cwd already equals the target path is refused with an attach
+// hint — no redundant clone, no archive
+const noopMigrate = await byName.task_workspace.execute(
+  { action: 'migrate', sessionId: 'session-same-cwd', workspaceId: 'ws-verify2' },
+  supervisorExec,
+);
+assert.equal(noopMigrate.code, 'bad-request');
+assert.match(noopMigrate.error, /use action 'attach'/);
+assert.equal(migrateCreateRequests.length, 1, 'same-cwd refusal clones nothing');
+assert.deepEqual(archivedSessions, ['session-migrate-me'], 'same-cwd refusal archives nothing');
+console.log('task_workspace migrate: OK -> clone+attach+archive route, meta carry-over (cwd/createdAt/preset/seed), same-cwd refusal');
 
 // 0.13.0 per-child model selection: catalog pre-validation, then install via
 // sessionController.selectModel between create and kickoff (order matters).

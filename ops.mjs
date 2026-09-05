@@ -47,6 +47,9 @@ export const OP_CODES = Object.freeze({
   CANCEL_REJECTED: 'cancel-rejected',
   WORKSPACE_NOT_FOUND: 'workspace-not-found',
   WORKSPACE_OP_FAILED: 'workspace-op-failed',
+  MIGRATE_UNAVAILABLE: 'migrate-unavailable',
+  MIGRATE_BUSY: 'migrate-busy',
+  MIGRATE_FAILED: 'migrate-failed',
   MODEL_UNAVAILABLE: 'model-unavailable',
   MODEL_SELECT_FAILED: 'model-select-failed',
   CATALOG_UNAVAILABLE: 'catalog-unavailable',
@@ -204,7 +207,7 @@ export async function describeModelRoutes(provider, listProviders, listModels) {
  * @returns {TaskOps}
  */
 export function createOps(deps) {
-  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser, listWorkspaces, getWorkspace, resolveModelConfig, listModelProviders, listProviderModels, readUiLocale } = deps;
+  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser, listWorkspaces, getWorkspace, resolveModelConfig, listModelProviders, listProviderModels, readUiLocale, readSessionSnapshot, createSeededSession, archiveSession } = deps;
 
   const fail = (code, message) => ({ ok: false, code, error: message });
   const failDeny = (denial) => fail(denial.code, denial.message);
@@ -821,13 +824,17 @@ export function createOps(deps) {
      * workspace entity — the same API the host's session.create uses
      * internally (workspace.attachSession validates the session's stored cwd
      * against the workspace path). Never injects a message into the session.
+     * Migrate (0.16.0) crosses workspaces whose paths differ from the
+     * session's stored cwd — the one thing attach can never do — by cloning
+     * the full history into a new session born with the target cwd and
+     * archiving the original; the task continues under a NEW session id.
      */
     async workspaceOp({ action, sessionId, workspaceId, workspacePath }, caller) {
       const callerDeny = checkCaller(caller, config);
       if (callerDeny) return failDeny(callerDeny);
       const mode = typeof action === 'string' && action.trim().length > 0 ? action.trim().toLowerCase() : 'list';
-      if (!['list', 'attach', 'detach'].includes(mode)) {
-        return fail(OP_CODES.BAD_REQUEST, `unknown action '${action}' (expected list | attach | detach)`);
+      if (!['list', 'attach', 'detach', 'migrate'].includes(mode)) {
+        return fail(OP_CODES.BAD_REQUEST, `unknown action '${action}' (expected list | attach | detach | migrate)`);
       }
       if (mode === 'list') {
         let workspaces;
@@ -860,6 +867,95 @@ export function createOps(deps) {
       }
       if (!targetId) {
         return fail(OP_CODES.WORKSPACE_NOT_FOUND, 'no workspace matched: pass workspaceId (see action list) or an exact workspacePath');
+      }
+      if (mode === 'migrate') {
+        // (0.16.0) True cross-workspace move. The host never rewrites a
+        // session's stored cwd — attach validates against it — so a move is a
+        // clone: read the complete log (sessionQuery.readSession), seed a NEW
+        // session whose header cwd is the target workspace path
+        // (sessions.create + flush, the route the host's own fork() uses
+        // internally), attach the clone, then archive the original. Rejects
+        // running sources: the clone seeds from the persisted log, so a
+        // mid-turn migration would drop the in-flight tail.
+        const targetPath = workspacePathOf(targetId, listWorkspaces);
+        if (typeof targetPath !== 'string' || targetPath.length === 0) {
+          return fail(OP_CODES.WORKSPACE_NOT_FOUND, `workspace '${targetId}' exposes no path to migrate into`);
+        }
+        const live = typeof agents?.get === 'function' ? agents.get(cleanSessionId) : undefined;
+        if (live && live.status === 'running') {
+          return fail(OP_CODES.MIGRATE_BUSY, `session '${cleanSessionId}' is running; migration clones the persisted log, so wait for the turn to settle (task_wait) first`);
+        }
+        let snapshot;
+        try {
+          snapshot = typeof readSessionSnapshot === 'function' ? await readSessionSnapshot(cleanSessionId) : undefined;
+        } catch (error) {
+          return fail(OP_CODES.MIGRATE_FAILED, `cannot read source session '${cleanSessionId}': ${error?.message ?? error}`);
+        }
+        if (snapshot === undefined) {
+          return fail(OP_CODES.MIGRATE_UNAVAILABLE, 'this host build exposes no session snapshot service (sessionQuery.readSession) for migration');
+        }
+        const sourceHeader = snapshot?.header;
+        if (!sourceHeader || !Array.isArray(snapshot?.events)) {
+          return fail(OP_CODES.MIGRATE_FAILED, `source session '${cleanSessionId}' returned no readable log`);
+        }
+        if (sourceHeader.cwd === targetPath) {
+          return fail(OP_CODES.BAD_REQUEST, `session '${cleanSessionId}' already has cwd '${targetPath}' — it belongs to this workspace; use action 'attach' to affiliate it without cloning`);
+        }
+        let created;
+        try {
+          created = typeof createSeededSession === 'function'
+            ? await createSeededSession({
+                seed: snapshot.events,
+                meta: {
+                  cwd: targetPath,
+                  ...(Number.isFinite(sourceHeader.createdAt) ? { createdAt: sourceHeader.createdAt } : {}),
+                  ...(typeof sourceHeader.agentPreset === 'string' ? { agentPreset: sourceHeader.agentPreset } : {}),
+                },
+              })
+            : undefined;
+        } catch (error) {
+          return fail(OP_CODES.MIGRATE_FAILED, `clone failed: ${error?.message ?? error}`);
+        }
+        const newSessionId = typeof created?.id === 'string' && created.id.length > 0 ? created.id : undefined;
+        if (!newSessionId) {
+          return fail(OP_CODES.MIGRATE_UNAVAILABLE, 'this host build exposes no seeded-session creation (sessions.create) for migration');
+        }
+        const migrateEntity = typeof getWorkspace === 'function' ? getWorkspace(targetId) : undefined;
+        if (!migrateEntity || typeof migrateEntity.attachSession !== 'function') {
+          return fail(OP_CODES.MIGRATE_FAILED, `clone '${newSessionId}' was created but workspace '${targetId}' is not attachable; attach the clone manually (action attach) and archive '${cleanSessionId}' when done`);
+        }
+        try {
+          await migrateEntity.attachSession(newSessionId);
+        } catch (error) {
+          return fail(OP_CODES.MIGRATE_FAILED, `clone '${newSessionId}' was created but attach to '${targetId}' failed: ${error?.message ?? error}; the original '${cleanSessionId}' was NOT archived`);
+        }
+        let archived = true;
+        let warning;
+        try {
+          if (typeof archiveSession === 'function') await archiveSession(cleanSessionId);
+          else archived = false;
+        } catch (error) {
+          archived = false;
+          warning = `clone '${newSessionId}' is live in '${targetId}' but archiving the original failed: ${error?.message ?? error}`;
+        }
+        // Carry the registry record (team/depth/parent lineage/title) over to
+        // the new id so team filtering and recursion governance survive the
+        // move; the old entry stays as history of the archived original.
+        const carried = typeof registry?.get === 'function' ? registry.get(cleanSessionId) : undefined;
+        if (carried && typeof registry?.record === 'function') {
+          registry.record(newSessionId, carried);
+        }
+        return {
+          ok: true,
+          action: 'migrate',
+          sessionId: newSessionId,
+          migratedFrom: cleanSessionId,
+          workspaceId: targetId,
+          archived,
+          ...(carried?.team !== undefined ? { team: carried.team } : {}),
+          ...(warning ? { warning } : {}),
+          note: `the migrated task continues under the NEW id '${newSessionId}'; message and steer that id, not '${cleanSessionId}'`,
+        };
       }
       const entity = typeof getWorkspace === 'function' ? getWorkspace(targetId) : undefined;
       const method = mode === 'attach' ? 'attachSession' : 'detachSession';

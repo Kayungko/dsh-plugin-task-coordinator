@@ -2,6 +2,19 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.16.0] - 2026-09-05
+
+### Added
+
+- **跨工作区真迁移**：`task_workspace` 新增 `action: migrate`——宿主从不改写会话存储的 cwd（`attachSession` 以它为准校验），跨路径移动因此是「克隆 + 归档」：`sessionQuery.readSession` 读取完整且经重放校验的会话日志（不激活源会话）→ `sessions.create` 以目标工作区路径为 cwd 种子创建**新**会话（保留原 `createdAt`/`agentPreset`；宿主自家 `fork()` 内部同款原语——`fork` 本身刻意保留源 cwd/工作区，不能改道）→ `flush` 持久化 → 目标实体 `attachSession` → `workspaceRegistry.archiveSession` 持久归档原会话。结果返回**新 sessionId**（任务在其下继续，注册表记录 team/depth/父链/标题平移到新 id，编组与递归治理存活迁移）。
+- **迁移防护**：运行中的源会话拒迁（`migrate-busy`——克隆只带得走已持久化日志，先 `task_wait` 收口）；源 cwd 已等于目标路径时拒绝并提示改用 `attach`（不产生冗余克隆）；宿主缺少快照/种子创建服务时报 `migrate-unavailable`；每一步部分失败（`migrate-failed`）都明确报告是否产生了孤儿克隆、原会话是否**未**被归档；移动成功但归档失败时保持 `ok: true` + `archived: false` + warning。
+- SKILL 反模式清单补上本功能诞生的两条实战教训：**跨项目派发必须带与目标工作区路径精确匹配的显式 `cwd`**（否则子会话继承总控 cwd 落错工作区）；migrate 成功后对新 id 发消息、旧 id 已归档。
+
+### Notes
+
+- 仍是 11 个工具——migrate 是 `task_workspace` 的新 action，不是新工具。克隆+挂载+归档路线为社区 `dsh-session-mover` 插件实证、宿主 `fork()` 内部同源（`sessions.create` 带 seed + meta）。
+- 单元测试 87 → 89（happy path 五步时序 read→create→attach→archive→注册表平移与元数据全携带；八个防护/部分失败分支）。
+
 ## [0.15.0] - 2026-09-05
 
 ### Added
@@ -193,7 +206,8 @@
 
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
-[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.12.1...v0.13.0

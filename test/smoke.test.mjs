@@ -360,6 +360,9 @@ function makeHarness(overrides = {}) {
     ...(overrides.listModelProviders ? { listModelProviders: overrides.listModelProviders } : {}),
     ...(overrides.listProviderModels ? { listProviderModels: overrides.listProviderModels } : {}),
     ...(overrides.readUiLocale ? { readUiLocale: overrides.readUiLocale } : {}),
+    ...(overrides.readSessionSnapshot ? { readSessionSnapshot: overrides.readSessionSnapshot } : {}),
+    ...(overrides.createSeededSession ? { createSeededSession: overrides.createSeededSession } : {}),
+    ...(overrides.archiveSession ? { archiveSession: overrides.archiveSession } : {}),
     uuid: () => 'req-test-1',
     askUser,
   });
@@ -720,6 +723,109 @@ test('ops.workspaceOp: failure modes (0.12.0)', async () => {
   // no registry service at all -> not-found, never a crash
   const bare = makeHarness({ listWorkspaces: () => workspaces });
   assert.equal((await bare.ops.workspaceOp({ action: 'attach', sessionId: 's', workspaceId: 'ws-1' }, SUPERVISOR)).code, 'workspace-not-found');
+});
+
+test('ops.workspaceOp: migrate — clone + attach + archive across workspaces (0.16.0)', async () => {
+  const workspaces = [
+    { id: 'ws-src', path: '/proj/src', sessionIds: ['session-old'] },
+    { id: 'ws-dst', path: '/proj/dst', sessionIds: [] },
+  ];
+  const calls = [];
+  const entity = { attachSession: async (id) => { calls.push(['attach', id]); } };
+  const snapshot = {
+    header: { id: 'session-old', cwd: '/proj/src', createdAt: 12345, agentPreset: 'preset-a' },
+    events: [{ type: 'turn/start', seq: 0 }, { type: 'turn/end', seq: 1 }],
+  };
+  const fakeRegistry = {
+    records: new Map([['session-old', { team: 'mission', createdAt: 12345, depth: 1, parentSessionId: 'session-super', title: 'T' }]]),
+    get(id) { return this.records.get(id); },
+    record(id, entry) { this.records.set(id, { ...entry }); calls.push(['record', id]); },
+  };
+  const harness = makeHarness({
+    listWorkspaces: () => workspaces,
+    getWorkspace: (id) => (id === 'ws-dst' ? entity : undefined),
+    registry: fakeRegistry,
+    readSessionSnapshot: async (id) => { calls.push(['read', id]); return id === 'session-old' ? snapshot : undefined; },
+    createSeededSession: async ({ seed, meta }) => { calls.push(['create', meta.cwd, meta.createdAt, meta.agentPreset, seed.length]); return { id: 'session-clone' }; },
+    archiveSession: async (id) => { calls.push(['archive', id]); },
+  });
+  const moved = await harness.ops.workspaceOp({ action: 'migrate', sessionId: 'session-old', workspaceId: 'ws-dst' }, SUPERVISOR);
+  assert.equal(moved.ok, true);
+  assert.equal(moved.action, 'migrate');
+  assert.equal(moved.sessionId, 'session-clone');
+  assert.equal(moved.migratedFrom, 'session-old');
+  assert.equal(moved.workspaceId, 'ws-dst');
+  assert.equal(moved.archived, true);
+  assert.equal(moved.team, 'mission');
+  assert.match(moved.note, /NEW id 'session-clone'/);
+  // the clone is born with the TARGET cwd, the original createdAt and preset, seeded with the full log
+  assert.deepEqual(calls.find(([op]) => op === 'create'), ['create', '/proj/dst', 12345, 'preset-a', 2]);
+  // ordering: read → create → attach → archive → registry retarget
+  assert.deepEqual(calls.map(([op]) => op), ['read', 'create', 'attach', 'archive', 'record']);
+  // the registry record carries over verbatim (team/depth/parent/title/createdAt)
+  assert.deepEqual(fakeRegistry.records.get('session-clone'), { team: 'mission', createdAt: 12345, depth: 1, parentSessionId: 'session-super', title: 'T' });
+});
+
+test('ops.workspaceOp: migrate guards and partial failures (0.16.0)', async () => {
+  const workspaces = [
+    { id: 'ws-src', path: '/proj/src', sessionIds: [] },
+    { id: 'ws-dst', path: '/proj/dst', sessionIds: [] },
+  ];
+  const baseSnapshot = { header: { id: 'session-old', cwd: '/proj/src', createdAt: 1 }, events: [{ type: 'turn/end', seq: 0 }] };
+  const base = {
+    listWorkspaces: () => workspaces,
+    getWorkspace: (id) => (id === 'ws-dst' ? { attachSession: async () => {} } : undefined),
+    readSessionSnapshot: async () => baseSnapshot,
+    createSeededSession: async () => ({ id: 'session-clone' }),
+    archiveSession: async () => {},
+  };
+  const MIGRATE = { action: 'migrate', sessionId: 'session-old', workspaceId: 'ws-dst' };
+  // 1. a running source is rejected before any read/clone
+  const busyHarness = makeHarness(base);
+  addLiveAgent(busyHarness, 'session-old', { status: 'running' });
+  const busy = await busyHarness.ops.workspaceOp(MIGRATE, SUPERVISOR);
+  assert.equal(busy.code, 'migrate-busy');
+  assert.match(busy.error, /task_wait/);
+  // 2. source cwd already equals the target path → bad-request with an attach hint
+  const sameCwd = makeHarness({ ...base, readSessionSnapshot: async () => ({ header: { ...baseSnapshot.header, cwd: '/proj/dst' }, events: [] }) });
+  const noop = await sameCwd.ops.workspaceOp(MIGRATE, SUPERVISOR);
+  assert.equal(noop.code, 'bad-request');
+  assert.match(noop.error, /use action 'attach'/);
+  // 3. host without the snapshot service → migrate-unavailable, never a crash
+  const noService = makeHarness({ listWorkspaces: () => workspaces });
+  assert.equal((await noService.ops.workspaceOp(MIGRATE, SUPERVISOR)).code, 'migrate-unavailable');
+  // 4. clone failure → migrate-failed, nothing attached, nothing archived
+  let archived = false;
+  const cloneFail = makeHarness({ ...base, createSeededSession: async () => { throw new Error('store full'); }, archiveSession: async () => { archived = true; } });
+  const failed = await cloneFail.ops.workspaceOp(MIGRATE, SUPERVISOR);
+  assert.equal(failed.code, 'migrate-failed');
+  assert.match(failed.error, /store full/);
+  assert.equal(archived, false);
+  // 5. attach failure reports the orphaned clone id; the original is NOT archived
+  const attachFail = makeHarness({
+    ...base,
+    getWorkspace: (id) => (id === 'ws-dst' ? { attachSession: async () => { throw new Error('attach denied'); } } : undefined),
+    archiveSession: async () => { archived = true; },
+  });
+  const orphan = await attachFail.ops.workspaceOp(MIGRATE, SUPERVISOR);
+  assert.equal(orphan.code, 'migrate-failed');
+  assert.match(orphan.error, /session-clone/);
+  assert.match(orphan.error, /NOT archived/);
+  assert.equal(archived, false);
+  // 6. archive failure → still ok, archived:false + warning (the move itself succeeded)
+  const archiveFail = makeHarness({ ...base, archiveSession: async () => { throw new Error('archive locked'); } });
+  const partial = await archiveFail.ops.workspaceOp(MIGRATE, SUPERVISOR);
+  assert.equal(partial.ok, true);
+  assert.equal(partial.archived, false);
+  assert.match(partial.warning, /archive locked/);
+  // 7. snapshot read throws → migrate-failed
+  const readFail = makeHarness({ ...base, readSessionSnapshot: async () => { throw new Error('log corrupt'); } });
+  const corrupt = await readFail.ops.workspaceOp(MIGRATE, SUPERVISOR);
+  assert.equal(corrupt.code, 'migrate-failed');
+  assert.match(corrupt.error, /log corrupt/);
+  // 8. the unknown-action message now lists migrate
+  const badAction = await makeHarness(base).ops.workspaceOp({ action: 'teleport' }, SUPERVISOR);
+  assert.match(badAction.error, /list \| attach \| detach \| migrate/);
 });
 
 test('ops.spawnTask: model selection — pair validation and effort-only ignored (0.13.0)', async () => {

@@ -39,7 +39,7 @@ export function defaultRegistryFile() {
 
 export function apply(ctx, input = {}) {
   const config = resolveConfig(input);
-  ctx.provide('taskCoordinator', { config, version: '0.15.0' });
+  ctx.provide('taskCoordinator', { config, version: '0.16.0' });
   if (!config.enabled) {
     ctx.logger?.info('task-coordinator: disabled by config; no tools registered');
     return;
@@ -150,6 +150,39 @@ export function apply(ctx, input = {}) {
       return 'zh';
     }
   };
+  // Cross-workspace migration (0.16.0): the host never rewrites a session's
+  // stored cwd, so a true move is clone + archive — the route the host's own
+  // fork() uses internally (sessions.create seeded with the full event log)
+  // and dsh-session-mover proved for cross-workspace moves. readSession
+  // returns cloned header + complete replay-validated events without making
+  // the source live; create seeds a NEW session born with the target cwd;
+  // archiveSession durably retires the original. The read/create closures
+  // degrade to undefined when their service is missing — ops then reports
+  // migrate-unavailable; archiveSession surfaces absence as an error, which
+  // ops records as a warning on an otherwise successful move.
+  const readSessionSnapshot = async (sessionId) => {
+    const service = typeof ctx.get === 'function' ? ctx.get('sessionQuery') : undefined;
+    if (typeof service?.readSession !== 'function') return undefined;
+    const snapshot = await service.readSession(sessionId);
+    if (!snapshot || typeof snapshot !== 'object') return undefined;
+    return {
+      header: snapshot.session,
+      events: Array.isArray(snapshot.events) ? snapshot.events : [],
+    };
+  };
+  const createSeededSession = async ({ seed, meta }) => {
+    const service = typeof ctx.get === 'function' ? ctx.get('sessions') : undefined;
+    if (typeof service?.create !== 'function') return undefined;
+    const session = service.create(undefined, { seed, meta });
+    if (typeof service.flush === 'function') await service.flush(session);
+    const id = typeof session?.id === 'string' ? session.id : session?.header?.id;
+    return typeof id === 'string' && id.length > 0 ? { id } : undefined;
+  };
+  const archiveSession = async (sessionId) => {
+    const service = typeof ctx.get === 'function' ? ctx.get('workspaceRegistry') : undefined;
+    if (typeof service?.archiveSession !== 'function') throw new Error('workspaceRegistry.archiveSession unavailable');
+    await service.archiveSession(sessionId);
+  };
   const ops = createOps({
     sessionController,
     agents,
@@ -165,6 +198,9 @@ export function apply(ctx, input = {}) {
     listModelProviders,
     listProviderModels,
     readUiLocale,
+    readSessionSnapshot,
+    createSeededSession,
+    archiveSession,
   });
   const dispose = registerTools(ctx, ops, { defineTool }, config);
   const disposeCommands = registerCommands(ctx, ops, uiStrings(readUiLocale()));

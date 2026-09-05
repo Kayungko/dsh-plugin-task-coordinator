@@ -83,7 +83,7 @@ flowchart LR
 - **`client.js`**：Web 客户端模块（0.8.0）——插件唯一运行在**浏览器侧**的产物。不经 cordis 入口装配，而是由宿主 `dsh-client-modules` 依 `dsh.client` 声明 + `exports["./client"]` 原样装载（`window.__ModuleLoader__` factory 格式），占 `conversation.session.header.utilities` 槽渲染「复制会话Id」按钮（面性胶囊：亮色黑底白字 / 暗色白底黑字，走 `--dsw-alias-label-primary(-foreground)` 主题 token，几何对齐「Session 日志」）；与宿主侧十一个模块完全解耦，缺槽位只影响该按钮；
 - **`index.mjs`**：唯一直接 import 宿主包（`dsh-tools` / `dsh-llm`）的装配层；`skills.mjs` 对 `dsh-skill-filesystem` 用**动态 import**；`ctx.get('userQuestions')` 在 `task_confirm` 调用时**惰性解析**（不硬注入，宿主缺该接缝时其余工具不受影响）。
 
-## 机制设计（0.4.0–0.15.0 新增）
+## 机制设计（0.4.0–0.16.0 新增）
 
 ### 派发确认链（0.6.0）
 
@@ -111,6 +111,8 @@ flowchart LR
 宿主 `create` 对 `workspaceId` 与 `cwd` 是**互斥**语义，且只有 `workspaceId` 触发 `workspace.attachSession`。`spawnTask` 因此先解析调用方的工作区成员归属（调用方自身 + `parentSessionId` 祖先链 ≤8 跳，与工作区 `sessionIds` 求交），命中传 `workspaceId`（宿主以工作区路径为 cwd 并挂入），显式 `cwd` 优先、无归属降级为旧语义——子任务与总控在同一工作区侧栏可见。
 
 cwd→工作区升级与既有会话迁移（0.12.0）：将发送的 cwd 与工作区 path **精确匹配**（`normalizeWorkspacePath` 按平台分支 [0.12.1]：win32 分隔符归一+大小写折叠、darwin 仅折叠、POSIX 保留大小写；非 realpath，宿主实体校验才是权威）时改发 `workspaceId`，跨目录派发与未分组总控的子任务不再落入「未分组」；`task_workspace` 工具直连 `workspaceRegistry.get(id)` 活实体的 `attachSession`/`detachSession`（宿主 create 内部同一 API，自带会话头 cwd 与工作区 path 全等校验、幂等），迁移历史未分组会话且**不注入任何消息**。GUI 无此入口（拖拽 = `insertSessionBefore`，仅区内重排序）——插件面是唯一干净通道。
+
+跨工作区真迁移（0.16.0）：attach/detach 只解决「cwd 已一致」的归置；cwd 不一致的会话宿主没有任何 API 能改写其存储 cwd，真搬家 = **克隆 + 归档**。`index.mjs` 新增三个降级容错闭包——`readSessionSnapshot`（`sessionQuery.readSession`：克隆 header + 完整重放校验日志，不激活源）、`createSeededSession`（`sessions.create(undefined,{seed,meta})` + `flush`：新会话以目标工作区路径为出生 cwd，保留原 createdAt/agentPreset——宿主 `fork()` 内部同款原语，但 fork 刻意保留源 cwd/工作区不能改道）、`archiveSession`（`workspaceRegistry.archiveSession`：持久、幂等）；ops 编排 read→create→attach→archive→注册表平移五步时序并逐步防护：运行中拒迁（克隆只带得走已持久化日志）、同 cwd 拒绝提示 attach、服务缺失 `migrate-unavailable`、部分失败逐一报告孤儿克隆与原会话归档状态。注册表记录随新 id 平移（team/depth/父链/标题），编组过滤与递归治理存活迁移；旧条目留作归档历史。
 
 ### 子会话模型指定（0.13.0）与路线发现（0.14.0）
 
