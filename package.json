@@ -59,5 +59,9 @@
     "multi-session",
     "skill"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kayungko/dsh-plugin-task-coordinator.git"
+  },
   "license": "MIT"
 }
