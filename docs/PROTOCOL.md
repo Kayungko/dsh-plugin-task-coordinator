@@ -1,6 +1,6 @@
 # 主机契约与投递语义（实测版）
 
-本文档描述 `dsh-plugin-task-coordinator` 依赖的 DSH 宿主契约与十个 `task_*` 工具 + `/tasks` 命令的投递语义。来源为插件开发期的宿主源码通读 + 真实宿主端到端实测（初验 **DSH 0.1.2-alpha.1**，2026-09-04 于 `~/.dsh/profiles/desktop`；宿主升级 **DSH Desktop 2.0.5 / core 0.1.2-rc.1** 后经 `verify-installed.mjs` 全量复验通过）。
+本文档描述 `dsh-plugin-task-coordinator` 依赖的 DSH 宿主契约与十一个 `task_*` 工具 + `/tasks` 命令的投递语义。来源为插件开发期的宿主源码通读 + 真实宿主端到端实测（初验 **DSH 0.1.2-alpha.1**，2026-09-04 于 `~/.dsh/profiles/desktop`；宿主升级 **DSH Desktop 2.0.5 / core 0.1.2-rc.1** 后经 `verify-installed.mjs` 全量复验通过）。
 
 ⚠️ 宿主版本是硬约束：契约按 0.1.2 系列（alpha.1 → rc.1）验证，peer 区间 `>=0.1.2-0 <0.2.0`；宿主大版本升级后须重跑 `verify-installed.mjs` 再放行。
 📌 章节按引入版本标注 **[0.3.0 新增]** ~ **[0.8.0 新增]**；0.8.1/0.8.2/0.8.4 为既有章节的行内修订与 §16（对应回归测试已全绿，见 §14）。
@@ -158,6 +158,7 @@
 - **cwd→工作区升级 [0.12.0]**：将发送的 cwd（显式参数或降级路径）与 `workspaceRegistry.list()` 快照的工作区 path **精确匹配**时改发 `workspaceId`——宿主派生同一 cwd 并挂载；未命中保持旧语义。归一按平台分支 [0.12.1]：win32 分隔符归一 + 大小写折叠 + 盘符根保留；darwin 仅大小写折叠；POSIX 保留大小写（反斜杠是普通文件名字符）。归一只是预筛——宿主实体 attach 的 realpath 全等校验才是权威。
 - **既有会话迁移 [0.12.0]**：`task_workspace` 直连 `workspaceRegistry.get(id)` 返回的**活实体**：`attachSession` 自带宿主校验（读会话头 cwd → realpath → 必须与工作区 path 全等，`dsh-workspace` 实体 87-105 行），幂等；`detachSession` 为逆操作。均不向会话注入消息。GUI 无等价入口：拖拽走 `workspace.insertSessionBefore`，仅接受已在区内会话（否则 `WorkspaceMoveInvalidError`），`workspace/move-invalid` 由此而来；工作区控制器 API 面（create/rename/delete/insertBefore/insertSessionBefore/archiveSession）不含跨区 attach。
 - **子会话模型指定 [0.13.0]**：`task_spawn`/`task_spawn_batch` 条目接受可选 `provider`+`model`（+`reasoningEffort`，成对约束）。两级校验：① 创建前经 `llm.resolveCallConfig` 目录预校验——无效路线 `model-unavailable`，**不创建会话**（目录服务缺失时优雅跳过，交②兜底）；② 创建后、开场前经 `sessionController.selectModel` 安装（`dsh-api-session-controller` 600-628 行）——选择经 `model/selection` 会话事件持久化（重启存活），安装失败报 `model-select-failed` 附孤儿 sessionId 且**不开场**。宿主语义：`selectModel` 同时 `agentDefaultModel.saveSelection` 更新应用级默认模型（settings `agent-default-model` 命名空间，GUI 选择器同行为）；它是唯一公开入口（会话本地的 `selectForNextRequest` 为控制器内部方法、非服务 API），插件如实披露而非绕过。
+- **模型路由发现 [0.14.0]**：市场分发下每个部署接入的路线都不同，id 从不写死。`task_models` 调 `sessionController.modelCatalog()`（2722 行，Remote 门面公开方法；内部 `buildModelCatalog` 经 `llm.listProviders/listModels/resolveModelInfo` 聚合，1933-1980 行——GUI 模型选择器同源）投影为精确 id：provider 分组、model id、efforts、应用级 `default`、单点失败 `failedProviders`。宿主无此方法的老版本降级 `catalog-unavailable`。`model-unavailable` 错误经 `describeModelRoutes` 附可行动提示（优先该 provider 的 model id 列表，回退可路由 provider 列表；全链失败容忍，任何异常退回原始错误消息）。
 
 ## 10. 派发确认 [0.6.0 新增]
 
@@ -215,7 +216,7 @@
 
 ## 14. 验证记录
 
-- **单元**：76 个测试（`test/smoke.test.mjs`，mock 宿主，`node --test`）全绿——覆盖 0.3.0 注册表/编组/引用/多目标等待、0.4.0 命令语法/渲染/注册降级、0.5.0 批量（部分失败/超上限/深度链）、0.6.0 确认（批准/拒绝/取消/无信道/子代理拒答/闸门五态）、0.7.0 回报（默认开/关/批量逐项）、0.8.1 工作区归属（继承/显式 cwd 覆盖/祖先链/降级/批量逐项）、0.9.0 确认卡标题规范（无标题/二级标题拒绝）、0.10.0 多选确认（子集批准/夹带拒绝/无标题拒绝/空选反馈/关窗/无信道/子代理拒答/子集凭证消耗）、0.11.0 复用凭证（跨批存活/跨会话拒借/子集强制持续）、0.12.0 工作区迁移（路径归一/精确匹配升级/list-attach-detach 实体链/五类失败模式/平台分支 win32-darwin-linux）、0.13.0 模型指定（成对校验/目录预校验零孤儿/安装时序 create→selectModel→prompt/安装失败孤儿不开场/目录缺失降级/批量逐项转发）；
+- **单元**：80 个测试（`test/smoke.test.mjs`，mock 宿主，`node --test`）全绿——覆盖 0.3.0 注册表/编组/引用/多目标等待、0.4.0 命令语法/渲染/注册降级、0.5.0 批量（部分失败/超上限/深度链）、0.6.0 确认（批准/拒绝/取消/无信道/子代理拒答/闸门五态）、0.7.0 回报（默认开/关/批量逐项）、0.8.1 工作区归属（继承/显式 cwd 覆盖/祖先链/降级/批量逐项）、0.9.0 确认卡标题规范（无标题/二级标题拒绝）、0.10.0 多选确认（子集批准/夹带拒绝/无标题拒绝/空选反馈/关窗/无信道/子代理拒答/子集凭证消耗）、0.11.0 复用凭证（跨批存活/跨会话拒借/子集强制持续）、0.12.0 工作区迁移（路径归一/精确匹配升级/list-attach-detach 实体链/五类失败模式/平台分支 win32-darwin-linux）、0.13.0 模型指定（成对校验/目录预校验零孤儿/安装时序 create→selectModel→prompt/安装失败孤儿不开场/目录缺失降级/批量逐项转发）、0.14.0 路线发现（目录投影/老宿主与坏目录降级/提示纯函数失败容忍/model-unavailable 错误附路线提示）；
 - **集成**：`verify-installed.mjs` 在**安装位置**用真实 `@deepseek-ai/dsh-tools` / `dsh-llm` / `dsh-skill-filesystem` 包 + mock ctx 跑 `apply()` 全链路（schema 编译、消息构造、9 工具、`/tasks` 五路径、确认闸门全链、多选确认子集强制、安全守卫、卸载清理、0.8.0 客户端模块全链）；宿主升级 2.0.5（core **0.1.2-rc.1**）后重跑全绿；
 - **端到端**（重启后真实宿主）：0.2.0 六项能力实测通过（运行中 `steer` 纠偏、取消后恢复、自环守卫；`task_spawn` kickoff 曾发现 prompt 门面缺 AbortSignal 的缺陷，修复后复验 `SPAWN_FIXED_OK`）；命名规则实测 `0904｜修复｜回归套件`；0.6.0 确认卡经官方 `userQuestions` 接缝同构路径构造（`exit_plan_mode` 先例 + 接缝错误码逐项核对）。
 
@@ -235,4 +236,4 @@
 
 - **安装入口**：`install.ps1`（仓库根为工作区便捷包装，`plugin/install.ps1` 为仓内等价版）——复制包文件、保证 profile `package.json` 的 `dependencies` + `dsh.profile.bundles` 登记，然后**必须重启宿主**才装载新 bundle。
 - **技能目录拷内容不拷目录**：`Copy-Item` 的源是目录且目标目录已存在时会拷**进去**（嵌套 `skills/skills/`），正式路径技能文件从此不再更新——0.4.0–0.8.3 的实际事故。现行脚本复制 `skills\*` 内容并清理历史嵌套残留；技能走 `patchReload: live`，内容更新**无需重启**即刻热刷新。
-- **安装态自检**：任何宿主/插件变更后，把 `verify-installed.mjs` 复制进安装目录运行（跑完删除），全绿才放行；它断言服务版本、10 工具、`/tasks`、确认闸门、多选确认子集强制、复用凭证跨批、task_workspace 实体链、spawn cwd 升级、子会话模型指定（预校验拒绝/安装时序/成对约束）、工作区归属与客户端模块全链。
+- **安装态自检**：任何宿主/插件变更后，把 `verify-installed.mjs` 复制进安装目录运行（跑完删除），全绿才放行；它断言服务版本、11 工具、`/tasks`、确认闸门、多选确认子集强制、复用凭证跨批、task_workspace 实体链、spawn cwd 升级、子会话模型指定（预校验拒绝/安装时序/成对约束/错误路线提示）、task_models 目录投影、工作区归属与客户端模块全链。

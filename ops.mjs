@@ -48,6 +48,7 @@ export const OP_CODES = Object.freeze({
   WORKSPACE_OP_FAILED: 'workspace-op-failed',
   MODEL_UNAVAILABLE: 'model-unavailable',
   MODEL_SELECT_FAILED: 'model-select-failed',
+  CATALOG_UNAVAILABLE: 'catalog-unavailable',
 });
 
 /** Approve option label for the dispatch-confirmation card (must match exactly). */
@@ -159,11 +160,46 @@ export function findWorkspaceByPath(cwd, listWorkspaces, platform) {
 }
 
 /**
+ * Build a best-effort "available routes" hint for model-unavailable errors
+ * (0.14.0). Marketplace reality: every deployment connects different
+ * providers/models, so a rejected pair is only actionable when the error
+ * shows what IS routable. Prefers the requested provider's model ids, falls
+ * back to the routable provider ids. Failure-tolerant by contract: any
+ * dependency problem yields an empty hint — never masks the original
+ * rejection.
+ * @param {string|undefined} provider - provider id from the rejected selection
+ * @param {Function|undefined} listProviders - () => [{id, name}] (sync or async)
+ * @param {Function|undefined} listModels - (providerId) => [{id, name}] (async)
+ * @returns {Promise<string>} hint suffix ('' when nothing can be listed)
+ */
+export async function describeModelRoutes(provider, listProviders, listModels) {
+  try {
+    if (typeof listModels === 'function' && typeof provider === 'string' && provider.length > 0) {
+      const models = await listModels(provider);
+      if (Array.isArray(models) && models.length > 0) {
+        const ids = models.map((model) => (typeof model?.id === 'string' ? model.id : undefined)).filter(Boolean);
+        if (ids.length > 0) return ` — models served by provider "${provider}": ${ids.join(', ')} (full catalog: task_models)`;
+      }
+    }
+    if (typeof listProviders === 'function') {
+      const providers = await listProviders();
+      if (Array.isArray(providers) && providers.length > 0) {
+        const ids = providers.map((entry) => (typeof entry?.id === 'string' ? entry.id : undefined)).filter(Boolean);
+        if (ids.length > 0) return ` — routable providers in this deployment: ${ids.join(', ')} (their models: task_models)`;
+      }
+    }
+  } catch {
+    // best effort only — the original rejection message stands alone
+  }
+  return '';
+}
+
+/**
  * @param {object} deps
  * @returns {TaskOps}
  */
 export function createOps(deps) {
-  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser, listWorkspaces, getWorkspace, resolveModelConfig } = deps;
+  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser, listWorkspaces, getWorkspace, resolveModelConfig, listModelProviders, listProviderModels } = deps;
 
   const fail = (code, message) => ({ ok: false, code, error: message });
   const failDeny = (denial) => fail(denial.code, denial.message);
@@ -449,7 +485,8 @@ export function createOps(deps) {
           try {
             await precheck;
           } catch (error) {
-            return fail(OP_CODES.MODEL_UNAVAILABLE, `model selection was rejected by the host catalog: ${error?.message ?? error}`);
+            const hint = await describeModelRoutes(modelSpec.provider, listModelProviders, listProviderModels);
+            return fail(OP_CODES.MODEL_UNAVAILABLE, `model selection was rejected by the host catalog: ${error?.message ?? error}${hint}`);
           }
         }
       }
@@ -824,6 +861,51 @@ export function createOps(deps) {
         return fail(OP_CODES.WORKSPACE_OP_FAILED, `${mode} failed: ${error?.message ?? error}`);
       }
       return { ok: true, action: mode, sessionId: cleanSessionId, workspaceId: targetId };
+    },
+
+    /**
+     * Capability 11 (0.14.0): model-route discovery. Every deployment
+     * connects different providers/models, so supervisors must never guess
+     * ids: this projects the host's LIVE model catalog
+     * (sessionController.modelCatalog — the same source the GUI model picker
+     * renders) down to the exact provider/model/reasoning-effort ids
+     * task_spawn accepts. Read-only, needs no session.
+     */
+    async models(_args, caller) {
+      const callerDeny = checkCaller(caller, config);
+      if (callerDeny) return failDeny(callerDeny);
+      if (typeof sessionController?.modelCatalog !== 'function') {
+        return fail(OP_CODES.CATALOG_UNAVAILABLE, 'this host build exposes no sessionController.modelCatalog(); rely on the model-unavailable error hints from task_spawn instead');
+      }
+      let catalog;
+      try {
+        catalog = await sessionController.modelCatalog();
+      } catch (error) {
+        return fail(OP_CODES.CATALOG_UNAVAILABLE, `the host model catalog failed: ${error?.message ?? error}`);
+      }
+      const groups = Array.isArray(catalog?.groups) ? catalog.groups : [];
+      const providers = groups.map((group) => ({
+        id: group.id,
+        ...(typeof group.name === 'string' && group.name.length > 0 && group.name !== group.id ? { name: group.name } : {}),
+        models: (Array.isArray(group.models) ? group.models : []).map((model) => ({
+          id: model.id,
+          ...(typeof model.name === 'string' && model.name.length > 0 && model.name !== model.id ? { name: model.name } : {}),
+          ...(model.reasoning
+            ? {
+                efforts: (Array.isArray(model.reasoning.efforts) ? model.reasoning.efforts : []).map((effort) => effort?.id).filter(Boolean),
+                ...(model.reasoning.defaultEffort ? { defaultEffort: model.reasoning.defaultEffort } : {}),
+              }
+            : {}),
+        })),
+      }));
+      const failures = Array.isArray(catalog?.failures) ? catalog.failures : [];
+      return {
+        ok: true,
+        ...(catalog?.default ? { default: catalog.default } : {}),
+        providers,
+        ...(failures.length > 0 ? { failedProviders: failures.map((entry) => ({ id: entry.id, message: entry.message })) } : {}),
+        hint: 'use these exact provider/model ids in task_spawn / task_spawn_batch; reasoningEffort must be one of the listed efforts',
+      };
     },
 
     /**

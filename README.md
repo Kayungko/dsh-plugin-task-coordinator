@@ -9,10 +9,10 @@
 
 [![DSH 0.1.2-rc.1 verified](https://img.shields.io/badge/DSH-0.1.2--rc.1%20verified-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![76 unit tests](https://img.shields.io/badge/tests-76%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![80 unit tests](https://img.shields.io/badge/tests-80%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
-[What is this](#what-is-this) · [Quick start](#quick-start) · [Tools](#the-ten-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Changelog](CHANGELOG.md) · [中文](README.zh-CN.md)
+[What is this](#what-is-this) · [Quick start](#quick-start) · [Tools](#the-eleven-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Changelog](CHANGELOG.md) · [中文](README.zh-CN.md)
 
 </div>
 
@@ -54,7 +54,7 @@ pwsh install.ps1 -Source .
 
 The script does three things: copies the plugin into the profile's `node_modules/` (no `pnpm install`, the lockfile stays untouched), registers the dependency + bundle in the profile manifest, and updates `.package-map.json` — **everything is backed up first** into `backups/<timestamp>/`.
 
-**Restart DSH Desktop** afterwards — any session can then use the ten tools and the `/tasks` command.
+**Restart DSH Desktop** afterwards — any session can then use the eleven tools and the `/tasks` command.
 
 > 💡 `install.ps1` defaults `-Source` to `$PSScriptRoot/plugin` (workspace layout); when running from the plugin repo itself, **pass `-Source .` explicitly**.
 > Re-running is safe: file copies are idempotent and manifest registration de-duplicates.
@@ -80,7 +80,7 @@ The model only coordinates when it can map your words to the tools. Vague prompt
 
 Loose wordings ("/task plugin", "coordinate things") are recognized too — the bundled skill carries an alias table and the tool descriptions carry trigger context since 0.9.0 — but the imperative template above is the reliable form, especially for goal objectives.
 
-## The ten tools
+## The eleven tools
 
 | Tool | Purpose |
 |---|---|
@@ -94,6 +94,7 @@ Loose wordings ("/task plugin", "coordinate things") are recognized too — the 
 | `task_wait` | Block until one task becomes idle (or timeout); multi-target (`sessionIds` + `mode: all/any`) |
 | `task_cancel` | Cancel the target's active turn, keeping its queued messages |
 | `task_workspace` | List host workspaces, or `attach` / `detach` an **existing** session (migrate sessions that landed in the ungrouped bucket); goes through the live workspace entity and never touches the session's conversation |
+| `task_models` | List the **exact model routes this deployment serves** — provider/model/reasoning-effort ids from the host's live catalog (the GUI picker's source) plus the app-wide default; consult before spawning with `provider`+`model`, never guess ids (0.14.0) |
 
 ### `/tasks` — the no-model fast lane
 
@@ -107,9 +108,11 @@ The plugin ships a small **web client module** (`client.js`, declared via `dsh.c
 
 Spawned children attach to the caller's workspace by default; an explicit `cwd` that exactly matches a workspace path (case- and separator-insensitive) is **upgraded to a workspace attachment** automatically, so cross-directory dispatch no longer drops sessions into the ungrouped bucket. Sessions that landed ungrouped earlier migrate via `task_workspace`: `list` the host workspaces, then `attach` / `detach` by id or exact path. It calls the live workspace entity — the same `attachSession` API the host's `session.create` uses internally — so the session's stored cwd is validated against the workspace path and its conversation is never touched. (The GUI offers no such entry: sidebar dragging calls `insertSessionBefore`, which only reorders sessions already inside a workspace — field-verified.)
 
-### Per-child model selection (0.13.0)
+### Per-child model selection (0.13.0) & route discovery (0.14.0)
 
 `task_spawn` — and every item of `task_spawn_batch` — accepts an optional `provider` + `model` pair (+ `reasoningEffort`). The route is validated against the host LLM catalog **before** the session is created (`model-unavailable` rejects an invalid pair with zero orphans), then installed through the host's `sessionController.selectModel` **between creation and kickoff**, so the child's very first turn runs on the requested model; the selection persists as a durable session event and survives restarts. Should installation fail after pre-validation, the spawn reports `model-select-failed` with the traceable orphan id and never kicks off on the wrong model. Host semantics, disclosed as-is: installing a session-local model **also updates the app-wide default model** (the GUI picker's "last selection wins" behavior — `selectModel` is the host's only public entry point), so in a mixed-model batch the last child's route becomes the app default.
+
+Marketplace reality: **every user connects different providers/models**, so ids are never hardcoded and never guessed — `task_models` projects the host's **live** model catalog (the same source the GUI model picker renders) into the exact ids `task_spawn` accepts, including per-model reasoning efforts and the app-wide default; providers whose catalog listing fails are reported in isolation (`failedProviders`). A rejected `model-unavailable` spawn carries an actionable hint too: the error lists what the requested provider actually serves (or the routable providers when the provider itself is unknown). On host builds without `modelCatalog()`, `task_models` degrades to `catalog-unavailable` and the error hints remain the fallback.
 
 ## Dispatch confirmation (the anti-black-box gate)
 
@@ -186,7 +189,7 @@ Example: `修复｜对账精度` → `0904｜修复｜对账精度`.
 
 The plugin ships one skill (`skills/task-coordination/SKILL.md`) teaching the supervisor *when and how* to orchestrate the tools: delivery semantics, decomposition criteria, confirmation semantics, fan-out/supervise/handoff patterns, recursion governance, the naming rule, anti-patterns. Loaded on demand — it costs no context until coordination actually happens.
 
-Mounting follows the shipped `@openviking/dsh-memory-plugin` precedent — an **isolated** `dsh-skill-filesystem` provider with `providerName: 'task-coordinator'`, `includeDefaultRoots: false`, seeing only this plugin's `skills/` directory. Consequences: hot-reload on edit, no shadowing of project/user skills, disappears on uninstall. If the provider package is unavailable the mount degrades to a warning — **the ten tools keep working**.
+Mounting follows the shipped `@openviking/dsh-memory-plugin` precedent — an **isolated** `dsh-skill-filesystem` provider with `providerName: 'task-coordinator'`, `includeDefaultRoots: false`, seeing only this plugin's `skills/` directory. Consequences: hot-reload on edit, no shadowing of project/user skills, disappears on uninstall. If the provider package is unavailable the mount degrades to a warning — **the eleven tools keep working**.
 
 ## Configuration (cordis.yml / patch)
 

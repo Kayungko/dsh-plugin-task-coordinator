@@ -9,10 +9,10 @@
 
 [![DSH 0.1.2-rc.1 实测](https://img.shields.io/badge/DSH-0.1.2--rc.1%20实测-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![76 个单元测试](https://img.shields.io/badge/tests-76%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![80 个单元测试](https://img.shields.io/badge/tests-80%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
-[这是什么](#这是什么) · [快速开始](#快速开始) · [十个工具](#十个工具) · [架构设计](docs/ARCHITECTURE.md) · [主机契约](docs/PROTOCOL.md) · [更新日志](CHANGELOG.md) · [English](README.md)
+[这是什么](#这是什么) · [快速开始](#快速开始) · [十一个工具](#十一个工具) · [架构设计](docs/ARCHITECTURE.md) · [主机契约](docs/PROTOCOL.md) · [更新日志](CHANGELOG.md) · [English](README.md)
 
 </div>
 
@@ -53,7 +53,7 @@ pwsh install.ps1 -Source .
 
 脚本做三件事：把插件复制进 profile 的 `node_modules/`（不跑 `pnpm install`、不碰 lockfile）、在 profile manifest 登记依赖与 bundle、登记 `.package-map.json`——**改前全部自动备份**到 `backups/<时间戳>/`。
 
-装完**重启 DSH Desktop**即可，任何会话都能使用十个工具和 `/tasks` 命令。
+装完**重启 DSH Desktop**即可，任何会话都能使用十一个工具和 `/tasks` 命令。
 
 > 💡 `install.ps1` 的默认 `-Source` 是 `$PSScriptRoot/plugin`（工作区布局）；在插件仓库根目录直接运行要**显式传 `-Source .`**。
 > 重复执行是安全的：文件覆盖幂等，manifest 登记自动去重。
@@ -79,7 +79,7 @@ pwsh install.ps1 -Source .
 
 「/task 插件」「协调一下」这类模糊说法也能识别——0.9.0 起技能描述带别名表、工具描述带触发语境——但上面的模板才是可靠写法，goal 的 objective 尤其要用它。
 
-## 十个工具
+## 十一个工具
 
 | 工具 | 用途 |
 |---|---|
@@ -93,6 +93,7 @@ pwsh install.ps1 -Source .
 | `task_wait` | 阻塞直到目标任务空闲（或超时）；支持多目标（`sessionIds` + `mode: all/any`） |
 | `task_cancel` | 取消目标的活动轮次（保留其排队消息） |
 | `task_workspace` | 列出宿主工作区，或把**既有**会话挂入/移出工作区（迁移落入「未分组」的会话）；直连宿主 workspace 实体，不触碰会话内容 |
+| `task_models` | 列出**本部署实际接入**的模型路线——provider/model/reasoning-effort 精确 id（宿主活体目录，GUI 选择器同源）+ 应用级默认；指定子会话模型前先查这里，永远不要猜 id（0.14.0） |
 
 ### `/tasks` —— 不进模型的快速通道
 
@@ -106,9 +107,11 @@ pwsh install.ps1 -Source .
 
 派生的子任务默认挂进调用方所在工作区；显式 `cwd` 与某工作区路径**精确匹配**（大小写/分隔符不敏感）时自动升级为工作区挂载——跨目录派发不再把会话丢进「未分组」。历史上已落入未分组的会话用 `task_workspace` 迁移：`list` 列出宿主工作区，再按 id 或精确路径 `attach` / `detach`。它直连宿主 workspace 实体——与 `session.create` 内部同一套 `attachSession` API——会话存储的 cwd 会对照工作区路径校验，且**绝不向会话注入消息**。（GUI 没有这个入口：侧栏拖拽走 `insertSessionBefore`，只接受已在工作区内的会话重排序——实测验证。）
 
-### 子会话模型指定（0.13.0）
+### 子会话模型指定（0.13.0）与路线发现（0.14.0）
 
 `task_spawn` 与 `task_spawn_batch` 的每个条目接受可选 `provider` + `model`（+ `reasoningEffort`）组合。路线先经宿主 LLM 目录在创建会话**之前**预校验（无效组合 `model-unavailable` 直接拒绝，零孤儿），再于**创建之后、开场之前**通过宿主 `sessionController.selectModel` 安装——子会话第一轮就跑在指定模型上；选择以持久会话事件写入，重启存活。预校验通过但安装失败时报 `model-select-failed` 并附可追踪的孤儿 sessionId，**绝不用错误模型开场**。宿主语义如实披露：安装会话级模型会**同时更新应用级默认模型**（GUI 模型选择器「最近选择即默认」的同一行为——`selectModel` 是宿主唯一公开入口），混合模型批量中最后一个子会话的路线会成为应用默认。
+
+市场现实：**每个用户接入的 provider/model 都不一样**，所以 id 从不写死、也不该靠猜——`task_models` 把宿主**活体模型目录**（GUI 模型选择器渲染的同一数据源）投影为 `task_spawn` 可直接使用的精确 id：provider 分组、model id、逐模型的 reasoning effort、应用级默认选择；目录列举失败的 provider 单点隔离上报（`failedProviders`）。`model-unavailable` 的拒绝错误同样自带可行动提示：列出该 provider 实际提供的模型（provider 本身不认识时列出全部可路由 provider）。宿主版本没有 `modelCatalog()` 时 `task_models` 降级为 `catalog-unavailable`，错误提示仍是兜底。
 
 ## 派发确认（反信息黑盒闸门）
 
@@ -183,9 +186,9 @@ pwsh install.ps1 -Source .
 
 ## 内置技能：task-coordination
 
-插件随包携带一个技能（`skills/task-coordination/SKILL.md`），教总控**何时、如何**编排十个工具：投递语义、拆分判据、确认语义、扇出/监督/交接模式、递归治理、命名规则、反模式。按需加载，不协调就不占上下文。
+插件随包携带一个技能（`skills/task-coordination/SKILL.md`），教总控**何时、如何**编排十一个工具：投递语义、拆分判据、确认语义、扇出/监督/交接模式、递归治理、命名规则、反模式。按需加载，不协调就不占上下文。
 
-挂载走隔离 `dsh-skill-filesystem` provider（同 `@openviking/dsh-memory-plugin` 先例）：`providerName: 'task-coordinator'`、`includeDefaultRoots: false`、只见本插件的 `skills/` 目录。效果：编辑热加载、不遮蔽项目/用户技能、随插件卸载一起消失。provider 包不可用时降级为一条 warning，**十个工具照常工作**。
+挂载走隔离 `dsh-skill-filesystem` provider（同 `@openviking/dsh-memory-plugin` 先例）：`providerName: 'task-coordinator'`、`includeDefaultRoots: false`、只见本插件的 `skills/` 目录。效果：编辑热加载、不遮蔽项目/用户技能、随插件卸载一起消失。provider 包不可用时降级为一条 warning，**十一个工具照常工作**。
 
 ## 配置（cordis.yml / patch）
 

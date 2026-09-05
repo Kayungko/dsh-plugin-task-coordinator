@@ -127,6 +127,12 @@ const ctx = {
         if (selection.model === 'model-ghost') throw new Error(`model "${selection.model}" is not served by provider "${selection.provider}"`);
         return selection;
       },
+      // route-discovery stand-in (0.14.0): mirror listProviders/listModels
+      listProviders: () => [{ id: 'prov-verify', name: 'Verify Provider' }],
+      async listModels(providerId) {
+        calls.push('listModels');
+        return providerId === 'prov-verify' ? [{ id: 'model-ok', name: 'OK Model' }] : [];
+      },
     };
     if (name !== 'userQuestions') return undefined;
     return {
@@ -178,6 +184,23 @@ const ctx = {
       const { sessionId, ...selection } = request;
       return { selected: selection };
     },
+    async modelCatalog() {
+      calls.push('modelCatalog');
+      return {
+        default: { provider: 'prov-verify', model: 'model-ok' },
+        routableProviders: ['prov-verify'],
+        groups: [
+          {
+            id: 'prov-verify',
+            name: 'Verify Provider',
+            models: [
+              { id: 'model-ok', name: 'OK Model', reasoning: { efforts: [{ id: 'high', name: 'High' }], defaultEffort: 'high' } },
+            ],
+          },
+        ],
+        failures: [],
+      };
+    },
     async resolveAgent(sessionId) {
       calls.push('resolve');
       const agent = liveAgents.get(sessionId);
@@ -194,11 +217,11 @@ const ctx = {
 const verifyDir = mkdtempSync(join(tmpdir(), 'task-coord-verify-'));
 const registryFile = join(verifyDir, 'registry.json');
 plugin.apply(ctx, { minSendIntervalMs: 0, registryFile });
-assert.equal(registrations.length, 10, `expected 10 tools, got ${registrations.length}`);
+assert.equal(registrations.length, 11, `expected 11 tools, got ${registrations.length}`);
 assert.equal(ctx.commandRegistrations.length, 1, 'expected the /tasks command');
 assert.equal(ctx.commandRegistrations[0].name, 'tasks');
 assert.ok(ctx.provides.taskCoordinator, 'taskCoordinator service not provided');
-assert.equal(ctx.provides.taskCoordinator.version, '0.13.0');
+assert.equal(ctx.provides.taskCoordinator.version, '0.14.0');
 // the skill mount is fire-and-forget (dynamic import); give it a macrotask
 await new Promise((resolve) => setImmediate(resolve));
 assert.equal(ctx.mountedPlugins.length, 1, 'expected the skill provider mount');
@@ -464,9 +487,21 @@ const ghostSpawn = await byName.task_spawn.execute({ prompt: '不应创建', pro
 assert.equal(ghostSpawn.ok, false);
 assert.equal(ghostSpawn.code, 'model-unavailable');
 assert.equal(ghostSpawn.sessionId, undefined);
+// 0.14.0: the rejection carries an actionable route hint
+assert.match(ghostSpawn.error, /models served by provider "prov-verify": model-ok/);
 // provider and model are a pair
 assert.equal((await byName.task_spawn.execute({ prompt: '不应创建', provider: 'prov-verify' }, supervisorExec)).code, 'bad-request');
-console.log('model selection    : OK -> installed before kickoff | invalid route rejected up front | pair enforced');
+console.log('model selection    : OK -> installed before kickoff | invalid route rejected up front with route hint | pair enforced');
+
+// 0.14.0 model-route discovery: the live catalog projection supervisors
+// consult before spawning with provider+model (per-deployment, never guessed).
+const catalog = await byName.task_models.execute({}, supervisorExec);
+assert.equal(catalog.ok, true);
+assert.deepEqual(catalog.default, { provider: 'prov-verify', model: 'model-ok' });
+assert.equal(catalog.providers[0].id, 'prov-verify');
+assert.deepEqual(catalog.providers[0].models[0], { id: 'model-ok', name: 'OK Model', efforts: ['high'], defaultEffort: 'high' });
+assert.match(catalog.hint, /task_spawn/);
+console.log('task_models        : OK -> live catalog projection (ids + efforts + default)');
 
 const cancelResult = await byName.task_cancel.execute({ sessionId: 'session-worker' }, supervisorExec);
 assert.equal(cancelResult.ok, true);

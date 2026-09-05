@@ -283,6 +283,25 @@ function makeHarness(overrides = {}) {
         },
       };
     },
+    async modelCatalog() {
+      calls.modelCatalog = (calls.modelCatalog ?? 0) + 1;
+      if (overrides.catalogError) throw new Error('catalog backend down');
+      return overrides.catalog ?? {
+        default: { provider: 'prov-a', model: 'model-x' },
+        routableProviders: ['prov-a'],
+        groups: [
+          {
+            id: 'prov-a',
+            name: 'Provider A',
+            models: [
+              { id: 'model-x', name: 'Model X', reasoning: { efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }], defaultEffort: 'high' } },
+              { id: 'model-y', name: 'model-y' },
+            ],
+          },
+        ],
+        failures: [{ id: 'prov-broken', name: 'Broken', message: 'unreachable' }],
+      };
+    },
     async resolveAgent(sessionId) {
       calls.resolve.push(sessionId);
       const agent = liveAgents.get(sessionId);
@@ -301,6 +320,7 @@ function makeHarness(overrides = {}) {
       };
     },
   };
+  if (overrides.catalogMissing) delete sessionController.modelCatalog; // simulate a host build without the catalog method
 
   const agents = { get: (id) => liveAgents.get(id) };
   const created = [];
@@ -336,6 +356,8 @@ function makeHarness(overrides = {}) {
     ...(overrides.listWorkspaces ? { listWorkspaces: overrides.listWorkspaces } : {}),
     ...(overrides.getWorkspace ? { getWorkspace: overrides.getWorkspace } : {}),
     ...(overrides.resolveModelConfig ? { resolveModelConfig: overrides.resolveModelConfig } : {}),
+    ...(overrides.listModelProviders ? { listModelProviders: overrides.listModelProviders } : {}),
+    ...(overrides.listProviderModels ? { listProviderModels: overrides.listProviderModels } : {}),
     uuid: () => 'req-test-1',
     askUser,
   });
@@ -756,6 +778,59 @@ test('ops.spawnBatch: per-item model selections are forwarded (0.13.0)', async (
   assert.equal(harness.calls.selectModel.length, 2);
   assert.deepEqual(harness.calls.selectModel.map((request) => request.model), ['model-big', 'model-small']);
   assert.equal(harness.calls.selectModel[1].reasoningEffort, 'low');
+});
+
+test('ops.models: live catalog projection (0.14.0)', async () => {
+  const harness = makeHarness();
+  const result = await harness.ops.models({}, SUPERVISOR);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.default, { provider: 'prov-a', model: 'model-x' });
+  assert.deepEqual(result.providers, [
+    {
+      id: 'prov-a',
+      name: 'Provider A',
+      models: [
+        { id: 'model-x', name: 'Model X', efforts: ['low', 'high'], defaultEffort: 'high' },
+        { id: 'model-y' }, // name equal to id omitted; no reasoning -> no efforts field
+      ],
+    },
+  ]);
+  assert.deepEqual(result.failedProviders, [{ id: 'prov-broken', message: 'unreachable' }]);
+  assert.match(result.hint, /task_spawn/);
+});
+
+test('ops.models: degradation on old or broken hosts (0.14.0)', async () => {
+  const missing = makeHarness({ catalogMissing: true });
+  assert.equal((await missing.ops.models({}, SUPERVISOR)).code, 'catalog-unavailable');
+  const broken = makeHarness({ catalogError: true });
+  const result = await broken.ops.models({}, SUPERVISOR);
+  assert.equal(result.code, 'catalog-unavailable');
+  assert.match(result.error, /catalog backend down/);
+});
+
+test('describeModelRoutes: actionable hints, failure-tolerant (0.14.0)', async () => {
+  const { describeModelRoutes } = await import('../ops.mjs');
+  const providers = () => [{ id: 'prov-a' }, { id: 'prov-b' }];
+  const models = async (id) => (id === 'prov-a' ? [{ id: 'model-x' }, { id: 'model-y' }] : []);
+  assert.match(await describeModelRoutes('prov-a', providers, models), /models served by provider "prov-a": model-x, model-y/);
+  // unknown provider -> falls back to the routable provider list
+  assert.match(await describeModelRoutes('ghost', providers, models), /routable providers in this deployment: prov-a, prov-b/);
+  // throwing or missing deps -> empty hint, never throws
+  assert.equal(await describeModelRoutes('prov-a', () => { throw new Error('x'); }, undefined), '');
+  assert.equal(await describeModelRoutes('prov-a', undefined, undefined), '');
+});
+
+test('ops.spawnTask: model-unavailable error carries the route hint (0.14.0)', async () => {
+  const harness = makeHarness({
+    resolveModelConfig: () => Promise.reject(new Error('no such model "ghost"')),
+    listProviderModels: async (id) => (id === 'prov-a' ? [{ id: 'model-x' }] : []),
+    listModelProviders: () => [{ id: 'prov-a' }],
+  });
+  const result = await harness.ops.spawnTask({ prompt: 'x', provider: 'prov-a', model: 'ghost' }, SUPERVISOR);
+  assert.equal(result.code, 'model-unavailable');
+  assert.match(result.error, /models served by provider "prov-a": model-x/);
+  assert.match(result.error, /task_models/);
+  assert.equal(harness.calls.create.length, 0);
 });
 
 test('ops.spawnTask: kickoff failure reports the orphan', async () => {
@@ -1374,7 +1449,7 @@ test('commands: registerCommands registers, executes and degrades', async () => 
 /* tools registration                                                  */
 /* ------------------------------------------------------------------ */
 
-test('registerTools: ten tools with delegation', async () => {
+test('registerTools: eleven tools with delegation', async () => {
   const harness = makeHarness();
   const registered = [];
   const ctx = {
@@ -1389,7 +1464,7 @@ test('registerTools: ten tools with delegation', async () => {
   // stub defineTool: minimal contract mirror (name/description/parameters/output/execute)
   const defineTool = (options) => options;
   const dispose = registerTools(ctx, harness.ops, { defineTool }, resolveConfig());
-  assert.deepEqual(registered.map((tool) => tool.name), ['task_list', 'task_progress', 'task_send', 'task_spawn', 'task_confirm', 'task_confirm_select', 'task_spawn_batch', 'task_wait', 'task_cancel', 'task_workspace']);
+  assert.deepEqual(registered.map((tool) => tool.name), ['task_list', 'task_progress', 'task_send', 'task_spawn', 'task_confirm', 'task_confirm_select', 'task_spawn_batch', 'task_wait', 'task_cancel', 'task_workspace', 'task_models']);
   const byName = Object.fromEntries(registered.map((tool) => [tool.name, tool]));
   assert.deepEqual(byName.task_list.parameters.sessionId, undefined);
   assert.ok(byName.task_list.parameters.team); // task_list team filter
@@ -1439,7 +1514,10 @@ test('registerTools: ten tools with delegation', async () => {
   const wsList = await byName.task_workspace.execute({}, exec);
   assert.equal(wsList.ok, true);
   assert.equal(wsList.action, 'list');
-  assert.equal(registered.length, 10);
+  const modelsResult = await byName.task_models.execute({}, exec);
+  assert.equal(modelsResult.ok, true);
+  assert.ok(Array.isArray(modelsResult.providers));
+  assert.equal(registered.length, 11);
   dispose();
   assert.equal(registered.length, 0);
 });

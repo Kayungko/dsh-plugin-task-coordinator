@@ -2,6 +2,14 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.14.0] - 2026-09-05
+
+### Added
+
+- **模型路由发现 `task_models`（第 11 个工具）**：市场分发场景下每个用户接入的 provider/model 都不同，id 永远不该靠猜——`task_models` 把宿主**活体模型目录**（`sessionController.modelCatalog()`，GUI 模型选择器同一数据源）投影为 `task_spawn` 可直接使用的精确 id：provider 分组、model id、reasoning effort 列表 + 应用级默认选择 + 单点失败的 provider（`failedProviders`）。只读、无需会话。宿主无此方法的老版本降级为 `catalog-unavailable`（提示改靠 spawn 错误提示）。
+- **`model-unavailable` 错误自带可行动提示**：预校验拒绝时经 `describeModelRoutes` 附上真实可用路线——优先列出该 provider 实际提供的 model id，provider 本身不存在则回退列出全部可路由 provider，并指向 `task_models`。全链失败容忍：目录依赖任何异常都只退回原始错误消息。
+- 单元测试 76 → 80。
+
 ## [0.13.0] - 2026-09-05
 
 ### Added
@@ -171,7 +179,8 @@
 
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
-[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.11.0...v0.12.0

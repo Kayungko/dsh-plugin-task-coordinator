@@ -38,7 +38,7 @@ export function defaultRegistryFile() {
 
 export function apply(ctx, input = {}) {
   const config = resolveConfig(input);
-  ctx.provide('taskCoordinator', { config, version: '0.13.0' });
+  ctx.provide('taskCoordinator', { config, version: '0.14.0' });
   if (!config.enabled) {
     ctx.logger?.info('task-coordinator: disabled by config; no tools registered');
     return;
@@ -111,6 +111,26 @@ export function apply(ctx, input = {}) {
       return undefined;
     }
   };
+  // Model-route discovery (0.14.0): every deployment connects different
+  // providers/models, so valid ids come from the live registry — never
+  // hardcoded. Both helpers are failure-tolerant; undefined degrades the
+  // model-unavailable hint to its original message.
+  const listModelProviders = () => {
+    try {
+      const service = typeof ctx.get === 'function' ? ctx.get('llm') : undefined;
+      return typeof service?.listProviders === 'function' ? service.listProviders() : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const listProviderModels = (providerId) => {
+    try {
+      const service = typeof ctx.get === 'function' ? ctx.get('llm') : undefined;
+      return typeof service?.listModels === 'function' ? service.listModels(providerId) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
   const ops = createOps({
     sessionController,
     agents,
@@ -123,6 +143,8 @@ export function apply(ctx, input = {}) {
     listWorkspaces,
     getWorkspace,
     resolveModelConfig,
+    listModelProviders,
+    listProviderModels,
   });
   const dispose = registerTools(ctx, ops, { defineTool }, config);
   const disposeCommands = registerCommands(ctx, ops);

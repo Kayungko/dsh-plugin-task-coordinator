@@ -305,7 +305,22 @@ export function registerTools(ctx, ops, deps, config) {
     },
   })));
 
-  ctx.logger?.info(`task-coordinator: registered 10 coordination tools (subagent use ${config.allowSubagentUse ? 'allowed' : 'denied'})`);
+  disposers.push(ctx.tools.register(defineTool({
+    name: 'task_models',
+    description: 'List the EXACT model routes available in THIS deployment — providers, model ids, and reasoning efforts — from the host\'s live model catalog (the same source the GUI model picker renders). '
+      + 'Every user connects different providers/models, so never guess ids: consult this before task_spawn / task_spawn_batch with provider+model. Read-only, needs no session.',
+    parameters: {},
+    output: OUTPUT,
+    async execute(args, exec) {
+      try {
+        return await ops.models(args, callerFrom(exec));
+      } catch (error) {
+        return { ok: false, code: 'internal', error: error?.message ?? String(error) };
+      }
+    },
+  })));
+
+  ctx.logger?.info(`task-coordinator: registered 11 coordination tools (subagent use ${config.allowSubagentUse ? 'allowed' : 'denied'})`);
   return () => {
     for (const dispose of disposers.splice(0)) {
       try {

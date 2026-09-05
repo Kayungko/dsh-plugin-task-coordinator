@@ -6,7 +6,7 @@ description: >
   或者用户提到"总控/协调多个任务/派一个任务去做/拆成几个会话"时使用。
   用户口中的"/task 插件""task 插件""task-coordinator""dsh-plugin-task-coordinator"
   "分发/派发子任务会话""开几个会话并行"同样指本技能的能力。
-  涵盖十个 task_* 工具的投递语义、拆分决策、编排模式、命名规则、递归治理与安全边界。
+  涵盖十一个 task_* 工具的投递语义、拆分决策、编排模式、命名规则、递归治理与安全边界。
 whenToUse: >
   协调两个以上顶层会话任务时；用户要求并行处理多项工作并汇总时；需要自动分析任务该拆成几个
   会话并向用户确认拆分方案时；需要监督一个长任务的进度并纠偏或取消时；需要把上下文交接给
@@ -15,7 +15,7 @@ whenToUse: >
 
 # 跨任务协调操作手册（task_* 工具）
 
-你可以通过十个 `task_*` 工具指挥其他顶层会话（"任务"）。这些消息在目标会话的 transcript
+你可以通过十一个 `task_*` 工具指挥其他顶层会话（"任务"）。这些消息在目标会话的 transcript
 中**可见**，来源标记为 `coordinator`。
 
 ## 工具速览
@@ -32,6 +32,7 @@ whenToUse: >
 | `task_wait` | 阻塞直到任务空闲（或超时）；支持多目标（`sessionIds` + `mode: all/any`） |
 | `task_cancel` | 取消目标的活动轮次，保留其排队消息 |
 | `task_workspace` | **工作区迁移**（0.12.0）：`list` 列宿主工作区；`attach`/`detach` 把既有会话挂入/移出工作区（走宿主实体 API，校验会话 cwd 与工作区路径一致，不触碰会话内容）——修复历史落入「未分组」的会话 |
+| `task_models` | **模型路由发现**（0.14.0）：列出本部署**实际接入**的 provider/model/reasoning-effort 精确 id（宿主活体目录，GUI 选择器同源）+ 应用级默认模型。指定子会话模型前先查这里——每个用户接入的路线不同，**永远不要猜 id** |
 
 **快速通道**：只想查询、不想消耗模型轮次时，用斜杠命令 `/tasks`（列任务）、
 `/tasks team <名称>`（列编组）、`/tasks <sessionId>`（单任务进度）——直接在 GUI 返回，
@@ -221,8 +222,9 @@ task_confirm_select({ tasks: [{title, scope}…] })  ← 用户勾选要派发�
 | `batch-all-failed` | 批量派发全部失败 | 看 `results` 里每项的 code 分别处理 |
 | `workspace-not-found` | task_workspace 的目标工作区不存在/不可用 | 先 `action: list` 核对 id 或精确路径 |
 | `workspace-op-failed` | 宿主实体拒绝挂载（常见：会话 cwd 与工作区路径不一致） | 看错误消息里的实际 cwd；不一致就不能挂 |
-| `model-unavailable` | 指定的模型路线被宿主目录预校验拒绝（未创建会话，无孤儿） | 核对 provider/model 拼写；可用路线以 GUI 模型选择器为准 |
+| `model-unavailable` | 指定的模型路线被宿主目录预校验拒绝（未创建会话，无孤儿） | 错误消息附该 provider 实际可用的模型（或可路由 provider 列表）；完整目录用 `task_models` |
 | `model-select-failed` | 会话已创建但模型安装失败（开场未发送） | 结果含孤儿 sessionId：手动选好模型后 task_send 补开场，或 task_cancel |
+| `catalog-unavailable` | 宿主版本过老/目录后端故障，`task_models` 拿不到目录 | 依赖 task_spawn 的 model-unavailable 错误提示纠正 id |
 | `target-cold` | 目标无活动代理，无可取消 | 无需处理 |
 
 ## 反模式
