@@ -288,7 +288,7 @@ export function registerTools(ctx, ops, deps, config) {
     description: 'List host workspaces, move an EXISTING top-level session into/out of one (attach/detach), or MIGRATE it to a DIFFERENT workspace (migrate). '
       + 'Use it to fix sessions that landed in the ungrouped bucket — e.g. spawned with an explicit cwd before 0.12.0. '
       + 'Attach goes through the host workspace entity (the same API session.create uses): the session\'s stored cwd must match the workspace path, and the session\'s conversation is never touched. '
-      + 'Migrate crosses workspaces whose path differs from the session\'s cwd — the one thing attach can never do: it clones the full history into a NEW session born with the target cwd, attaches the clone and archives the original, then returns the new session id (message that id from now on). It refuses running sessions (settle them with task_wait first). '
+      + 'Migrate crosses workspaces whose path differs from the session\'s cwd — the one thing attach can never do: it clones the full history into a NEW session born with the target cwd, attaches the clone and archives the original (workspace-level: the old id stays readable and resumable — never message it again or the work forks into two diverging copies), then returns the new session id (message that id from now on). It refuses running sessions (settle them with task_wait first). '
       + 'New spawns rarely need attach — task_spawn upgrades an exact cwd match to a workspace attachment automatically; spawn with the target workspace\'s cwd when the task belongs elsewhere.',
     parameters: {
       action: { type: 'string', description: 'list | attach | detach | migrate. Defaults to list.' },

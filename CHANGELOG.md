@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.16.2] - 2026-09-06
+
+### Fixed
+
+- **migrate 归档语义对齐宿主真实行为（真机验收产物）**：v0.16.0 发布后实测迁移 6 个跨项目会话，对照宿主源码（`dsh-workspace` lib/index.js 206-215/408 行）澄清：`archiveSession` 只把旧 id 记入工作区 `archivedSessionIds`（GUI 工作区面板据此折叠），**`sessionIds` 槽位保留、会话本体仍在 store、依旧可读且可被 `task_send` 续跑**——「归档」是工作区展示层语义，不是会话退役；对旧 id 发消息会唤醒旧副本、与新副本分叉。本版把说重的文案全部对齐：migrate 回执 note 扩为含分叉警告（旧 id 仍可读写，绝不再发消息）、工具描述、SKILL 反模式与工具表、PROTOCOL/ARCHITECTURE 同步宿主行号证据。零行为改动；单测保持 89。
+
 ## [0.16.1] - 2026-09-06
 
 ### Fixed
@@ -217,7 +223,8 @@
 
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
-[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.16.1...HEAD
+[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.16.2...HEAD
+[0.16.2]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.16.1...v0.16.2
 [0.16.1]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.14.0...v0.15.0

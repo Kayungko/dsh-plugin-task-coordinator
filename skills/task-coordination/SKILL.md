@@ -31,7 +31,7 @@ whenToUse: >
 | `task_spawn_batch` | **一次创建一批任务**（拆分执行步）：传 `tasks: [{title?, prompt}]` + 统一 `team`（+ 必需的 `confirmationId`）；默认带回报约定 |
 | `task_wait` | 阻塞直到任务空闲（或超时）；支持多目标（`sessionIds` + `mode: all/any`） |
 | `task_cancel` | 取消目标的活动轮次，保留其排队消息 |
-| `task_workspace` | **工作区迁移**（0.12.0）：`list` 列宿主工作区；`attach`/`detach` 把既有会话挂入/移出工作区（走宿主实体 API，校验会话 cwd 与工作区路径一致，不触碰会话内容）——修复历史落入「未分组」的会话；`migrate`（0.16.0）**跨工作区真迁移**：cwd 不一致 attach 挂不进时，克隆完整历史到目标工作区路径下出生的新会话并归档原会话，任务改用返回的新 sessionId 继续；运行中的会话拒迁（先 `task_wait` 收口） |
+| `task_workspace` | **工作区迁移**（0.12.0）：`list` 列宿主工作区；`attach`/`detach` 把既有会话挂入/移出工作区（走宿主实体 API，校验会话 cwd 与工作区路径一致，不触碰会话内容）——修复历史落入「未分组」的会话；`migrate`（0.16.0）**跨工作区真迁移**：cwd 不一致 attach 挂不进时，克隆完整历史到目标工作区路径下出生的新会话并归档原会话（归档=工作区展示层标记：旧会话本体仍可读可写，对旧 id 发消息会分叉），任务改用返回的新 sessionId 继续；运行中的会话拒迁（先 `task_wait` 收口） |
 | `task_models` | **模型路由发现**（0.14.0）：列出本部署**实际接入**的 provider/model/reasoning-effort 精确 id（宿主活体目录，GUI 选择器同源）+ 应用级默认模型。指定子会话模型前先查这里——每个用户接入的路线不同，**永远不要猜 id** |
 
 **快速通道**：只想查询、不想消耗模型轮次时，用斜杠命令 `/tasks`（列任务）、
@@ -240,4 +240,4 @@ task_confirm_select({ tasks: [{title, scope}…] })  ← 用户勾选要派发�
 - ❌ spawn 时写一行模糊指令（"帮我处理一下"）——子任务没有上下文，指令必须自包含。
 - ❌ 把长文档整段塞进 spawn 标题——标题只放类型和主题，内容放 prompt。
 - ❌ 跨项目派发不带显式 `cwd`——子会话默认继承总控的 cwd 并挂进总控所在工作区；任务属于别的项目时，必须传与目标工作区路径精确匹配的 `cwd`（事后补救用 `task_workspace` 的 `migrate`）。
-- ❌ `migrate` 成功后继续对旧 id 发 `task_send`——任务已在返回的新 sessionId 下继续，旧会话已归档。
+- ❌ `migrate` 成功后继续对旧 id 发 `task_send`——任务已在返回的新 sessionId 下继续；旧会话只是被工作区归档标记，本体仍可读可写，对旧 id 发消息会唤醒旧副本、与新副本分叉成两条线。

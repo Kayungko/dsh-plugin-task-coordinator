@@ -954,7 +954,7 @@ export function createOps(deps) {
           archived,
           ...(carried?.team !== undefined ? { team: carried.team } : {}),
           ...(warning ? { warning } : {}),
-          note: `the migrated task continues under the NEW id '${newSessionId}'; message and steer that id, not '${cleanSessionId}'`,
+          note: `the migrated task continues under the NEW id '${newSessionId}'; message and steer that id, not '${cleanSessionId}' — host archive is workspace-level: the original stays readable and RESUMABLE, and messaging the old id would fork the work into two diverging copies`,
         };
       }
       const entity = typeof getWorkspace === 'function' ? getWorkspace(targetId) : undefined;
