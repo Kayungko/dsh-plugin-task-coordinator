@@ -103,13 +103,13 @@ Loose wordings ("/task plugin", "coordinate things") are recognized too — the 
 |---|---|
 | `task_list` | List coordination-visible tasks with stable session ids, status, titles, todo/goal progress; filterable by `team` |
 | `task_progress` | Read one task in depth: live/cold state, queued messages, conversation tail, todos, goal |
-| `task_send` | Deliver a visible follow-up prompt (`mode: queue` or `steer`; `reference` links an earlier instruction); returns a `messageId` |
+| `task_send` | Deliver a visible follow-up prompt (`mode: queue` or `steer`; `reference` links an earlier instruction); returns a `messageId` plus a `queueDepth` receipt `{nextTurn, nextStep}` (post-send; one next-turn message is consumed per round, so depth N ≈ N rounds before it is read) |
 | `task_spawn` | Create + name + kick off a brand-new task (title follows the `MMDD｜type｜topic` rule; groupable via `team`); returns a `correlationId`; appends the report-back convention by default; the child attaches to the caller's workspace, and an explicit `cwd` exactly matching a workspace path is upgraded to that workspace's attachment (0.12.0); optional `provider`+`model` (+`reasoningEffort`) select the child's LLM route, installed before the kickoff (0.13.0) |
 | `task_confirm` | Present a decomposition/dispatch plan as an **interactive approval card** and block until the user answers; approval mints a single-use `confirmationId` |
 | `task_confirm_select` | Present the proposed task list as a **multi-select card** (host's neutral question UI — no amber styling): the user checks which tasks to dispatch (partial dispatch) with an optional custom-feedback row; approval binds the `confirmationId` to the selected subset and `task_spawn_batch` enforces it (`confirmation-mismatch` otherwise) |
 | `task_spawn_batch` | Spawn a whole decomposition plan in one call (`tasks: [{title?, prompt}]` + one `team`); requires the `confirmationId` once the batch reaches the confirmation threshold; one failed item does not abort the rest |
-| `task_wait` | Block until one task becomes idle (or timeout); multi-target (`sessionIds` + `mode: all/any`) |
-| `task_cancel` | Cancel the target's active turn, keeping its queued messages |
+| `task_wait` | Block until one task becomes idle (or timeout); multi-target (`sessionIds` + `mode: all/any`); cold targets (no live agent) report idle immediately — cold ≠ no pending work |
+| `task_cancel` | Cancel the target's active turn, keeping its queued messages (the stopped target needs a new message to wake — cancellation does not auto-drain the queue) |
 | `task_workspace` | List host workspaces, `attach` / `detach` an **existing** session (fix the ungrouped bucket), or `migrate` it to a **different** workspace (0.16.0): clones the full history into a new session born with the target cwd, attaches the clone, workspace-archives the original and returns the new id (workspace-level fold: the old session stays readable and resumable — messaging it would fork the work); refuses running sessions (`task_wait` first). Goes through the live workspace entity and never touches a session's conversation |
 | `task_models` | List the **exact model routes this deployment serves** — provider/model/reasoning-effort ids from the host's live catalog (the GUI picker's source) plus the app-wide default; consult before spawning with `provider`+`model`, never guess ids (0.14.0) |
 
@@ -153,7 +153,7 @@ Degradation: with no UI connected, `task_confirm` returns `no-question-channel` 
 
 ## Result report-back
 
-Spawned tasks come with a **report-back convention by default** (`reportBack`): the kickoff prompt ends with an instruction to push a result summary (conclusion, output paths, remaining issues) back to the spawning session via `task_send` when the task finishes — with "write the summary into your final reply" as the fallback when the send fails. The supervisor therefore gets **push + `task_wait` as the pull fallback** instead of polling. Pass `reportBack: false` for fire-and-forget tasks you will read with `task_progress` anyway.
+Spawned tasks come with a **report-back convention by default** (`reportBack`): the kickoff prompt ends with an instruction to push a result summary (conclusion, output paths, remaining issues) back to the spawning session via `task_send` when the task finishes — with "write the summary into your final reply" as the fallback when the send fails. The supervisor therefore gets **push + `task_wait` as the pull fallback** instead of polling. Pass `reportBack: false` for fire-and-forget tasks you will read with `task_progress` anyway. Since 0.17.0 the convention also tells the child to **end its turn right after sending** (your reply auto-opens a new round on the idle child), and for multi-phase tasks to send a phase report and yield at phases that need your review — the bundled skill pairs this with the phase-review-gate pattern; **respond to every phase report**, the yielded child hangs until you do.
 
 ## Recursion governance
 
@@ -166,6 +166,18 @@ Spawned coordinators can spawn further tasks — up to `maxSpawnDepth` (default 
 | **idle** | Immediately starts a new round on the target |
 | **running** + `queue` (default) | Message queues, claimed at the next **turn** boundary |
 | **running** + `steer` | Message queues, claimed at the next **step** boundary (faster mid-course correction) |
+
+Queue-drain mechanics (host-source verified): the next-turn queue is FIFO and **exactly one message is consumed per round** — the round's first step also absorbs all pending next-step messages — so a message queued at depth N is read after ~N rounds. `task_send` receipts carry `queueDepth {nextTurn, nextStep}` (post-send, including your message). `steer` skips the whole next-turn queue while the target is healthily running, at the cost of extending the current round (several steers land in one batch); on an idle or abort-winding-down target it degrades to next-turn queuing. `task_wait` returns immediately for cold targets (no live agent) — cold does not mean no pending work.
+
+Three-tier interruption ladder:
+
+| Tier | Tool | Takes effect | Skips the queue? | Cost |
+|---|---|---|---|---|
+| 1 | `task_send` queue | idle → new round at once; running → first step of the next round (FIFO, one per round) | no | none |
+| 2 | `task_send` steer | healthily running → next step boundary; idle / abort-winding-down → degrades to queue | yes (running): ahead of the whole next-turn queue | extends the current round; several steers land in one batch |
+| 3 | `task_cancel` | requests immediate stop (running tool calls finish first); queued messages kept | yes (vs the current round) | work in flight is lost; the stopped target needs a new message to wake |
+
+Rule of thumb: **if being one step late wastes a step, steer** (stop / course change / conflict warning); otherwise queue (acknowledgments, background, non-urgent handoffs). Inside a single marathon tool call (a full test battery, say) there is no step boundary — even steer cannot get in; only tier 3 applies.
 
 Conclusion: **no polling needed** — deliver, `task_wait` for idle, then `task_progress` for the result. To correct a running task right away use `steer`; a `queue` message will not take effect earlier.
 
@@ -210,7 +222,7 @@ Example (English set configured): `Fix｜reconciliation precision` → `0904｜F
 
 ## Bundled skill: task-coordination
 
-The plugin ships one skill (`skills/task-coordination/SKILL.md`) teaching the supervisor *when and how* to orchestrate the tools: delivery semantics, decomposition criteria, confirmation semantics, fan-out/supervise/handoff patterns, recursion governance, the naming rule, anti-patterns. Loaded on demand — it costs no context until coordination actually happens.
+The plugin ships one skill (`skills/task-coordination/SKILL.md`) teaching the supervisor *when and how* to orchestrate the tools: delivery semantics, the three-tier interruption ladder, decomposition criteria, confirmation semantics, fan-out/supervise/handoff patterns, yield-and-wake (goal-mode event loop) and phase-review-gate orchestration patterns, recursion governance, the naming rule, anti-patterns. Loaded on demand — it costs no context until coordination actually happens.
 
 Mounting follows the shipped `@openviking/dsh-memory-plugin` precedent — an **isolated** `dsh-skill-filesystem` provider with `providerName: 'task-coordinator'`, `includeDefaultRoots: false`, seeing only this plugin's `skills/` directory. Consequences: hot-reload on edit, no shadowing of project/user skills, disappears on uninstall. If the provider package is unavailable the mount degrades to a warning — **the eleven tools keep working**.
 
@@ -254,7 +266,7 @@ Module layering, DI boundaries and the degradation strategy live in **[docs/ARCH
 
 ```powershell
 node --check *.mjs                      # syntax check
-node --test test/smoke.test.mjs         # 59 unit tests (mocked host)
+node --test test/smoke.test.mjs         # 89 unit tests (mocked host)
 # after installing into a profile (see Quick start):
 node verify-installed.mjs               # installed-location integration check: real host packages + mock ctx
 ```
@@ -278,7 +290,7 @@ dsh-plugin-task-coordinator/
 ├── cordis.patch.yml    isolated plugin-group mount descriptor
 ├── install.ps1         deploy script (copy-based install + automatic backups)
 ├── verify-installed.mjs installed-location integration check
-├── test/smoke.test.mjs 59 unit tests
+├── test/smoke.test.mjs 89 unit tests
 └── docs/               ARCHITECTURE.md · PROTOCOL.md
 ```
 

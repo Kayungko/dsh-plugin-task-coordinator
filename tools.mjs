@@ -71,11 +71,11 @@ export function registerTools(ctx, ops, deps, config) {
 
   disposers.push(ctx.tools.register(defineTool({
     name: 'task_send',
-    description: 'Send a visible follow-up prompt to another task. Mode "queue" (default): starts a new round when the target is idle, otherwise queues at the next turn boundary. Mode "steer": mid-run course correction delivered at the next step boundary. The message appears in the target\'s transcript and is attributed to this coordinating session. Returns a messageId; delivery means accepted into the inbox, not yet consumed — verify with task_progress before resending.',
+    description: 'Send a visible follow-up prompt to another task. Mode "queue" (default): starts a new round when the target is idle, otherwise queues at the next turn boundary. Mode "steer": mid-run course correction delivered at the next step boundary. The message appears in the target\'s transcript and is attributed to this coordinating session. Returns a messageId plus a queueDepth receipt {nextTurn, nextStep} (post-send, including this message; one next-turn message is consumed per round, so nextTurn depth N ≈ N rounds before it is read); delivery means accepted into the inbox, not yet consumed — verify with task_progress before resending.',
     parameters: {
       sessionId: { type: 'string', required: true, description: 'Target task session id.' },
       message: { type: 'string', required: true, description: 'Follow-up prompt text: corrections, new instructions, or handoff context.' },
-      mode: { type: 'string', enum: ['queue', 'steer'], description: 'Delivery mode. queue = next turn (default); steer = next step of the running turn.' },
+      mode: { type: 'string', enum: ['queue', 'steer'], description: 'Delivery mode. queue = next turn (default); steer = next step of the running turn — steer only skips the queue while the target is healthily running (it degrades to next-turn queuing on an idle or abort-winding-down target) and it extends the running round. Rule: steer when the message changes the target\'s next step (stop, course correction, conflict warning); queue when it only adds context for a future round.' },
       reference: { type: 'string', description: 'Optional id of an earlier instruction (a messageId or correlationId returned by task_send/task_spawn) that this message corrects or continues; it is quoted visibly in the delivered message.' },
     },
     output: OUTPUT,
@@ -116,6 +116,7 @@ export function registerTools(ctx, ops, deps, config) {
       + 'or "task-coordinator" references), use this tool family instead of doing everything in-session, and load the '
       + 'task-coordination skill for the orchestration playbook. '
       + 'The new task appears in the session list immediately. Returns the new session id for follow-up coordination. '
+      + 'With reportBack (default on) the child is told to send its result summary back and end its turn right after, so your reply auto-opens a new round on the idle child. '
       + 'Optional provider+model select the child\'s LLM route (installed before the kickoff, so its first turn uses it; '
       + 'host semantics: this also updates the app-wide default model, like picking a model in the GUI). '
       + spawnTitleRule,
@@ -248,7 +249,7 @@ export function registerTools(ctx, ops, deps, config) {
 
   disposers.push(ctx.tools.register(defineTool({
     name: 'task_wait',
-    description: 'Wait until task(s) become idle (current round finishes) or the timeout expires. Pass one sessionId, or several sessionIds with mode "all" (settle when every target is idle; the fan-out default) or "any" (settle when the first target is idle). Use before reading final results or handing work over. A timeout means the tasks are still running — check task_progress before resending anything.',
+    description: 'Wait until task(s) become idle (current round finishes) or the timeout expires. Pass one sessionId, or several sessionIds with mode "all" (settle when every target is idle; the fan-out default) or "any" (settle when the first target is idle). Use before reading final results or handing work over. Cold targets (no live agent) are reported idle immediately — cold does not mean no pending work. A timeout means the tasks are still running — check task_progress before resending anything; as a supervisor in goal mode, consider ending your turn instead of blocking: queued messages auto-open new rounds on you when idle.',
     parameters: {
       sessionId: { type: 'string', description: 'Single target task session id. Use this or sessionIds.' },
       sessionIds: { type: 'array', items: { type: 'string' }, description: 'Several target task session ids to wait on together. Use this or sessionId.' },

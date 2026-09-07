@@ -47,7 +47,7 @@
 `ctx.agents.get(sessionId)` 返回运行中 agent 或 `undefined`。插件用到的成员：
 
 - `agent.status` —— 空闲 / 运行中判定（决定投递走立即启动还是排队）；
-- `agent.inbox.nextTurn` / `agent.inbox.nextStep` —— 两个排队队列；**排队深度 = 两队列长度之和**（`SendLimiter` 的度量口径）；
+- `agent.inbox.nextTurn` / `agent.inbox.nextStep` —— 两个排队队列；**排队深度 = 两队列长度之和**（`SendLimiter` 的度量口径）；0.17.0 起 `task_send` 回执分列回传 `queueDepth {nextTurn, nextStep}`（投递后口径，含本条）；
 - `agent.whenIdle()` —— `task_wait` 的等待原语；
 - `agent.followup()` / `agent.steer()` —— `task_send` 的两种投递入口。
 
@@ -66,6 +66,17 @@
 - **不需要轮询**——投递后 `task_wait` 等空闲，再 `task_progress` 读结果；
 - 要立刻纠偏运行中的任务用 `steer`，发 `queue` 不会提前生效；
 - **[0.3.0 新增] 投递 ≠ 消费**：`delivered: true` 只表示消息进了收件箱。超时、异常或长时间无响应时先用 `task_progress` 对账（队列 + 对话尾部），再决定补发——绝不把不确定的投递当新消息盲发。
+
+### 队列消化与三级中断阶梯 [0.17.0 实测]
+
+宿主源码级实测（`@deepseek-ai/dsh-agent` `Inbox.claim` / `dsh-agent-loop` 主循环）：
+
+- **next-turn 每轮恰好消化 1 条**（`mutate('next-turn', 0, 1, …)`），新轮首步同批吸收全部 next-step 积压——排队深度 N ≈ N 轮后才被读；目标运行中先等当前轮结束；中途出错中断连续消化（剩余滞留待下一条消息唤醒）；
+- **steer（目标健康运行中）跳过整个 next-turn 队列**（步边界 claim 不碰 next-turn）；代价是回合不收尾（`nextStep.length === 0` 才 break），多条 steer 同批合并、通常只多延一步；目标空闲或 abort 收尾期（宿主 send 的 `wakingAfterAbort` 重分类），steer 降级为 next-turn 排队；
+- **cancel 保留排队但不自动消费**（`keepInbox: true` 链路）：kick 收尾回 idle、无任何 claim，需下一条消息唤醒，唤醒后仍每轮 1 条；
+- **单个超长工具调用内部无步边界**——preStep 只在步间触发，steer 也进不去；
+- **冷会话即返**：`waitFor` 对无 live agent 目标立即判 idle；`pendingCount` 对冷目标恒 0，`maxQueuePerTask` 深度守卫不覆盖冷目标（见 §13）；
+- **回执与提示**：`task_send` 返回 `queueDepth {nextTurn, nextStep}`（投递后口径，含本条）+ 动态 hint（queue→运行中且深度 ≥2 给"~N 轮后读，改变下一步考虑 steer"；steer→运行中给"步边界 + 延轮"）；`task_wait` 超时附"考虑结束回合"提示；`task_send`/`task_progress` 冷路径附冷提示。
 
 ### 关联与追溯 [0.3.0 新增]
 
@@ -190,7 +201,8 @@
 
 - **注册表摘录永远是用户原始 prompt**——摘录记意图，不记派生文本；
 - 追加是 prompt 级约定，不是硬信道——子任务若被外部中止，总控靠 `task_wait` + `task_progress` 兜底；
-- `task_spawn_batch` 的 `reportBack` 批级生效；`reportBack: false` 时开场词保持原样。
+- `task_spawn_batch` 的 `reportBack` 批级生效；`reportBack: false` 时开场词保持原样；
+- **[0.17.0 升级] 让位协议句**：追加指令新增两句（zh/en 逐句对齐）——①发送后即结束当前回合，不在回合内等待或轮询总控回复（总控回复经"空闲自动开新轮"送达）；②多阶段任务需评审的阶段发阶段报告并让位等指示，未约定评审点的阶段连续执行。前缀不变；失败回退句保留。
 
 ## 12. 安全守卫（拒绝即终态）
 
@@ -214,11 +226,12 @@
 - **注册表只记 spawn** [0.3.0 新增]：`team` 过滤依赖注册表记录——注册表启用前创建或外部创建的会话无法按团队检索；
 - **`/tasks` 只读** [0.4.0 新增]：命令面不做任何动作；短 ID 前缀歧义时报错而不是猜第一个；
 - **确认凭证进程内** [0.6.0 新增]：宿主重启后需重新确认（设计取舍，见 §10）；
-- **回报约定非硬信道** [0.7.0 新增]：子任务被外部中止时不会回报，拉取兜底不可省。
+- **回报约定非硬信道** [0.7.0 新增]：子任务被外部中止时不会回报，拉取兜底不可省；
+- **冷会话深度守卫盲区** [0.17.0 实测]：`pendingCount` 对无 live agent 的冷目标恒 0——`maxQueuePerTask` 对冷目标不生效；`task_wait` 对冷目标立即返回 already-idle（冷 ≠ 无待办）。回执与 `task_progress` 冷路径带提示；彻底修复（sessionQuery 重放冷 inbox）列二期。
 
 ## 14. 验证记录
 
-- **单元**：89 个测试（`test/smoke.test.mjs`，mock 宿主，`node --test`）全绿——覆盖 0.3.0 注册表/编组/引用/多目标等待、0.4.0 命令语法/渲染/注册降级、0.5.0 批量（部分失败/超上限/深度链）、0.6.0 确认（批准/拒绝/取消/无信道/子代理拒答/闸门五态）、0.7.0 回报（默认开/关/批量逐项）、0.8.1 工作区归属（继承/显式 cwd 覆盖/祖先链/降级/批量逐项）、0.9.0 确认卡标题规范（无标题/二级标题拒绝）、0.10.0 多选确认（子集批准/夹带拒绝/无标题拒绝/空选反馈/关窗/无信道/子代理拒答/子集凭证消耗）、0.11.0 复用凭证（跨批存活/跨会话拒借/子集强制持续）、0.12.0 工作区迁移（路径归一/精确匹配升级/list-attach-detach 实体链/五类失败模式/平台分支 win32-darwin-linux）、0.13.0 模型指定（成对校验/目录预校验零孤儿/安装时序 create→selectModel→prompt/安装失败孤儿不开场/目录缺失降级/批量逐项转发）、0.14.0 路线发现（目录投影/老宿主与坏目录降级/提示纯函数失败容忍/model-unavailable 错误附路线提示）、0.15.0 界面本地化（偏好解析回退纪律/字典插值/en 确认卡标签批准闭环/拒绝回退标签/多选 en 问题与空选反馈/开场后缀随语言/命令元数据）、0.16.0 跨工作区真迁移（五步时序 read→create→attach→archive→注册表平移、克隆元数据全携带[目标 cwd/原 createdAt/agentPreset/完整 seed]、运行中拒迁、同 cwd 拒绝提示 attach、服务缺失降级、克隆失败零副作用、挂载失败孤儿报告、归档失败仍算移动成功、日志不可读、未知 action 消息含 migrate）；
+- **单元**：89 个测试（`test/smoke.test.mjs`，mock 宿主，`node --test`）全绿——覆盖 0.3.0 注册表/编组/引用/多目标等待、0.4.0 命令语法/渲染/注册降级、0.5.0 批量（部分失败/超上限/深度链）、0.6.0 确认（批准/拒绝/取消/无信道/子代理拒答/闸门五态）、0.7.0 回报（默认开/关/批量逐项）、0.8.1 工作区归属（继承/显式 cwd 覆盖/祖先链/降级/批量逐项）、0.9.0 确认卡标题规范（无标题/二级标题拒绝）、0.10.0 多选确认（子集批准/夹带拒绝/无标题拒绝/空选反馈/关窗/无信道/子代理拒答/子集凭证消耗）、0.11.0 复用凭证（跨批存活/跨会话拒借/子集强制持续）、0.12.0 工作区迁移（路径归一/精确匹配升级/list-attach-detach 实体链/五类失败模式/平台分支 win32-darwin-linux）、0.13.0 模型指定（成对校验/目录预校验零孤儿/安装时序 create→selectModel→prompt/安装失败孤儿不开场/目录缺失降级/批量逐项转发）、0.14.0 路线发现（目录投影/老宿主与坏目录降级/提示纯函数失败容忍/model-unavailable 错误附路线提示）、0.15.0 界面本地化（偏好解析回退纪律/字典插值/en 确认卡标签批准闭环/拒绝回退标签/多选 en 问题与空选反馈/开场后缀随语言/命令元数据）、0.16.0 跨工作区真迁移（五步时序 read→create→attach→archive→注册表平移、克隆元数据全携带[目标 cwd/原 createdAt/agentPreset/完整 seed]、运行中拒迁、同 cwd 拒绝提示 attach、服务缺失降级、克隆失败零副作用、挂载失败孤儿报告、归档失败仍算移动成功、日志不可读、未知 action 消息含 migrate）、0.17.0 投递回执（queueDepth 分列/动态 hint 三分支/冷会话 note/回报让位协议句/超时 hint）；
 - **集成**：`verify-installed.mjs` 在**安装位置**用真实 `@deepseek-ai/dsh-tools` / `dsh-llm` / `dsh-skill-filesystem` 包 + mock ctx 跑 `apply()` 全链路（schema 编译、消息构造、9 工具、`/tasks` 五路径、确认闸门全链、多选确认子集强制、安全守卫、卸载清理、0.8.0 客户端模块全链）；宿主升级 2.0.5（core **0.1.2-rc.1**）后重跑全绿；
 - **端到端**（重启后真实宿主）：0.2.0 六项能力实测通过（运行中 `steer` 纠偏、取消后恢复、自环守卫；`task_spawn` kickoff 曾发现 prompt 门面缺 AbortSignal 的缺陷，修复后复验 `SPAWN_FIXED_OK`）；命名规则实测 `0904｜修复｜回归套件`；0.6.0 确认卡经官方 `userQuestions` 接缝同构路径构造（`exit_plan_mode` 先例 + 接缝错误码逐项核对）。
 
@@ -238,4 +251,4 @@
 
 - **安装入口**：`install.ps1`（仓库根为工作区便捷包装，`plugin/install.ps1` 为仓内等价版）——复制包文件、保证 profile `package.json` 的 `dependencies` + `dsh.profile.bundles` 登记，然后**必须重启宿主**才装载新 bundle。
 - **技能目录拷内容不拷目录**：`Copy-Item` 的源是目录且目标目录已存在时会拷**进去**（嵌套 `skills/skills/`），正式路径技能文件从此不再更新——0.4.0–0.8.3 的实际事故。现行脚本复制 `skills\*` 内容并清理历史嵌套残留；技能走 `patchReload: live`，内容更新**无需重启**即刻热刷新。
-- **安装态自检**：任何宿主/插件变更后，把 `verify-installed.mjs` 复制进安装目录运行（跑完删除），全绿才放行；它断言服务版本、11 工具、`/tasks`、确认闸门、多选确认子集强制、复用凭证跨批、task_workspace 实体链与 migrate 克隆五步链（目标 cwd 出生/元数据携带/同 cwd 拒绝零副作用）、spawn cwd 升级、子会话模型指定（预校验拒绝/安装时序/成对约束/错误路线提示）、task_models 目录投影、客户端 i18n 回归（0.16.1：裸键 `t()` 回退内置词典、迟注册 locale 服务首见即注册、zh/en 实时解析）、工作区归属与客户端模块全链。
+- **安装态自检**：任何宿主/插件变更后，把 `verify-installed.mjs` 复制进安装目录运行（跑完删除），全绿才放行；它断言服务版本、11 工具、`/tasks`、确认闸门、多选确认子集强制、复用凭证跨批、task_workspace 实体链与 migrate 克隆五步链（目标 cwd 出生/元数据携带/同 cwd 拒绝零副作用）、spawn cwd 升级、子会话模型指定（预校验拒绝/安装时序/成对约束/错误路线提示）、task_models 目录投影、客户端 i18n 回归（0.16.1：裸键 `t()` 回退内置词典、迟注册 locale 服务首见即注册、zh/en 实时解析）、工作区归属与客户端模块全链、0.17.0 投递回执（task_send queueDepth 分列断言、回报后缀让位协议句断言）。

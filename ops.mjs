@@ -388,6 +388,7 @@ export function createOps(deps) {
         result.seq = agent.session?.seq ?? null;
       } else {
         result.agentState = 'cold-idle';
+        result.note = 'cold session (no live agent): not running does not mean no pending work — a persisted queue may exist, and the send-depth guard (maxQueuePerTask) does not cover cold targets';
         result.queue = [];
         try {
           const observed = await sessionController.inspect(targetId, signal);
@@ -418,6 +419,7 @@ export function createOps(deps) {
       if (targetDeny) return failDeny(targetDeny);
       const limitDeny = limiter.check(targetId);
       if (limitDeny) return failDeny(limitDeny);
+      const wasCold = !agents.get(targetId);
       const resolved = await sessionController.resolveAgent(targetId);
       if (!resolved || resolved.error) {
         const code = resolved?.error?.code ?? 'internal';
@@ -441,6 +443,20 @@ export function createOps(deps) {
       if (mode === 'steer') resolved.agent.steer(message);
       else resolved.agent.followup(message);
       limiter.accept(targetId);
+      // Post-send queue depth (includes this message): the nextTurn count is the
+      // number of rounds before this message is read — the host claims exactly
+      // one next-turn message per round.
+      const queueDepth = {
+        nextTurn: resolved.agent.inbox?.nextTurn?.length ?? 0,
+        nextStep: resolved.agent.inbox?.nextStep?.length ?? 0,
+      };
+      const running = resolved.agent.status === 'running';
+      let hint = 'delivered != consumed; verify with task_progress before resending';
+      if (mode === 'steer' && running) {
+        hint = 'delivered at the next step boundary; extends the current round (multiple queued steers land in one batch); verify with task_progress before resending';
+      } else if (mode === 'queue' && running && queueDepth.nextTurn >= 2) {
+        hint = `delivered != consumed; next-turn depth ${queueDepth.nextTurn} (post-send, including this message) — one next-turn message is consumed per round, so this one is read after ~${queueDepth.nextTurn} rounds; if this message changes the target's next step, consider steer`;
+      }
       return {
         ok: true,
         delivered: true,
@@ -450,7 +466,9 @@ export function createOps(deps) {
         ...(annotation ? { reference: reference.trim() } : {}),
         placement: mode === 'steer' ? 'next-step (mid-run steering)' : 'next-turn (queued; starts a new round when the task is idle)',
         targetStatus: resolved.agent.status,
-        hint: 'delivered != consumed; verify with task_progress before resending',
+        queueDepth,
+        hint,
+        ...(wasCold ? { note: 'target was cold before this send (no live agent): the queue-depth guard (maxQueuePerTask) does not cover cold targets — cold does not mean no pending work' } : {}),
       };
     },
 
@@ -1163,7 +1181,10 @@ export function createOps(deps) {
       if (woke === 'aborted') return finish(false, 'wait aborted by caller');
       if (woke === 'timeout') {
         const pending = snapshot.filter((entry) => !entry.idle).map((entry) => entry.sessionId);
-        return finish(false, `timed out after ${clamped}ms; still running: ${pending.join(', ')}`);
+        return {
+          ...finish(false, `timed out after ${clamped}ms; still running: ${pending.join(', ')}`),
+          hint: 'still running: check task_progress for the real state; as a supervisor, consider ending your turn instead of blocking — queued messages auto-open a new round on an idle session (one next-turn message per round)',
+        };
       }
       if (mode === 'any') return finish(true, `target ${woke} became idle`);
       return finish(true, targets.length === 1 ? 'target became idle' : 'all targets became idle');

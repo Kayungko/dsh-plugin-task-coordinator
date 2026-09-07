@@ -4,15 +4,20 @@
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-07
+
 ### Added
 
 - 标题类型双语归一（`title.mjs` 新增 `TYPE_ALIASES` + `resolveTitleType`）：fix/bugfix、feature/feat、design、optimize/optimise/perf/refactor、release/publish、explore/exploration、doc(s)/documentation、research/investigate 等英文别名在类型匹配前**不区分大小写**归一到中文规范集——英文环境的模型传 `fix｜topic` 不再被静默错标成兜底「探索」（此前 `types.includes` 精确匹配失败走裸主题分支，类型词还会泄进主题）。成员检查保持权威：自定义 `titleTypes` 时别名只在规范型被允许时才生效，绝不覆盖用户集合；未映射的词（如 `deploy`）仍是主题、不猜类型。`task_spawn`/`task_spawn_batch` 工具描述、双 README、SKILL 同步说明；别名回归织入三个既有标题测试块（含 `constructor` 原型键防御断言），测试总数保持 89。
 - 英文部署全链路补全：① 新配置项 `titleFallbackTopic`（标题与开场提示词全空白时的主题兜底，默认「新任务」，英文部署可配 'New task'）；② 类型匹配第三级——自定义类型集内大小写不敏感精确匹配（英文集 `'Fix'` 直接匹配 `fix`/`FIX`，别名机制不再只服务默认中文集）；③ 英文 README 去中文化（Copy Session ID / `MMDD｜type｜topic` / 英文类型集示例与配置样例，默认中文集字面值改为指向中文 README + 英文顺序对照）；④ 删除 `ops.mjs` 两个零引用的硬编码中文确认卡常量（运行路径 0.15.0 起已走 `i18n.mjs`，全仓库 grep 证实无引用）；⑤ 双 README/SKILL/工具描述补自定义英文集与 `titleFallbackTopic` 说明。
 - 市场截图声明：`screenshots.json`（awesome-dsh-plugin 官方契约，1–8 个仓库相对路径）+ 4 张实机 GUI 截图（`assets/shot-{1..4}.png`，用户确认无敏感内容，按拍摄时序排列）。dsh-market 详情页/官网插件页经 nightly build 自动抓取展示，列表侧无需 PR；清单按官方 CI 同款规则自检（JSON 数组、条数、路径不逃逸、文件存在）。`package.json files[]` 同步收录 `screenshots.json` 与 `assets/`（未来 npm publish 及 README banner SVG 一并随行）。
+- **投递回执与排队可观测性（评审闭环停摆修复包）**：`task_send` 回执新增 `queueDepth {nextTurn, nextStep}`（投递后口径，含本条——nextTurn 深度 N 即本条 N 轮后才被读）+ 动态 hint 三分支：queue 落运行中目标且深度 ≥2 时提示"~N 轮后读（每轮恰消费 1 条），改变下一步考虑 steer"；steer 落运行中目标提示"步边界送达并延长当前回合（多条同批合并）"；基础 hint 保持"delivered != consumed"。`task_wait` 超时返回新增 hint——"考虑结束回合：空闲会话的排队消息自动逐条开新轮"（超时时刻恰是总控该想起让位的时刻）。`task_send`/`task_progress` 冷会话路径新增提示：冷 ≠ 无待办，`maxQueuePerTask` 深度守卫不覆盖冷目标（`pendingCount` 对冷目标恒 0——已知边界，PROTOCOL §13 登记，彻底修复列二期）。
+- **投递语义四事实 + 三个编排模式成文**（全部宿主源码实测：`Inbox.claim` 每轮恰取 1 条 next-turn、next-step 步边界整批且跳队、`nextStep.length === 0` 才收尾、cancel `keepInbox: true` 终止后不自动消费、preStep 只在步间触发）：①next-turn FIFO 每轮 1 条（新轮首步同批吸收全部 next-step 积压）；②steer 健康运行中跳整个 next-turn 队列、代价是延轮（多条同批合并通常只多延一步），空闲/abort 收尾期降级排队；③cancel 终止后需新消息唤醒；④冷会话 task_wait 即返。SKILL 新增「三级中断阶梯」（queue/steer/cancel + 判据"晚一步=白干一步→插队" + 反模式 + 马拉松硬地板）、「让位—唤醒」（goal 模式事件循环；马拉松回合驻留是评审闭环停摆根因——实测现场：总控 69 分钟单回合锁死 3 条子任务报告、子任务 93 分钟连跑评审意见进不去）、「阶段评审门」（连续跑 vs 阶段让位二选一写进 spawn prompt；总控必须回应阶段报告，否则子任务永久挂起）三节；双 README 投递语义节、PROTOCOL §4/§13 同步。
 
 ### Changed
 
 - peer 范围扩显式预发布分支（三个 peer 依赖）：`>=0.1.2-0 <0.2.0` → `>=0.1.2-0 <0.1.3 || >=0.1.3-0 <0.1.4 || >=0.1.4-0 <0.2.0`。node-semver 只放行「比较符元组自身带预发布标签」的预发布版本（awesome-dsh-plugin contributing.md 官方警告的静默排除陷阱）：旧区间对当前 0.1.2-rc.1 有效，但会静默排除未来的 0.1.3-rc.x / 0.1.4-rc.x，让预发布宿主上的装机用户遇到需手工绕行的 ERESOLVE。经真 semver 引擎 8 版本实测：0.1.2-rc.1 / 0.1.3-rc.1 / 0.1.4-rc.2 / 0.1.9 全部 MATCH（现网行为不变），0.2.0-rc.1 保守排除；0.1.5-rc.x 为文档化绊线——宿主发布新预发布元组时须再扩一条分支（PROTOCOL 版本硬约束段已记规则）。
+- **reportBack 汇报约定注入文案升级（行为协议变更）**：zh/en 双语逐句对齐新增两句——①"发送后即结束当前回合，不要在回合内等待或轮询总控的回复（它会在你空闲时自动开新轮送达）"：封死子任务发完报告驻留等待的停摆形态；②"多阶段任务：需总控评审的阶段发阶段报告并结束回合等待指示，未约定评审点的阶段连续执行"：阶段评审门机制的子任务侧约定。前缀不变（5 条前缀断言零改动），失败回退句保留；`task_spawn`/`task_spawn_batch` 描述同步总控视角（子任务发完即让位，你的回复会在它空闲时自动开新轮送达）。测试断言织入既有块（queueDepth 分列/动态 hint/让位句/超时 hint），总数保持 89。
 
 ## [0.16.2] - 2026-09-06
 
@@ -235,7 +240,8 @@
 
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
-[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.16.2...HEAD
+[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.16.2...v0.17.0
 [0.16.2]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.16.1...v0.16.2
 [0.16.1]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.15.0...v0.16.0

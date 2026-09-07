@@ -506,10 +506,12 @@ test('ops.sendMessage: self-address rejected', async () => {
 test('ops.sendMessage: queue delivery with coordinator source', async () => {
   const harness = makeHarness();
   addRow(harness, { sessionId: 'session-a' });
-  const agent = addLiveAgent(harness, 'session-a');
+  const agent = addLiveAgent(harness, 'session-a', { nextTurn: [{}, {}] });
   const result = await harness.ops.sendMessage({ targetId: 'session-a', text: 'adjust the plan' }, SUPERVISOR);
   assert.equal(result.ok, true);
   assert.equal(result.placement.startsWith('next-turn'), true);
+  assert.deepEqual(result.queueDepth, { nextTurn: 2, nextStep: 0 });
+  assert.match(result.hint, /read after ~2 rounds; if this message changes the target's next step, consider steer/);
   assert.equal(agent.followups.length, 1);
   assert.equal(agent.steers.length, 0);
   const message = harness.created[0];
@@ -527,6 +529,8 @@ test('ops.sendMessage: steer delivery', async () => {
   assert.equal(result.ok, true);
   assert.equal(agent.steers.length, 1);
   assert.equal(agent.followups.length, 0);
+  assert.deepEqual(result.queueDepth, { nextTurn: 0, nextStep: 0 });
+  assert.match(result.hint, /extends the current round/);
 });
 
 test('ops.sendMessage: busy target maps to retryable error', async () => {
@@ -1411,6 +1415,7 @@ test('ops.waitFor: multi-target timeout lists the still-running targets', async 
   const result = await harness.ops.waitFor({ sessionIds: ['session-a', 'session-b'], timeoutMs: 30 }, SUPERVISOR);
   assert.equal(result.settled, false);
   assert.match(result.reason, /session-a, session-b/);
+  assert.match(result.hint, /consider ending your turn/);
 });
 
 test('ops.cancelTask: live cancel and cold refusal', async () => {
@@ -1612,6 +1617,8 @@ test('i18n: dictionaries carry the exact card labels and interpolate', () => {
   assert.equal(uiStrings('zh').confirmApproveLabel, '按计划派发（推荐）');
   assert.match(uiStrings('en').reportBackSuffix('session-x'), /^Reporting convention: .*session session-x via task_send/);
   assert.match(uiStrings('zh').reportBackSuffix('session-x'), /^汇报约定：.*发回会话 session-x/);
+  assert.match(uiStrings('en').reportBackSuffix('session-x'), /End your turn right after sending/);
+  assert.match(uiStrings('zh').reportBackSuffix('session-x'), /发送后即结束当前回合/);
   assert.match(uiStrings('en').selectQuestionDefault(3), /^3 proposed task\(s\)/);
   assert.match(uiStrings('zh').selectQuestionDefault(3), /^共 3 个任务/);
 });

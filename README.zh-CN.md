@@ -102,13 +102,13 @@ pwsh install.ps1 -Source .
 |---|---|
 | `task_list` | 列出协调可见的任务（含稳定 sessionId、状态、标题、todo/goal 进度；可按 `team` 过滤） |
 | `task_progress` | 深入读取单个任务：实时/冷状态、排队消息、对话尾部、todos、goal |
-| `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`；`reference` 关联先前指令），返回 `messageId` |
+| `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`；`reference` 关联先前指令），返回 `messageId` + `queueDepth` 回执 `{nextTurn, nextStep}`（投递后口径；next-turn 每轮恰消费 1 条，深度 N ≈ N 轮后才被读） |
 | `task_spawn` | 创建 + 命名 + 启动新任务（标题遵循 `MMDD｜类型｜主题`；可用 `team` 编组），返回 `correlationId`；默认附带回报约定；新任务默认挂进调用方所在工作区；显式 `cwd` 与某工作区路径精确匹配时自动升级挂载该工作区（0.12.0）；可选 `provider`+`model`（+`reasoningEffort`）指定子会话模型路线，开场前安装（0.13.0） |
 | `task_confirm` | 把拆分/派发方案做成**交互式审批卡**弹给用户，阻塞直到回答；批准返回单次 `confirmationId` |
 | `task_confirm_select` | 把任务清单做成**多选卡**（宿主中性提问 UI，非琥珀审批卡）：用户勾选要派发哪些（部分派发），可在自定义输入行写调整意见；批准把 `confirmationId` 绑定到选中子集，`task_spawn_batch` 强制校验（夹带未勾选标题报 `confirmation-mismatch`） |
 | `task_spawn_batch` | 一次批量创建整个拆分方案（`tasks: [{title?, prompt}]` + 统一 `team`）；达到确认阈值时必须携带 `confirmationId`；单条失败不中止整批 |
-| `task_wait` | 阻塞直到目标任务空闲（或超时）；支持多目标（`sessionIds` + `mode: all/any`） |
-| `task_cancel` | 取消目标的活动轮次（保留其排队消息） |
+| `task_wait` | 阻塞直到目标任务空闲（或超时）；支持多目标（`sessionIds` + `mode: all/any`）；冷目标（无 live agent）立即返回空闲——冷 ≠ 无待办 |
+| `task_cancel` | 取消目标的活动轮次（保留其排队消息；被停目标需下一条消息才被唤醒——取消不自动清队列） |
 | `task_workspace` | 列出宿主工作区，把**既有**会话挂入/移出工作区（归置落入「未分组」的会话），或 `migrate` **跨工作区真迁移**（0.16.0）：克隆完整历史到以目标路径为 cwd 出生的新会话、挂载克隆、工作区级归档原会话（展示层折叠：旧会话仍可读可续，对旧 id 发消息会分叉）、返回新 id；运行中的会话拒迁（先 `task_wait`）。直连宿主 workspace 实体，不触碰会话内容 |
 | `task_models` | 列出**本部署实际接入**的模型路线——provider/model/reasoning-effort 精确 id（宿主活体目录，GUI 选择器同源）+ 应用级默认；指定子会话模型前先查这里，永远不要猜 id（0.14.0） |
 
@@ -152,7 +152,7 @@ pwsh install.ps1 -Source .
 
 ## 结果回报
 
-派发的任务**默认带回报约定**（`reportBack`）：开场提示词尾部自动追加一条指令——任务完成（或确认无法完成）后用 `task_send` 把结果摘要（结论、产出路径、遗留问题）推回派发方会话；发送失败时把摘要写进最终回复兜底。总控因此得到**推送 + `task_wait` 拉取兜底**，不用轮询。确实不需要汇报的一次性任务传 `reportBack: false`。
+派发的任务**默认带回报约定**（`reportBack`）：开场提示词尾部自动追加一条指令——任务完成（或确认无法完成）后用 `task_send` 把结果摘要（结论、产出路径、遗留问题）推回派发方会话；发送失败时把摘要写进最终回复兜底。总控因此得到**推送 + `task_wait` 拉取兜底**，不用轮询。确实不需要汇报的一次性任务传 `reportBack: false`。0.17.0 起约定新增两句：**发送后即结束回合**（你的回复会在子任务空闲时自动开新轮送达）；多阶段任务在需评审的阶段**发阶段报告并让位等指示**——配套内置技能的「阶段评审门」模式，**收到阶段报告必须回应**，让位中的子任务不回应就一直挂起。
 
 ## 递归治理
 
@@ -165,6 +165,18 @@ pwsh install.ps1 -Source .
 | **空闲** | 立即启动目标的新一轮执行 |
 | **运行中** + `queue`（默认） | 消息排队，**下一个轮次边界**消费 |
 | **运行中** + `steer` | 消息排队，**下一个步骤边界**消费（更快的中途纠偏） |
+
+队列消化机制（宿主源码实测）：next-turn 队列 FIFO，**每轮恰好消费 1 条**（新轮首步同批顺带吸收全部 next-step 积压）——排队深度 N ≈ 本条 N 轮后才被读。`task_send` 回执携带 `queueDepth {nextTurn, nextStep}`（投递后口径，含本条）。`steer` 在目标健康运行中跳过整个 next-turn 队列，代价是延长当前回合（多条 steer 同批合并）；目标空闲或 abort 收尾期降级为排队。`task_wait` 对冷目标（无 live agent）立即返回——冷 ≠ 无待办。
+
+三级中断阶梯：
+
+| 级 | 工具 | 何时生效 | 跳队 | 代价 |
+|---|---|---|---|---|
+| 1 | `task_send` queue | 空闲→立即开新轮；运行中→下一轮首步（FIFO，每轮 1 条） | 否 | 无 |
+| 2 | `task_send` steer | 健康运行中→下一步边界；空闲/abort 收尾期→降级为排队 | 是（运行中）：先于整个 next-turn 队列 | 延长当前回合；多条同批合并 |
+| 3 | `task_cancel` | 请求立即停止（运行中的工具调用先收尾）；排队消息保留 | 是（相对当前轮） | 在跑工作作废；被停目标需新消息唤醒 |
+
+判据：**晚一步 = 白干一步 → 插队**——叫停/纠偏/冲突预警用 steer；放行确认/补充背景/非紧急交接用 queue。单个超长工具调用（如全量测试电池）内部没有步边界——steer 也进不去，只剩第 3 级。
 
 结论：**不需要轮询**——投递后 `task_wait` 等空闲，再 `task_progress` 读结果。要立刻纠偏运行中的任务用 `steer`，发 `queue` 不会提前生效。
 
@@ -209,7 +221,7 @@ pwsh install.ps1 -Source .
 
 ## 内置技能：task-coordination
 
-插件随包携带一个技能（`skills/task-coordination/SKILL.md`），教总控**何时、如何**编排十一个工具：投递语义、拆分判据、确认语义、扇出/监督/交接模式、递归治理、命名规则、反模式。按需加载，不协调就不占上下文。
+插件随包携带一个技能（`skills/task-coordination/SKILL.md`），教总控**何时、如何**编排十一个工具：投递语义、三级中断阶梯、拆分判据、确认语义、扇出/监督/交接模式、让位—唤醒（goal 模式事件循环）与阶段评审门编排模式、递归治理、命名规则、反模式。按需加载，不协调就不占上下文。
 
 挂载走隔离 `dsh-skill-filesystem` provider（同 `@openviking/dsh-memory-plugin` 先例）：`providerName: 'task-coordinator'`、`includeDefaultRoots: false`、只见本插件的 `skills/` 目录。效果：编辑热加载、不遮蔽项目/用户技能、随插件卸载一起消失。provider 包不可用时降级为一条 warning，**十一个工具照常工作**。
 
@@ -253,7 +265,7 @@ pwsh install.ps1 -Source .
 
 ```powershell
 node --check *.mjs                      # 语法检查
-node --test test/smoke.test.mjs         # 59 个单元测试（mock 宿主）
+node --test test/smoke.test.mjs         # 89 个单元测试（mock 宿主）
 # 安装进 profile 后（见快速开始）：
 node verify-installed.mjs               # 安装态集成验证：真实宿主包 + mock ctx
 ```
@@ -277,7 +289,7 @@ dsh-plugin-task-coordinator/
 ├── cordis.patch.yml    隔离插件组挂载描述
 ├── install.ps1         部署脚本（复制式安装 + 自动备份）
 ├── verify-installed.mjs 安装态集成验证
-├── test/smoke.test.mjs 59 个单元测试
+├── test/smoke.test.mjs 89 个单元测试
 └── docs/               ARCHITECTURE.md · PROTOCOL.md
 ```
 

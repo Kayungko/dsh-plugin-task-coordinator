@@ -299,6 +299,7 @@ console.log('task_progress      : OK ->', progressResult.recent.at(-1).text);
 const sendResult = await byName.task_send.execute({ sessionId: 'session-worker', message: 'please also cover edge cases' }, supervisorExec);
 assert.equal(sendResult.ok, true);
 assert.ok(typeof sendResult.messageId === 'string' && sendResult.messageId.length > 0, 'messageId missing');
+assert.ok(sendResult.queueDepth && Number.isInteger(sendResult.queueDepth.nextTurn) && Number.isInteger(sendResult.queueDepth.nextStep), 'queueDepth receipt missing');
 const delivered = liveAgents.get('session-worker').delivered.at(-1);
 assert.equal(delivered.via, 'followup');
 assert.equal(delivered.message.source.kind, 'coordinator');
