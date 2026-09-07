@@ -102,7 +102,8 @@ export function registerTools(ctx, ops, deps, config) {
     + `(e.g. "修复｜对账精度"); the plugin auto-stamps the MMDD date prefix from the session `
     + `creation time (Asia/Shanghai). Allowed types: ${titleTypes}. `
     + `English type aliases (fix, feature, design, optimize, release, explore, docs, research and common variants) `
-    + `are accepted case-insensitively and normalized to the canonical set. `
+    + `are accepted case-insensitively and normalized to the canonical set; `
+    + `custom titleTypes sets match exactly or case-insensitively. `
     + `Keep the topic short (<=16 chars), concrete, and do not repeat the project name. `
     + `If the type is unclear, supply just the topic and the plugin uses "${fallbackType}". `
     + `If no title is given, the topic is derived from the kickoff prompt's first line.`;

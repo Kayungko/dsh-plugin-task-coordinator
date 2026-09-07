@@ -17,10 +17,12 @@ export const DEFAULTS = Object.freeze({
    * The date prefix is always stamped from the session creation time in
    * `titleTimeZone` — the model only supplies 类型｜主题.
    */
-  /** Allowed 类型 values; anything else falls back to `titleFallbackType`. */
+  /** Allowed 类型 values (fully customizable — an English set works: values match exactly or case-insensitively); anything else falls back to `titleFallbackType`. */
   titleTypes: DEFAULT_TITLE_TYPES,
   /** 类型 used when the caller's type is missing or not in `titleTypes`. */
   titleFallbackType: '探索',
+  /** Topic used when both `title` and the kickoff prompt yield nothing. */
+  titleFallbackTopic: '新任务',
   /** Max characters kept for 主题 (sidebar-friendly truncation). */
   titleMaxTopicChars: 16,
   /** IANA time zone for the MMDD date prefix. */
@@ -86,7 +88,7 @@ export function resolveConfig(input = {}) {
     'confirmBatchThreshold',
     'maxSpawnDepth',
   ];
-  const strings = ['titleFallbackType', 'titleTimeZone', 'registryFile'];
+  const strings = ['titleFallbackType', 'titleFallbackTopic', 'titleTimeZone', 'registryFile'];
   for (const key of booleans) {
     if (source[key] !== undefined) {
       if (typeof source[key] !== 'boolean') throw new TypeError(`task-coordinator config "${key}" must be boolean`);

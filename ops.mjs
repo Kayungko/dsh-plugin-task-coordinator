@@ -56,16 +56,6 @@ export const OP_CODES = Object.freeze({
 });
 
 /**
- * Approve option label for the dispatch-confirmation card (must match exactly).
- * zh baseline (0.15.0): the live card labels follow the host locale preference
- * through i18n.mjs; these constants remain the zh reference for docs/tests.
- */
-export const CONFIRM_APPROVE_LABEL = '按计划派发（推荐）';
-
-/** Decline option label for the dispatch-confirmation card (zh baseline). */
-export const CONFIRM_DECLINE_LABEL = '暂不派发';
-
-/**
  * Resolve the workspace a spawn should attach to: the workspace (if any)
  * whose membership contains the caller or one of its recorded spawn
  * ancestors. Pure and failure-tolerant — any missing piece yields undefined

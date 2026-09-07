@@ -169,7 +169,7 @@ task_confirm_select({ tasks: [{title, scope}…] })  ← 用户勾选要派发�
 
 `title` 只填语义部分 **`类型｜主题`**：
 
-- 类型 ∈ {功能、设计、修复、优化、发布、探索、文档、研究}；英文别名（fix/feature/design/optimize/release/explore/docs/research 及常见变体）自动归一到中文规范集；拿不准就只填主题（兜底「探索」），不要猜；
+- 类型 ∈ {功能、设计、修复、优化、发布、探索、文档、研究}；英文别名（fix/feature/design/optimize/release/explore/docs/research 及常见变体）自动归一到中文规范集（自定义类型集按精确或大小写不敏感匹配）；拿不准就只填主题（兜底「探索」），不要猜；
 - 主题 ≤16 字、具体、适合侧栏显示，不重复项目名；
 - **不要自己写日期**——插件按会话创建时间（Asia/Shanghai）自动盖 `MMDD｜` 前缀。
 

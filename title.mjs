@@ -50,9 +50,10 @@ export function resolveTitleType(part, types) {
   if (trimmed.length === 0) return null;
   if (types.includes(trimmed)) return trimmed;
   const lower = trimmed.toLowerCase();
-  if (!Object.hasOwn(TYPE_ALIASES, lower)) return null;
-  const aliased = TYPE_ALIASES[lower];
-  return types.includes(aliased) ? aliased : null;
+  const aliased = Object.hasOwn(TYPE_ALIASES, lower) ? TYPE_ALIASES[lower] : null;
+  if (aliased !== null && types.includes(aliased)) return aliased;
+  // custom sets: values also match their own members case-insensitively
+  return types.find((value) => typeof value === 'string' && value.toLowerCase() === lower) ?? null;
 }
 
 /**
@@ -111,6 +112,9 @@ export function buildSpawnTitle({ title, prompt } = {}, config = {}, createdAtMs
   const fallbackType = typeof config.titleFallbackType === 'string' && config.titleFallbackType.length > 0
     ? config.titleFallbackType
     : '探索';
+  const fallbackTopic = typeof config.titleFallbackTopic === 'string' && config.titleFallbackTopic.trim().length > 0
+    ? config.titleFallbackTopic.trim()
+    : '新任务';
   const maxTopic = Number.isFinite(config.titleMaxTopicChars) && config.titleMaxTopicChars > 0
     ? config.titleMaxTopicChars
     : 16;
@@ -140,6 +144,6 @@ export function buildSpawnTitle({ title, prompt } = {}, config = {}, createdAtMs
   }
 
   topic = truncateTopic(topic, maxTopic);
-  if (topic.length === 0) topic = '新任务';
+  if (topic.length === 0) topic = fallbackTopic;
   return `${mmdd(createdAtMs, timeZone)}${TITLE_SEPARATOR}${type}${TITLE_SEPARATOR}${topic}`;
 }

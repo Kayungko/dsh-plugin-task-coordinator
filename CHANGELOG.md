@@ -7,6 +7,7 @@
 ### Added
 
 - 标题类型双语归一（`title.mjs` 新增 `TYPE_ALIASES` + `resolveTitleType`）：fix/bugfix、feature/feat、design、optimize/optimise/perf/refactor、release/publish、explore/exploration、doc(s)/documentation、research/investigate 等英文别名在类型匹配前**不区分大小写**归一到中文规范集——英文环境的模型传 `fix｜topic` 不再被静默错标成兜底「探索」（此前 `types.includes` 精确匹配失败走裸主题分支，类型词还会泄进主题）。成员检查保持权威：自定义 `titleTypes` 时别名只在规范型被允许时才生效，绝不覆盖用户集合；未映射的词（如 `deploy`）仍是主题、不猜类型。`task_spawn`/`task_spawn_batch` 工具描述、双 README、SKILL 同步说明；别名回归织入三个既有标题测试块（含 `constructor` 原型键防御断言），测试总数保持 89。
+- 英文部署全链路补全：① 新配置项 `titleFallbackTopic`（标题与开场提示词全空白时的主题兜底，默认「新任务」，英文部署可配 'New task'）；② 类型匹配第三级——自定义类型集内大小写不敏感精确匹配（英文集 `'Fix'` 直接匹配 `fix`/`FIX`，别名机制不再只服务默认中文集）；③ 英文 README 去中文化（Copy Session ID / `MMDD｜type｜topic` / 英文类型集示例与配置样例，默认中文集字面值改为指向中文 README + 英文顺序对照）；④ 删除 `ops.mjs` 两个零引用的硬编码中文确认卡常量（运行路径 0.15.0 起已走 `i18n.mjs`，全仓库 grep 证实无引用）；⑤ 双 README/SKILL/工具描述补自定义英文集与 `titleFallbackTopic` 说明。
 - 市场截图声明：`screenshots.json`（awesome-dsh-plugin 官方契约，1–8 个仓库相对路径）+ 4 张实机 GUI 截图（`assets/shot-{1..4}.png`，用户确认无敏感内容，按拍摄时序排列）。dsh-market 详情页/官网插件页经 nightly build 自动抓取展示，列表侧无需 PR；清单按官方 CI 同款规则自检（JSON 数组、条数、路径不逃逸、文件存在）。`package.json files[]` 同步收录 `screenshots.json` 与 `assets/`（未来 npm publish 及 README banner SVG 一并随行）。
 
 ### Changed

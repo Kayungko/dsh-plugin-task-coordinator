@@ -12,7 +12,7 @@
 [![89 unit tests](https://img.shields.io/badge/tests-89%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
-[What is this](#what-is-this) · [Screenshots](#screenshots) · [Quick start](#quick-start) · [Tools](#the-eleven-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Changelog](CHANGELOG.md) · [中文](README.zh-CN.md)
+[What is this](#what-is-this) · [Screenshots](#screenshots) · [Quick start](#quick-start) · [Tools](#the-eleven-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Changelog](CHANGELOG.md) · [Chinese](README.zh-CN.md)
 
 </div>
 
@@ -119,7 +119,7 @@ Read-only lookups can bypass the model entirely: `/tasks` (all tasks), `/tasks t
 
 ### Copying session ids — one click in the session header
 
-The plugin ships a small **web client module** (`client.js`, declared via `dsh.client` in `package.json`) that occupies the official `conversation.session.header.utilities` slot — the same seam the shipped `session-log-export` package uses. Every session header gets a **「复制会话Id」** button (filled pill matching the Session-log button geometry: black-on-white in light mode, white-on-black in dark mode) that copies the session's full `sessionId` to the clipboard, ready to paste into `task_send`, `task_progress` or `/tasks <id>` on the supervisor side. (The sidebar's per-session context menu is hard-coded in the host and cannot be extended — field-verified — so the header slot is the sanctioned place.)
+The plugin ships a small **web client module** (`client.js`, declared via `dsh.client` in `package.json`) that occupies the official `conversation.session.header.utilities` slot — the same seam the shipped `session-log-export` package uses. Every session header gets a **Copy Session ID** button (filled pill matching the Session-log button geometry: black-on-white in light mode, white-on-black in dark mode) that copies the session's full `sessionId` to the clipboard, ready to paste into `task_send`, `task_progress` or `/tasks <id>` on the supervisor side. (The sidebar's per-session context menu is hard-coded in the host and cannot be extended — field-verified — so the header slot is the sanctioned place.)
 
 ### Workspace placement & migration (0.12.0)
 
@@ -135,7 +135,7 @@ Marketplace reality: **every user connects different providers/models**, so ids 
 
 ### Localized UI strings (0.15.0)
 
-User-facing strings follow the host's Language preference (Settings → General → Language; the durable `locale.preference`, zh/en — the same channel the official session-log button uses). The browser-side header button registers dictionaries with the live client locale runtime and re-renders on every language switch; host-side surfaces (dispatch-confirmation cards, the report-back kickoff suffix, `/tasks` metadata) resolve through `i18n.mjs` per call, so a switch applies from the next card/kickoff without a restart. An absent or unknown preference keeps the historical Chinese strings — the host side cannot see the "follow the browser" delegation, so the plugin never guesses a language it does not ship. Model-facing surfaces stay as documented: tool descriptions are the English model contract, the SKILL manual is Chinese, and titles follow the `MMDD｜类型｜主题` convention.
+User-facing strings follow the host's Language preference (Settings → General → Language; the durable `locale.preference`, zh/en — the same channel the official session-log button uses). The browser-side header button registers dictionaries with the live client locale runtime and re-renders on every language switch; host-side surfaces (dispatch-confirmation cards, the report-back kickoff suffix, `/tasks` metadata) resolve through `i18n.mjs` per call, so a switch applies from the next card/kickoff without a restart. An absent or unknown preference keeps the historical Chinese strings — the host side cannot see the "follow the browser" delegation, so the plugin never guesses a language it does not ship. Model-facing surfaces stay as documented: tool descriptions are the English model contract, the SKILL manual is Chinese, and titles follow the `MMDD｜type｜topic` convention.
 
 ## Dispatch confirmation (the anti-black-box gate)
 
@@ -202,11 +202,11 @@ Failures return `{ ok: false, code, error }` — agents branch on `code`, never 
 `task_spawn` splits the title responsibilities — **the model supplies `type｜topic`; the plugin stamps the date mechanically**:
 
 - The **date prefix** is stamped from the session *creation* time in `titleTimeZone` (default `Asia/Shanghai`) — never `updatedAt`, never model-computed;
-- **type** must be one of `titleTypes` (功能、设计、修复、优化、发布、探索、文档、研究) — English aliases (`fix`/`bugfix`, `feature`/`feat`, `design`, `optimize`/`perf`/`refactor`, `release`/`publish`, `explore`, `doc(s)`/`documentation`, `research`/`investigate`) are normalized to the canonical set case-insensitively; unclear types fall back to `titleFallbackType` (default 探索) instead of guessing;
+- **type** must be one of `titleTypes`. The shipped default set is a Chinese octet (literal values in the [Chinese README](README.zh-CN.md) — Feature / Design / Fix / Optimize / Release / Explore / Docs / Research in order); the set is fully customizable, and an all-English octet like `['Feature', 'Design', 'Fix', 'Optimize', 'Release', 'Explore', 'Docs', 'Research']` works out of the box. With the default set, English aliases (`fix`/`bugfix`, `feature`/`feat`, `design`, `optimize`/`perf`/`refactor`, `release`/`publish`, `explore`, `doc(s)`/`documentation`, `research`/`investigate`) are normalized to it case-insensitively; with any set, values also match their own members case-insensitively. Unclear types fall back to `titleFallbackType` (the shipped default is the Explore slot) instead of guessing;
 - **topic** is truncated to `titleMaxTopicChars` (default 16) for sidebar display; with no `title`, the topic is derived from the kickoff prompt's first line;
 - A stale leading `MMDD｜` is re-stamped from the real creation time; halfwidth `|` and legacy `[team]` prefixes are normalized.
 
-Example: `修复｜对账精度` → `0904｜修复｜对账精度`; `fix｜对账精度` resolves to the same title.
+Example (English set configured): `Fix｜reconciliation precision` → `0904｜Fix｜reconciliation precision`; with the shipped default set, `fix｜reconciliation precision` resolves to the same title with the Chinese canonical type.
 
 ## Bundled skill: task-coordination
 
@@ -223,8 +223,9 @@ Mounting follows the shipped `@openviking/dsh-memory-plugin` precedent — an **
     enabled: true
     allowSubagentUse: false
     includeSubagentsInList: false
-    titleTypes: ['功能', '设计', '修复', '优化', '发布', '探索', '文档', '研究']
-    titleFallbackType: '探索'
+    titleTypes: ['Feature', 'Design', 'Fix', 'Optimize', 'Release', 'Explore', 'Docs', 'Research']  # fully customizable; shipped default is the Chinese octet (see Chinese README)
+    titleFallbackType: 'Explore'
+    titleFallbackTopic: 'New task'  # topic when title and kickoff prompt are both blank
     titleMaxTopicChars: 16
     titleTimeZone: 'Asia/Shanghai'
     registryFile: ''              # empty = <DSH_HOME or ~/.dsh>/task-coordinator/registry.json

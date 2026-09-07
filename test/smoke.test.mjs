@@ -31,6 +31,7 @@ test('config: defaults', () => {
   assert.equal(config.maxQueuePerTask, DEFAULTS.maxQueuePerTask);
   assert.deepEqual(config.titleTypes, ['功能', '设计', '修复', '优化', '发布', '探索', '文档', '研究']);
   assert.equal(config.titleFallbackType, '探索');
+  assert.equal(config.titleFallbackTopic, '新任务');
   assert.equal(config.titleMaxTopicChars, 16);
   assert.equal(config.titleTimeZone, 'Asia/Shanghai');
   assert.equal(config.maxBatchSpawn, 6);
@@ -59,6 +60,7 @@ test('config: wrong types throw', () => {
   assert.throws(() => resolveConfig({ enabled: 'yes' }), TypeError);
   assert.throws(() => resolveConfig({ maxQueuePerTask: -3 }), TypeError);
   assert.throws(() => resolveConfig({ titleFallbackType: 42 }), TypeError);
+  assert.throws(() => resolveConfig({ titleFallbackTopic: 42 }), TypeError);
   assert.throws(() => resolveConfig({ titleTypes: '功能' }), TypeError);
   assert.throws(() => resolveConfig({ titleTypes: [] }), TypeError);
   assert.throws(() => resolveConfig({ titleTypes: ['功能', ''] }), TypeError);
@@ -102,6 +104,13 @@ test('title: 类型｜主题 gets the date stamped', () => {
   assert.equal(resolveTitleType('DOCS', DEFAULT_TITLE_TYPES), '文档');
   assert.equal(resolveTitleType('deploy', DEFAULT_TITLE_TYPES), null);
   assert.equal(resolveTitleType('constructor', DEFAULT_TITLE_TYPES), null);
+  // custom English sets match their own members case-insensitively (third resolution tier)
+  assert.equal(resolveTitleType('FIX', ['Feature', 'Fix']), 'Fix');
+  const enConfig = resolveConfig({ titleTypes: ['Feature', 'Fix'], titleFallbackType: 'Explore' });
+  assert.equal(
+    buildSpawnTitle({ title: 'fix｜reconciliation', prompt: 'x' }, enConfig, SH_AFTER_MIDNIGHT),
+    '0904｜Fix｜reconciliation',
+  );
 });
 
 test('title: bare topic never guesses a type (fallback 探索)', () => {
@@ -164,6 +173,9 @@ test('title: empty topic falls back to 新任务', () => {
   const config = resolveConfig();
   assert.equal(buildSpawnTitle({ title: '   ' }, config, SH_AFTER_MIDNIGHT), '0904｜探索｜新任务');
   assert.equal(firstLine(''), '');
+  // titleFallbackTopic makes the empty-topic fallback configurable for English deployments
+  const enConfig = resolveConfig({ titleFallbackTopic: ' New task ', titleFallbackType: 'Explore' });
+  assert.equal(buildSpawnTitle({ title: '   ' }, enConfig, SH_AFTER_MIDNIGHT), '0904｜Explore｜New task');
 });
 
 test('title: custom type list and fallback are honored', () => {
