@@ -23,6 +23,8 @@
     "skills/",
     "client.js",
     "cordis.patch.yml",
+    "screenshots.json",
+    "assets/",
     "CHANGELOG.md",
     "docs/",
     "README.md",
