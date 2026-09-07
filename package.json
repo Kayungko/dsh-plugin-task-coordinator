@@ -44,9 +44,9 @@
     "test": "node --test test/smoke.test.mjs"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-llm": ">=0.1.2-0 <0.2.0",
-    "@deepseek-ai/dsh-skill-filesystem": ">=0.1.2-0 <0.2.0",
-    "@deepseek-ai/dsh-tools": ">=0.1.2-0 <0.2.0"
+    "@deepseek-ai/dsh-llm": ">=0.1.2-0 <0.1.3 || >=0.1.3-0 <0.1.4 || >=0.1.4-0 <0.2.0",
+    "@deepseek-ai/dsh-skill-filesystem": ">=0.1.2-0 <0.1.3 || >=0.1.3-0 <0.1.4 || >=0.1.4-0 <0.2.0",
+    "@deepseek-ai/dsh-tools": ">=0.1.2-0 <0.1.3 || >=0.1.3-0 <0.1.4 || >=0.1.4-0 <0.2.0"
   },
   "engines": {
     "node": "^22.19.0 || >=24"
