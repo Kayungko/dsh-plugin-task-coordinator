@@ -21,6 +21,41 @@ const HALF_SEPARATOR = /\|/g;
 const LEADING_BRACKET_PREFIX = /^\[[^\]]*\]\s*/;
 
 /**
+ * English spelling variants of the default Chinese type vocabulary.
+ * Normalization runs BEFORE the membership check, so a custom
+ * `titleTypes` set stays authoritative: an alias only resolves when its
+ * canonical type is actually allowed.
+ */
+export const TYPE_ALIASES = Object.freeze({
+  fix: '修复', bugfix: '修复',
+  feature: '功能', feat: '功能',
+  design: '设计',
+  optimize: '优化', optimise: '优化', perf: '优化', refactor: '优化',
+  release: '发布', publish: '发布',
+  explore: '探索', exploration: '探索',
+  doc: '文档', docs: '文档', documentation: '文档',
+  research: '研究', investigate: '研究',
+});
+
+/**
+ * Resolve one raw title segment to an allowed type: exact match first,
+ * then case-insensitive English alias whose canonical form is allowed.
+ * @param {string} part raw segment (already separator-split)
+ * @param {string[]} types allowed canonical types
+ * @returns {string | null} canonical type, or null when not a type
+ */
+export function resolveTitleType(part, types) {
+  if (typeof part !== 'string' || !Array.isArray(types)) return null;
+  const trimmed = part.trim();
+  if (trimmed.length === 0) return null;
+  if (types.includes(trimmed)) return trimmed;
+  const lower = trimmed.toLowerCase();
+  if (!Object.hasOwn(TYPE_ALIASES, lower)) return null;
+  const aliased = TYPE_ALIASES[lower];
+  return types.includes(aliased) ? aliased : null;
+}
+
+/**
  * Format MMDD from a creation timestamp in one IANA time zone.
  * @param {number} createdAtMs epoch milliseconds
  * @param {string} timeZone e.g. 'Asia/Shanghai'
@@ -59,6 +94,7 @@ export function truncateTopic(topic, maxChars) {
  *
  * Accepted `title` shapes (separator variants ｜ / | both fine):
  *   "类型｜主题"          -> date is stamped, type kept
+ *   "fix｜topic"          -> English alias normalized to its canonical type
  *   "MMDD｜类型｜主题"     -> stale date is re-stamped from createdAt
  *   "主题" (unknown type)  -> fallback type is used (never guessed)
  * Missing/blank title      -> topic derived from the kickoff prompt's first line.
@@ -88,13 +124,15 @@ export function buildSpawnTitle({ title, prompt } = {}, config = {}, createdAtMs
   const parts = raw.split(TITLE_SEPARATOR).map((part) => part.trim()).filter((part) => part.length > 0);
   let type = fallbackType;
   let topic;
-  if (parts.length >= 3 && /^\d{4}$/.test(parts[0]) && types.includes(parts[1])) {
+  const datedType = parts.length >= 3 && /^\d{4}$/.test(parts[0]) ? resolveTitleType(parts[1], types) : null;
+  const plainType = parts.length >= 2 ? resolveTitleType(parts[0], types) : null;
+  if (datedType) {
     // "MMDD｜类型｜主题" — keep type/topic, re-stamp the date below
-    type = parts[1];
+    type = datedType;
     topic = parts.slice(2).join(TITLE_SEPARATOR);
-  } else if (parts.length >= 2 && types.includes(parts[0])) {
-    // "类型｜主题"
-    type = parts[0];
+  } else if (plainType) {
+    // "类型｜主题" (canonical or English alias)
+    type = plainType;
     topic = parts.slice(1).join(TITLE_SEPARATOR);
   } else {
     // bare topic: never guess a type

@@ -202,11 +202,11 @@ Failures return `{ ok: false, code, error }` — agents branch on `code`, never 
 `task_spawn` splits the title responsibilities — **the model supplies `type｜topic`; the plugin stamps the date mechanically**:
 
 - The **date prefix** is stamped from the session *creation* time in `titleTimeZone` (default `Asia/Shanghai`) — never `updatedAt`, never model-computed;
-- **type** must be one of `titleTypes` (功能、设计、修复、优化、发布、探索、文档、研究); unclear types fall back to `titleFallbackType` (default 探索) instead of guessing;
+- **type** must be one of `titleTypes` (功能、设计、修复、优化、发布、探索、文档、研究) — English aliases (`fix`/`bugfix`, `feature`/`feat`, `design`, `optimize`/`perf`/`refactor`, `release`/`publish`, `explore`, `doc(s)`/`documentation`, `research`/`investigate`) are normalized to the canonical set case-insensitively; unclear types fall back to `titleFallbackType` (default 探索) instead of guessing;
 - **topic** is truncated to `titleMaxTopicChars` (default 16) for sidebar display; with no `title`, the topic is derived from the kickoff prompt's first line;
 - A stale leading `MMDD｜` is re-stamped from the real creation time; halfwidth `|` and legacy `[team]` prefixes are normalized.
 
-Example: `修复｜对账精度` → `0904｜修复｜对账精度`.
+Example: `修复｜对账精度` → `0904｜修复｜对账精度`; `fix｜对账精度` resolves to the same title.
 
 ## Bundled skill: task-coordination
 

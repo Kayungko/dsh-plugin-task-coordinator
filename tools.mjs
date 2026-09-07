@@ -101,6 +101,8 @@ export function registerTools(ctx, ops, deps, config) {
     + `The caller only supplies the semantic part in the \`title\` argument as "type｜topic" `
     + `(e.g. "修复｜对账精度"); the plugin auto-stamps the MMDD date prefix from the session `
     + `creation time (Asia/Shanghai). Allowed types: ${titleTypes}. `
+    + `English type aliases (fix, feature, design, optimize, release, explore, docs, research and common variants) `
+    + `are accepted case-insensitively and normalized to the canonical set. `
     + `Keep the topic short (<=16 chars), concrete, and do not repeat the project name. `
     + `If the type is unclear, supply just the topic and the plugin uses "${fallbackType}". `
     + `If no title is given, the topic is derived from the kickoff prompt's first line.`;
@@ -121,7 +123,8 @@ export function registerTools(ctx, ops, deps, config) {
       title: {
         type: 'string',
         description: 'Semantic title in the form "type｜topic" (e.g. "功能｜导出报表"). '
-          + `Allowed types: ${titleTypes}. The MMDD｜ date prefix is added automatically; do not write the date yourself. `
+          + `Allowed types: ${titleTypes}. English aliases (e.g. "fix｜...") are normalized automatically. `
+          + `The MMDD｜ date prefix is added automatically; do not write the date yourself. `
           + 'Keep the topic short and concrete. If unsure of the type, pass only the topic.',
       },
       cwd: { type: 'string', description: 'Working directory for the new task. Defaults to the caller\'s working directory.' },

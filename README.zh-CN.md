@@ -201,11 +201,11 @@ pwsh install.ps1 -Source .
 `task_spawn` 的标题分工明确——**模型只填 `类型｜主题`，日期由插件机械盖印**：
 
 - **日期前缀**按会话**创建时间**（`titleTimeZone`，默认 Asia/Shanghai）盖印——永不用 `updatedAt`，永不让模型算；
-- **类型** ∈ 功能 / 设计 / 修复 / 优化 / 发布 / 探索 / 文档 / 研究（`titleTypes`）；拿不准时用兜底「探索」（`titleFallbackType`），不猜；
+- **类型** ∈ 功能 / 设计 / 修复 / 优化 / 发布 / 探索 / 文档 / 研究（`titleTypes`）；英文别名（fix/bugfix、feature/feat、design、optimize/perf/refactor、release/publish、explore、doc(s)/documentation、research/investigate）不区分大小写、自动归一到中文规范集；拿不准时用兜底「探索」（`titleFallbackType`），不猜；
 - **主题**截断到 16 字（`titleMaxTopicChars`），适合侧栏显示；没给 `title` 时从 kickoff prompt 第一行提取；
 - 过期的行首 `MMDD｜` 会按真实创建时间重新盖印，半角 `|` 与旧式 `[团队]` 前缀自动归一。
 
-示例：`修复｜对账精度` → `0904｜修复｜对账精度`。
+示例：`修复｜对账精度` → `0904｜修复｜对账精度`；`fix｜对账精度` 归一后得到同一标题。
 
 ## 内置技能：task-coordination
 

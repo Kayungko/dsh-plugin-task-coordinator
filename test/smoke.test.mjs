@@ -11,7 +11,7 @@ import { resolveConfig, DEFAULTS } from '../config.mjs';
 import { checkCaller, checkTarget, SendLimiter, excerpt, blocksToText } from '../safety.mjs';
 import { createOps } from '../ops.mjs';
 import { registerTools } from '../tools.mjs';
-import { buildSpawnTitle, mmdd, truncateTopic, firstLine } from '../title.mjs';
+import { buildSpawnTitle, mmdd, truncateTopic, firstLine, resolveTitleType, DEFAULT_TITLE_TYPES } from '../title.mjs';
 import { buildSkillsConfig, SKILL_PROVIDER_NAME, SKILLS_DIR } from '../skills.mjs';
 import { SpawnRegistry } from '../registry.mjs';
 import { parseTasksCommand, registerCommands, renderTaskList, renderProgress, callerFromInvocation } from '../commands.mjs';
@@ -90,6 +90,18 @@ test('title: 类型｜主题 gets the date stamped', () => {
     buildSpawnTitle({ title: '修复｜对账精度', prompt: 'x' }, config, SH_AFTER_MIDNIGHT),
     '0904｜修复｜对账精度',
   );
+  // English aliases normalize to the canonical set, case-insensitively
+  assert.equal(
+    buildSpawnTitle({ title: 'fix｜登录报错', prompt: 'x' }, config, SH_AFTER_MIDNIGHT),
+    '0904｜修复｜登录报错',
+  );
+  assert.equal(
+    buildSpawnTitle({ title: 'Feature｜export report', prompt: 'x' }, config, SH_AFTER_MIDNIGHT),
+    '0904｜功能｜export report',
+  );
+  assert.equal(resolveTitleType('DOCS', DEFAULT_TITLE_TYPES), '文档');
+  assert.equal(resolveTitleType('deploy', DEFAULT_TITLE_TYPES), null);
+  assert.equal(resolveTitleType('constructor', DEFAULT_TITLE_TYPES), null);
 });
 
 test('title: bare topic never guesses a type (fallback 探索)', () => {
@@ -98,6 +110,11 @@ test('title: bare topic never guesses a type (fallback 探索)', () => {
     buildSpawnTitle({ title: 'Migration', prompt: 'migrate' }, config, SH_AFTER_MIDNIGHT),
     '0904｜探索｜Migration',
   );
+  // an unmapped English word is a topic, not a type — it never leaks as one
+  assert.equal(
+    buildSpawnTitle({ title: 'deploy｜支付网关', prompt: 'x' }, config, SH_AFTER_MIDNIGHT),
+    '0904｜探索｜deploy｜支付网关',
+  );
 });
 
 test('title: stale date prefix is re-stamped from createdAt', () => {
@@ -105,6 +122,11 @@ test('title: stale date prefix is re-stamped from createdAt', () => {
   assert.equal(
     buildSpawnTitle({ title: '0901｜设计｜旧日期标题', prompt: 'x' }, config, SH_AFTER_MIDNIGHT),
     '0904｜设计｜旧日期标题',
+  );
+  // aliases work in the dated shape too
+  assert.equal(
+    buildSpawnTitle({ title: '0901｜docs｜API 参考', prompt: 'x' }, config, SH_AFTER_MIDNIGHT),
+    '0904｜文档｜API 参考',
   );
 });
 
@@ -153,6 +175,11 @@ test('title: custom type list and fallback are honored', () => {
   assert.equal(
     buildSpawnTitle({ title: '修复｜不在类型表' }, config, SH_AFTER_MIDNIGHT),
     '0904｜需求｜修复｜不在类型表',
+  );
+  // aliases never override a custom set: fix -> 修复 is canonical but not allowed here
+  assert.equal(
+    buildSpawnTitle({ title: 'fix｜登录崩溃' }, config, SH_AFTER_MIDNIGHT),
+    '0904｜需求｜fix｜登录崩溃',
   );
 });
 
