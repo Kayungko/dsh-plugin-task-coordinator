@@ -12,7 +12,7 @@
 [![89 unit tests](https://img.shields.io/badge/tests-89%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
-[What is this](#what-is-this) · [Quick start](#quick-start) · [Tools](#the-eleven-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Changelog](CHANGELOG.md) · [中文](README.zh-CN.md)
+[What is this](#what-is-this) · [Screenshots](#screenshots) · [Quick start](#quick-start) · [Tools](#the-eleven-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Changelog](CHANGELOG.md) · [中文](README.zh-CN.md)
 
 </div>
 
@@ -36,6 +36,21 @@ What happens behind the scenes: you (plain language) → supervisor session → 
 
 > 📌 Host contract verified on **DSH 0.1.2-alpha.1**; every capability passed real-host end-to-end testing after restart (criteria in [Host contract](docs/PROTOCOL.md)).
 
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="./assets/shot-1.png" alt="task-coordinator in the DSH Desktop GUI (1/4)" width="420"></td>
+    <td><img src="./assets/shot-2.png" alt="task-coordinator in the DSH Desktop GUI (2/4)" width="420"></td>
+  </tr>
+  <tr>
+    <td><img src="./assets/shot-3.png" alt="task-coordinator in the DSH Desktop GUI (3/4)" width="420"></td>
+    <td><img src="./assets/shot-4.png" alt="task-coordinator in the DSH Desktop GUI (4/4)" width="420"></td>
+  </tr>
+</table>
+
+<sub><i>Live GUI captures — the same four shots are declared in <code>screenshots.json</code> for the dsh-market detail view.</i></sub>
+
 ## Quick start
 
 ### Prerequisites
@@ -45,6 +60,8 @@ What happens behind the scenes: you (plain language) → supervisor session → 
 - PowerShell (the deploy script is `.ps1`).
 
 ### Install (one command)
+
+> 🛒 **Listed on [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) (Workflow & Automation)** — with the in-app [dsh-market](https://github.com/dsh-market/dsh-market) plugin browser, search “task-coordinator” and install/upgrade with one click. The git-clone route below is the no-market equivalent.
 
 ```powershell
 git clone https://github.com/Kayungko/dsh-plugin-task-coordinator.git

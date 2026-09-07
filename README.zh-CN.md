@@ -12,7 +12,7 @@
 [![89 个单元测试](https://img.shields.io/badge/tests-89%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
-[这是什么](#这是什么) · [快速开始](#快速开始) · [十一个工具](#十一个工具) · [架构设计](docs/ARCHITECTURE.md) · [主机契约](docs/PROTOCOL.md) · [更新日志](CHANGELOG.md) · [English](README.md)
+[这是什么](#这是什么) · [界面一览](#界面一览) · [快速开始](#快速开始) · [十一个工具](#十一个工具) · [架构设计](docs/ARCHITECTURE.md) · [主机契约](docs/PROTOCOL.md) · [更新日志](CHANGELOG.md) · [English](README.md)
 
 </div>
 
@@ -35,6 +35,21 @@
 
 > 📌 主机契约已在 **DSH 0.1.2-alpha.1** 实测；全部能力通过重启后的真实宿主端到端验证（判据见 [主机契约](docs/PROTOCOL.md)）。
 
+## 界面一览
+
+<table>
+  <tr>
+    <td><img src="./assets/shot-1.png" alt="task-coordinator 实机界面（1/4）" width="420"></td>
+    <td><img src="./assets/shot-2.png" alt="task-coordinator 实机界面（2/4）" width="420"></td>
+  </tr>
+  <tr>
+    <td><img src="./assets/shot-3.png" alt="task-coordinator 实机界面（3/4）" width="420"></td>
+    <td><img src="./assets/shot-4.png" alt="task-coordinator 实机界面（4/4）" width="420"></td>
+  </tr>
+</table>
+
+<sub><i>实机 GUI 截图——同四张图经 <code>screenshots.json</code> 声明给 dsh-market 详情页画廊。</i></sub>
+
 ## 快速开始
 
 ### 前置条件
@@ -44,6 +59,8 @@
 - PowerShell（部署脚本是 `.ps1`）。
 
 ### 安装（一条命令）
+
+> 🛒 **已收录于 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)（Workflow & Automation 分类）**——装了应用内 [dsh-market](https://github.com/dsh-market/dsh-market) 插件市场的话，搜索 “task-coordinator” 一键安装/升级；下面的 git clone 路线是无市场时的等价安装方式。
 
 ```powershell
 git clone https://github.com/Kayungko/dsh-plugin-task-coordinator.git
