@@ -2,6 +2,16 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### Added
+
+- 市场截图声明：`screenshots.json`（awesome-dsh-plugin 官方契约，1–8 个仓库相对路径）+ 4 张实机 GUI 截图（`assets/shot-{1..4}.png`，用户确认无敏感内容，按拍摄时序排列）。dsh-market 详情页/官网插件页经 nightly build 自动抓取展示，列表侧无需 PR；清单按官方 CI 同款规则自检（JSON 数组、条数、路径不逃逸、文件存在）。`package.json files[]` 同步收录 `screenshots.json` 与 `assets/`（未来 npm publish 及 README banner SVG 一并随行）。
+
+### Changed
+
+- peer 范围扩显式预发布分支（三个 peer 依赖）：`>=0.1.2-0 <0.2.0` → `>=0.1.2-0 <0.1.3 || >=0.1.3-0 <0.1.4 || >=0.1.4-0 <0.2.0`。node-semver 只放行「比较符元组自身带预发布标签」的预发布版本（awesome-dsh-plugin contributing.md 官方警告的静默排除陷阱）：旧区间对当前 0.1.2-rc.1 有效，但会静默排除未来的 0.1.3-rc.x / 0.1.4-rc.x，让预发布宿主上的装机用户遇到需手工绕行的 ERESOLVE。经真 semver 引擎 8 版本实测：0.1.2-rc.1 / 0.1.3-rc.1 / 0.1.4-rc.2 / 0.1.9 全部 MATCH（现网行为不变），0.2.0-rc.1 保守排除；0.1.5-rc.x 为文档化绊线——宿主发布新预发布元组时须再扩一条分支（PROTOCOL 版本硬约束段已记规则）。
+
 ## [0.16.2] - 2026-09-06
 
 ### Fixed
