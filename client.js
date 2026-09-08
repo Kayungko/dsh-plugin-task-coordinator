@@ -1,18 +1,20 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.18.0)
+ * dsh-plugin-task-coordinator — client module (0.18.1)
  *
  * Two surfaces:
  *  1. `conversation.session.header.utilities` slot — the "Copy session id"
  *     action (0.8.0), so any session's stable id can be grabbed with one
  *     click and pasted into task_send / task_progress / /tasks.
- *  2. `settings.plugins.tab` slot (0.18.0) — the "任务编排" settings tab:
- *     a GUI editor for the plugin's durable spawn-model default (the
+ *  2. `settings.section` slot (0.18.1) — the first-level "任务编排" settings
+ *     page: a GUI editor for the plugin's durable spawn-model default (the
  *     `task-coordinator` settings section installed host-side). Candidates
- *     come from the host's live model catalog (ctx.remote.session.
- *     modelCatalog — the same source the GUI model picker renders, so
- *     gateway providers such as a self-hosted mana route appear
- *     automatically); writes go through ctx.settingsScope.bind({namespace})
- *     — the same staged-write channel the native plugin cards use.
+ *     come from the host's live model catalog (remote.session.modelCatalog —
+ *     the same source the GUI model picker renders, so gateway providers
+ *     such as a self-hosted mana route appear automatically); writes go
+ *     through settingsScope.bind({namespace}) — the same staged-write
+ *     channel the native plugin cards use. (0.18.0 shipped this as a
+ *     settings.plugins.tab inside the Plugins page; 0.18.1 moved it to a
+ *     first-level section per user request.)
  *
  * Localization (0.15.0): strings follow the host's live locale runtime
  * (@deepseek-ai/dsh-client-locale — the same channel the official
@@ -26,10 +28,17 @@
  * echoes bare keys for unregistered dictionaries (the "header.action" button
  * regression). A bare-key guard around props.t backs the retry up, so a
  * missing dictionary can never render a raw key again.
- * 0.18.0: the settings tab follows the same lazy-service discipline for
- * `settingsScope` / `remote` (defensive per-use reads, a short retry while
- * unsighted, graceful degraded states) — the bundle still injects only
- * ["slots"], so older hosts keep the header button working.
+ * 0.18.1 CRITICAL FIX: the client runner (dsh-cordis-client-runner
+ * dynamicCordisContext) gates direct `ctx.serviceName` property access
+ * behind the fiber's inject declaration — reading an UNDECLARED service
+ * throws, so the 0.16.1 lazy sighting and the 0.18.0 settings tab silently
+ * never sighted anything (language switching never actually engaged; the
+ * settings selects rendered permanently grey). The sanctioned bypass is
+ * `ctx.get(name)` (requireDeclaration=false): every optional service read
+ * (locale / settingsScope / remote) now goes through ctx.get() with the
+ * plain property kept only as a direct-require fallback for test hosts.
+ * The bundle still injects only ["slots"], so older hosts keep the header
+ * button working, and every degraded state renders a real diagnostics line.
  *
  * Contract notes (field-tested against DSH Desktop 2.0.5 / core 0.1.2-rc.1):
  * - The client-modules registry reads this file's path from the plugin's
@@ -42,9 +51,10 @@
  * - The slot contract is declared by dsh-cordis-client-runner: occupants
  *   receive the standard session props, including `sessionId` (and `t` when
  *   the slot plumbing binds the registration's `locale` namespace).
- * - Third-party settings tabs follow the dsh-community-market precedent:
- *   register into `settings.plugins.tab` and render inside the Plugins
- *   settings section's tab bar.
+ * - First-level settings pages occupy the `settings.section` slot (the
+ *   settings-general / settings-models / settings-plugins /
+ *   settings-agent-preset seat); native order values are general=0,
+ *   models=10, plugins=15, agent-presets=20 — ours is 25.
  */
 window.__ModuleLoader__.load({
 	id: "dsh-plugin-task-coordinator",
@@ -104,7 +114,10 @@ window.__ModuleLoader__.load({
 				"status.effective": "当前默认",
 				"status.hostDefault": "宿主默认",
 				"status.notSet": "未设置",
-				"invalid.pair": "provider 与 model 需成对设置，或两者都留空。"
+				"invalid.pair": "provider 与 model 需成对设置，或两者都留空。",
+				"degraded.scope": "设置服务不可用（宿主缺少 settingsScope），本页暂不可编辑；派发仍按已存默认与宿主默认执行。",
+				"degraded.catalog": "模型目录不可用：{message}",
+				"degraded.namespace": "设置区未在宿主设置文档中注册（插件可能未随宿主装载），本页暂不可编辑。"
 			},
 			en: {
 				"header.action": "Copy Session ID",
@@ -128,7 +141,10 @@ window.__ModuleLoader__.load({
 				"status.effective": "Current default",
 				"status.hostDefault": "Host default",
 				"status.notSet": "Not set",
-				"invalid.pair": "provider and model must be set together, or both left empty."
+				"invalid.pair": "provider and model must be set together, or both left empty.",
+				"degraded.scope": "The settings service is unavailable (no settingsScope on this host); this page is read-only for now — spawns still follow the stored default and the host default.",
+				"degraded.catalog": "The model catalog is unavailable: {message}",
+				"degraded.namespace": "The settings section is not registered in the host settings document (the plugin may not be loaded with the host); this page is read-only for now."
 			}
 		};
 		/** Live LocaleRuntime (register/translate/getSnapshot/subscribe) when present. */
@@ -153,7 +169,15 @@ window.__ModuleLoader__.load({
 		const ensureLocale = () => {
 			if (localeRegistered || !hostCtx) return localeRuntime;
 			if (!localeRuntime || typeof localeRuntime.register !== "function") {
-				try { localeRuntime = hostCtx.locale; } catch { localeRuntime = undefined; }
+				// 0.18.1: the client runner gates direct ctx.serviceName access
+				// behind the fiber's inject declaration — a plain property read
+				// on an undeclared service THROWS (the 0.16.1 lazy sighting
+				// silently never sighted anything, so live language switching
+				// never actually engaged). ctx.get(name) is the sanctioned
+				// optional-lookup bypass (requireDeclaration=false in the
+				// runner's dynamicCordisContext proxy); the property fallback
+				// keeps direct-require test hosts working.
+				try { localeRuntime = typeof hostCtx.get === "function" ? hostCtx.get("locale") : hostCtx.locale; } catch { localeRuntime = undefined; }
 			}
 			if (localeRuntime && typeof localeRuntime.register === "function") {
 				try {
@@ -279,7 +303,8 @@ window.__ModuleLoader__.load({
 			".tcSettingsStatus{margin:0;font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary,#5b616e)}",
 			".tcSettingsStatus[data-kind='error']{color:var(--dsw-alias-danger,#c0392b)}",
 			".tcSettingsIntro{margin:0 0 4px;font-size:13px;line-height:21px;color:var(--dsw-alias-label-secondary,#5b616e);max-width:560px}",
-			".tcSettingsHeading{margin:0;font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary,#0f1115)}"
+			".tcSettingsHeading{margin:0;font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary,#0f1115)}",
+			".tcSettingsPageTitle{margin:0 0 12px;font-size:18px;font-weight:600;color:var(--dsw-alias-label-primary,#0f1115)}"
 		].join("\n");
 		function installSettingsStyles() {
 			if (document.querySelector(`style[data-plugin="${STYLE_ID_SETTINGS}"]`) !== null) return () => {};
@@ -294,7 +319,10 @@ window.__ModuleLoader__.load({
 		const getBoundScope = () => {
 			if (boundScope) return boundScope;
 			try {
-				const svc = hostCtx && hostCtx.settingsScope;
+				// ctx.get() bypasses the runner's inject-declaration gate (see
+				// the ensureLocale note); a plain .settingsScope read would
+				// throw under our "slots"-only declaration.
+				const svc = hostCtx && (typeof hostCtx.get === "function" ? hostCtx.get("settingsScope") : hostCtx.settingsScope);
 				if (typeof svc?.bind === "function") {
 					const scope = svc.bind({ namespace: NS_SETTINGS });
 					if (scope && typeof scope.getSnapshot === "function") boundScope = scope;
@@ -304,7 +332,7 @@ window.__ModuleLoader__.load({
 		};
 		/** Live remote face (model catalog) — defensive per-use read. */
 		const getRemote = () => {
-			try { return hostCtx && hostCtx.remote; } catch { return undefined; }
+			try { return hostCtx && (typeof hostCtx.get === "function" ? hostCtx.get("remote") : hostCtx.remote); } catch { return undefined; }
 		};
 		/** Project the host modelCatalog() payload onto select-friendly rows. */
 		function projectCatalog(catalog) {
@@ -464,11 +492,20 @@ window.__ModuleLoader__.load({
 				: null;
 			const effective = routeText(stored);
 			const hostDefault = catalog.status === "ready" ? routeText(catalog.default) : null;
+			// Diagnostics (0.18.1): every degraded state renders a real line —
+			// the 0.18.0 build silently greyed the selects when the runner's
+			// inject gate hid the services (see getBoundScope).
+			const scopeMissing = !services.scope && services.ticks > 40;
+			const scopeLoading = !!services.scope && (scopeSnap === null || (scopeSnap.status !== "ready" && scopeSnap.status !== "unavailable"));
+			const nsUnavailable = scopeSnap?.status === "unavailable";
 			return h("div", null,
+				h("h2", { className: "tcSettingsPageTitle" }, t("tab.title")),
 				h("h3", { className: "tcSettingsHeading" }, t("card.title")),
 				h("p", { className: "tcSettingsIntro" }, t("card.intro")),
 				h("div", { className: "tcSettingsCard" },
-					!services.scope && services.ticks > 40 ? h("p", { className: "tcSettingsStatus", "data-kind": "error" }, t("degraded.scope")) : null,
+					scopeMissing ? h("p", { className: "tcSettingsStatus", "data-kind": "error" }, t("degraded.scope")) : null,
+					nsUnavailable ? h("p", { className: "tcSettingsStatus", "data-kind": "error" }, t("degraded.namespace")) : null,
+					scopeLoading ? h("p", { className: "tcSettingsStatus" }, t("status.loading")) : null,
 					h("div", { className: "tcSettingsRow" },
 						h("label", { className: "tcSettingsLabel" }, t("field.provider")),
 						h("select", {
@@ -529,11 +566,12 @@ window.__ModuleLoader__.load({
 		const inject = ["slots"];
 
 		/**
-		 * Client fiber entry: occupy the header utilities slot and the
-		 * settings plugins tab.
-		 * @param ctx - Client cordis context (slots service; locale when the
-		 *   host provides @deepseek-ai/dsh-client-locale — accessed defensively,
-		 *   never hard-injected so older hosts keep the button in zh).
+		 * Client fiber entry: occupy the header utilities slot and a
+		 * first-level settings section.
+		 * @param ctx - Client cordis context (slots service; locale /
+		 *   settingsScope / remote are sighted through ctx.get() — the
+		 *   runner's sanctioned optional-lookup bypass — so the bundle keeps
+		 *   its "slots"-only declaration and older hosts keep the button).
 		 */
 		function apply(ctx) {
 			hostCtx = ctx;
@@ -547,16 +585,20 @@ window.__ModuleLoader__.load({
 				locale: NS,
 				label: () => translateNow("header.action")
 			}, CopySessionIdHeaderAction));
-			// Settings tab (0.18.0, dsh-community-market precedent): one tab in
-			// the Plugins settings section editing the durable spawn-model
-			// default. Styles install once per document; the tab component
-			// itself degrades gracefully on hosts without settingsScope/remote.
-			ctx.slots.inject("settings.plugins.tab", () => {
+			// First-level settings section (0.18.1): Settings → 任务编排 in the
+			// left nav (the settings-general/settings-models/settings-plugins/
+			// settings-agent-preset seat — order 25 sits after agent-presets'
+			// 20). 0.18.0 shipped this as a settings.plugins.tab inside the
+			// Plugins page; the user asked for a first-level entry. The
+			// component edits the durable spawn-model default; styles install
+			// once per document; every missing service degrades to a real
+			// diagnostics line instead of silent grey.
+			ctx.slots.inject("settings.section", () => {
 				installSettingsStyles();
 				return ctx.slots.register({
-					name: "settings.plugins.tab",
+					name: "settings.section",
 					id: "task-coordinator",
-					order: 20,
+					order: 25,
 					locale: NS,
 					label: () => translateNow("tab.title")
 				}, TaskCoordinatorSettingsTab);

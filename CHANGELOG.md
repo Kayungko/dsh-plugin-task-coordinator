@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-09-09
+
+### Fixed
+
+- **真机回归：设置页下拉恒灰（0.18.0 发布当天用户报告）**。根因（源码级实锤）：`dsh-cordis-client-runner` 的 `dynamicCordisContext`（L319-342）把动态插件的 `ctx.serviceName` **直接属性访问**按 fiber 的 inject 声明门控——读本插件未声明的服务（settingsScope/remote/locale）直接抛错；官方旁路是 `ctx.get(name)`（requireDeclaration=false）。0.18.0 的懒寻视用属性访问 + try/catch 吞错 → 永远寻视不到 → `draft` 恒空 → 三个下拉恒灰。修复：三处可选服务读取全部改走 `ctx.get()`（属性访问仅保留为直连测试宿主的回退）。无头实验已先行证明链路其余部分全通（真实 ui-settings bundle + 本插件 schema envelope + describe 视图 → ready/writable/value 齐备）。
+- **连带破案（0.16.1 隐藏缺陷）**：同门控下 `ctx.locale` 属性访问同样从未生效——**语言切换在真机上从未真正接入宿主 locale 运行时**（一直静默回退内置 zh 字典）；verify-installed 的 fake ctx 没有复刻 Proxy 门控，属验证盲区。本版一并修复。
+
+### Changed
+
+- **「任务编排」升级为设置页一级入口**（用户需求）：注册槽位从 `settings.plugins.tab`（插件页内页签）改为 `settings.section`（设置左侧导航一级页，与 通用/模型/插件/Agent 预设 同级；原生 order general=0/models=10/plugins=15/agent-presets=20，本插件=25）。
+- 每个降级态渲染真实诊断文案（此前 0.18.0 缺 `degraded.*` 字典键会渲染裸键）：设置服务缺失 / 设置区未注册 / 目录失败 / 加载中，各有独立 zh/en 文案；设置页组件增加页面级标题。
+- 工具描述/双 README/SKILL/PROTOCOL/ARCHITECTURE 同步位置表述（设置 → 任务编排）与 runner 门控接缝事实。
+
+### 测试
+
+- 单元 95 保持全绿；verify-installed 新增 **runner 门控回归测试**：以复刻 `dynamicCordisContext` 的 Proxy（未声明服务属性读抛错 + `get()` 应答）作为 apply() 与渲染的宿主 ctx，断言 apply 存活、双槽注册、locale 经 `ctx.get()` 完成注册（0.16.1 盲区补防）；另加三处 `ctx.get()` 源码静态断言防止回退为属性访问；安装态端到端 ALL PASSED。
+
 ## [0.18.0] - 2026-09-09
 
 ### Added

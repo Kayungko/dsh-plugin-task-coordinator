@@ -118,7 +118,7 @@ export function registerTools(ctx, ops, deps, config) {
       + 'The new task appears in the session list immediately. Returns the new session id for follow-up coordination. '
       + 'With reportBack (default on) the child is told to send its result summary back and end its turn right after, so your reply auto-opens a new round on the idle child. '
       + 'Optional provider+model select the child\'s LLM route (installed before the kickoff, so its first turn uses it; '
-      + 'omit both to use the plugin\'s configured default route — Settings → 插件 → 任务编排 — and then the host default model; '
+      + 'omit both to use the plugin\'s configured default route — Settings → 任务编排 — and then the host default model; '
       + 'host semantics: this also updates the app-wide default model, like picking a model in the GUI). '
       + spawnTitleRule,
     parameters: {

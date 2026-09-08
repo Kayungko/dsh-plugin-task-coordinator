@@ -487,7 +487,7 @@ export function createOps(deps) {
       // note it also updates the app-wide default model, host semantics).
       // 0.18.0: a call that omits both falls back to the plugin's configured
       // default route (durable "task-coordinator" settings section, GUI-editable
-      // in Settings → 插件 → 任务编排) before landing on the host default. The
+      // in Settings → 任务编排) before landing on the host default. The
       // resolution order is: explicit tool args > plugin default > host default.
       let modelFromDefaults = false;
       if ((provider === undefined || provider === null || String(provider).trim().length === 0)

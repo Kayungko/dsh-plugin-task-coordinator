@@ -103,7 +103,7 @@ pwsh install.ps1 -Source .
 | `task_list` | 列出协调可见的任务（含稳定 sessionId、状态、标题、todo/goal 进度；可按 `team` 过滤） |
 | `task_progress` | 深入读取单个任务：实时/冷状态、排队消息、对话尾部、todos、goal |
 | `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`；`reference` 关联先前指令），返回 `messageId` + `queueDepth` 回执 `{nextTurn, nextStep}`（投递后口径；next-turn 每轮恰消费 1 条，深度 N ≈ N 轮后才被读） |
-| `task_spawn` | 创建 + 命名 + 启动新任务（标题遵循 `MMDD｜类型｜主题`；可用 `team` 编组），返回 `correlationId`；默认附带回报约定；新任务默认挂进调用方所在工作区；显式 `cwd` 与某工作区路径精确匹配时自动升级挂载该工作区（0.12.0）；可选 `provider`+`model`（+`reasoningEffort`）指定子会话模型路线，开场前安装（0.13.0）；省略时回退插件默认路线（设置 → 插件 → 任务编排，0.18.0），再回退宿主默认 |
+| `task_spawn` | 创建 + 命名 + 启动新任务（标题遵循 `MMDD｜类型｜主题`；可用 `team` 编组），返回 `correlationId`；默认附带回报约定；新任务默认挂进调用方所在工作区；显式 `cwd` 与某工作区路径精确匹配时自动升级挂载该工作区（0.12.0）；可选 `provider`+`model`（+`reasoningEffort`）指定子会话模型路线，开场前安装（0.13.0）；省略时回退插件默认路线（设置 → 任务编排，0.18.0），再回退宿主默认 |
 | `task_confirm` | 把拆分/派发方案做成**交互式审批卡**弹给用户，阻塞直到回答；批准返回单次 `confirmationId` |
 | `task_confirm_select` | 把任务清单做成**多选卡**（宿主中性提问 UI，非琥珀审批卡）：用户勾选要派发哪些（部分派发），可在自定义输入行写调整意见；批准把 `confirmationId` 绑定到选中子集，`task_spawn_batch` 强制校验（夹带未勾选标题报 `confirmation-mismatch`） |
 | `task_spawn_batch` | 一次批量创建整个拆分方案（`tasks: [{title?, prompt}]` + 统一 `team`）；达到确认阈值时必须携带 `confirmationId`；单条失败不中止整批 |
@@ -118,7 +118,7 @@ pwsh install.ps1 -Source .
 
 ### 复制会话 ID —— 会话头部一键完成
 
-插件随包一个 **Web 客户端模块**（`client.js`，由 `package.json` 的 `dsh.client` 声明），占用两个官方槽位。①`conversation.session.header.utilities`——与自带的 `session-log-export` 同一条接缝：每个会话头部右侧出现「复制会话Id」按钮（面性胶囊，几何参数与「Session 日志」一致：亮色黑底白字、暗色白底黑字），一键复制当前会话的完整 `sessionId`，直接粘给总控侧的 `task_send`、`task_progress` 或 `/tasks <id>`。（侧栏会话行右键菜单为宿主硬编码，实测不可扩展，故选择有官方先例的头部槽位。）②`settings.plugins.tab`（0.18.0，dsh-community-market 同款接缝）：设置 → 插件 → 「任务编排」页签，可视化配置派发默认模型（见上一节）。
+插件随包一个 **Web 客户端模块**（`client.js`，由 `package.json` 的 `dsh.client` 声明），占用两个官方槽位。①`conversation.session.header.utilities`——与自带的 `session-log-export` 同一条接缝：每个会话头部右侧出现「复制会话Id」按钮（面性胶囊，几何参数与「Session 日志」一致：亮色黑底白字、暗色白底黑字），一键复制当前会话的完整 `sessionId`，直接粘给总控侧的 `task_send`、`task_progress` 或 `/tasks <id>`。（侧栏会话行右键菜单为宿主硬编码，实测不可扩展，故选择有官方先例的头部槽位。）②`settings.section`（0.18.1）：设置左侧一级入口「任务编排」页（与 通用/模型/插件/Agent 预设 同级，order 25），可视化配置派发默认模型（见上一节）。
 
 ### 工作区归置与迁移（0.12.0）
 
@@ -134,7 +134,7 @@ pwsh install.ps1 -Source .
 
 ### 派发默认模型：设置界面可视化配置（0.18.0）
 
-省略 `provider`+`model` 的派发不再只能落到宿主默认——**设置 → 插件 → 任务编排**新页签可视化配置一条默认路线，解析链变为：**工具显式指定 > 插件默认 > 宿主默认**。
+省略 `provider`+`model` 的派发不再只能落到宿主默认——**设置 → 任务编排**（设置页左侧一级入口，与 通用/模型/插件/Agent 预设 同级）可视化配置一条默认路线，解析链变为：**工具显式指定 > 插件默认 > 宿主默认**。
 
 - **三级下拉**（Provider → 模型 → 推理力度），候选来自宿主活体模型目录（与 GUI 模型选择器、`task_models` 同一数据源）——自建网关路线（如 mana 接入的 provider）自动出现在列表里，零额外配置；已保存但目录中下线的路线显示为「（已下线）」仍可改选。
 - **durable 存储**：值写入宿主设置服务的 `task-coordinator` 命名空间（`installSection` 契约，subagent-model-selection 同款），GUI 改动即时生效于下一次派发，无需重启。

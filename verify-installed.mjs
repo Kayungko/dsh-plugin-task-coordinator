@@ -668,32 +668,40 @@ const slotCtx = {
   },
 };
 clientExports.apply(slotCtx);
-assert.equal(slotInjections.length, 2, 'header utilities + settings plugins tab');
+assert.equal(slotInjections.length, 2, 'header utilities + settings section');
 assert.equal(slotInjections[0].name, 'conversation.session.header.utilities');
 const occupation = slotInjections[0].thunk();
 assert.equal(occupation.options.id, 'copy-session-id');
 assert.equal(typeof occupation.component, 'function');
 
-// 0.18.0 settings tab: the second slot occupation registers the "任务编排"
-// tab. The thunk installs styles first — stub a minimal document whose
-// querySelector always hits (style already present) so no DOM is touched.
+// 0.18.1 first-level settings section: the second occupation registers the
+// "任务编排" page in the settings left nav (native order values: general=0,
+// models=10, plugins=15, agent-presets=20 — ours is 25). The thunk installs
+// styles first — stub a minimal document whose querySelector always hits
+// (style already present) so no DOM is touched.
 const docDesc = Object.getOwnPropertyDescriptor(globalThis, 'document');
 Object.defineProperty(globalThis, 'document', {
   value: { querySelector: () => ({}) },
   configurable: true,
 });
-assert.equal(slotInjections[1].name, 'settings.plugins.tab');
+assert.equal(slotInjections[1].name, 'settings.section');
 const tabOccupation = slotInjections[1].thunk();
 if (docDesc) Object.defineProperty(globalThis, 'document', docDesc);
 else delete globalThis.document;
 assert.equal(tabOccupation.options.id, 'task-coordinator');
-assert.equal(tabOccupation.options.order, 20);
+assert.equal(tabOccupation.options.order, 25);
 assert.match(tabOccupation.options.label(), /任务编排/);
 assert.equal(typeof tabOccupation.component, 'function');
-// The tab renders a degraded (never-crashing) tree before any service is
+// The section renders a degraded (never-crashing) tree before any service is
 // sighted: react stand-in has no useEffect, so call the component directly.
 const tabTree = tabOccupation.component({});
-assert.equal(tabTree.type, 'div', 'settings tab renders a root div without services');
+assert.equal(tabTree.type, 'div', 'settings section renders a root div without services');
+// Static source guards (0.18.1): every optional-service read must go through
+// ctx.get() — the runner's inject-declaration gate THROWS on direct property
+// access, which is exactly how 0.18.0's selects greyed out for good.
+assert.match(clientSrc, /hostCtx\.get\("locale"\)/, 'ensureLocale must read the locale service through ctx.get()');
+assert.match(clientSrc, /hostCtx\.get\("settingsScope"\)/, 'getBoundScope must read settingsScope through ctx.get()');
+assert.match(clientSrc, /hostCtx\.get\("remote"\)/, 'getRemote must read remote through ctx.get()');
 
 const wrote = [];
 const navDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
@@ -739,7 +747,59 @@ assert.equal(lateEn.children[0], 'Copy Session ID', 'en switch resolves through 
 assert.equal(lateEn.props.title, 'Copy Session ID (s-late)', 'en title uses ASCII parentheses off snapshot.active');
 if (navDesc) Object.defineProperty(globalThis, 'navigator', navDesc);
 else delete globalThis.navigator;
-console.log('client module      : OK -> dsh.client declared, bundle loads, header slot occupied (copy writes sessionId), settings tab registered');
+
+// 0.18.1 runner-gate regression (the root cause of the permanently grey
+// selects): dsh-cordis-client-runner's dynamicCordisContext gates direct
+// ctx.serviceName property access behind the fiber's inject declaration —
+// reading an UNDECLARED service throws. Our bundle declares only ["slots"],
+// so locale / settingsScope / remote must be sighted through ctx.get().
+// This harness replicates the gate: undeclared property reads throw, get()
+// answers. A FRESH factory invocation provides fresh module state (the
+// locale-registered flag is module-level and persists across apply()).
+{
+  const gatedRuntime = {
+    dicts: new Map(),
+    register(ns, dicts) { this.dicts.set(ns, dicts); return () => {}; },
+    translate(ns, key) { return this.dicts.get(ns)?.zh?.[key] ?? key; },
+    getSnapshot() { return { active: 'zh', locales: ['zh', 'en'], revision: 1 }; },
+    subscribe() { return () => {}; },
+  };
+  const gatedServices = { locale: gatedRuntime };
+  const gatedSlotInjections = [];
+  const gatedSlotService = {
+    inject: (name, thunk) => gatedSlotInjections.push({ name, thunk }),
+    register: (options, component) => ({ options, component }),
+  };
+  const gatedCtx = new Proxy({}, {
+    get(_target, prop) {
+      if (prop === 'get') return (name) => gatedServices[name];
+      if (prop === 'slots') return gatedSlotService;
+      throw new Error(`service "${String(prop)}" is not declared by your plugin. Declare it on the plugin you return: { inject: ['${String(prop)}', …] }`);
+    },
+  });
+  const freshExports = clientRegistrations[0].factory((spec) => {
+    assert.equal(spec, 'react', 'client module may only require shared graph deps');
+    return fakeReact;
+  });
+  assert.deepEqual(freshExports.inject, ['slots']);
+  let gatedApplyError = null;
+  try { freshExports.apply(gatedCtx); } catch (error) { gatedApplyError = error; }
+  assert.equal(gatedApplyError, null, 'apply() must survive the runner inject gate (no direct undeclared service reads)');
+  assert.equal(gatedSlotInjections.length, 2, 'both slots register through the gated ctx');
+  // The eager ensureLocale inside apply() sights the runtime through
+  // ctx.get('locale') under the gate — the 0.16.1 lazy sighting that never
+  // actually engaged in production until this fix.
+  assert.equal(gatedRuntime.dicts.has('task-coordinator'), true, 'ensureLocale must sight the runtime through ctx.get() under the gate');
+  const gatedOccupation = gatedSlotInjections[0].thunk();
+  Object.defineProperty(globalThis, 'navigator', { value: { clipboard: { writeText: async () => {} } }, configurable: true });
+  const gatedButton = gatedOccupation.component({ sessionId: 's-gated' });
+  assert.equal(gatedButton.children[0], '复制会话Id', 'button renders through the gated ctx');
+  if (navDesc) Object.defineProperty(globalThis, 'navigator', navDesc);
+  else delete globalThis.navigator;
+}
+
+console.log('client module      : OK -> dsh.client declared, bundle loads, header slot occupied (copy writes sessionId), first-level settings section registered (order 25)');
 console.log('client i18n        : OK -> bare-key t() falls back to zh, late locale service registers on first sight, zh/en resolve live');
+console.log('client runner gate : OK -> apply/render survive the inject gate; locale sights via ctx.get(); source reads settingsScope/remote through ctx.get()');
 
 console.log('\nALL INTEGRATION CHECKS PASSED');

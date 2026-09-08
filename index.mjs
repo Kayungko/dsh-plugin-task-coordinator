@@ -41,7 +41,7 @@ export function defaultRegistryFile() {
 
 export function apply(ctx, input = {}) {
   const config = resolveConfig(input);
-  ctx.provide('taskCoordinator', { config, version: '0.18.0' });
+  ctx.provide('taskCoordinator', { config, version: '0.18.1' });
   if (!config.enabled) {
     ctx.logger?.info('task-coordinator: disabled by config; no tools registered');
     return;
@@ -153,7 +153,7 @@ export function apply(ctx, input = {}) {
     }
   };
   // Spawn-model defaults (0.18.0): a durable settings section the GUI edits
-  // (Settings → 插件 → 任务编排) and task_spawn falls back to when a call
+  // (Settings → 任务编排, a first-level section) and task_spawn falls back to when a call
   // omits provider+model. Registered through the host settings service's
   // installSection (subagent-model-selection precedent): our entry is the
   // composition base, the user layer composes over it, scope.get() resolves.
