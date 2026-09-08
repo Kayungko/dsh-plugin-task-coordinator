@@ -764,7 +764,25 @@ else delete globalThis.navigator;
     getSnapshot() { return { active: 'zh', locales: ['zh', 'en'], revision: 1 }; },
     subscribe() { return () => {}; },
   };
-  const gatedServices = { locale: gatedRuntime };
+  // Live settings services behind the gate: the tab component must render
+  // (not throw, not blank) when it sights a bound scope + remote face.
+  const gatedScopeSnap = {
+    status: 'ready',
+    value: { provider: 'prov-gated', model: 'model-gated', reasoningEffort: '' },
+    writable: true,
+    revision: 1,
+  };
+  const gatedServices = {
+    locale: gatedRuntime,
+    settingsScope: {
+      bind: () => ({
+        getSnapshot: () => gatedScopeSnap,
+        subscribe: () => () => {},
+        set: async () => {},
+      }),
+    },
+    remote: { session: { modelCatalog: async () => ({ groups: [], default: undefined }) } },
+  };
   const gatedSlotInjections = [];
   const gatedSlotService = {
     inject: (name, thunk) => gatedSlotInjections.push({ name, thunk }),
@@ -794,6 +812,16 @@ else delete globalThis.navigator;
   Object.defineProperty(globalThis, 'navigator', { value: { clipboard: { writeText: async () => {} } }, configurable: true });
   const gatedButton = gatedOccupation.component({ sessionId: 's-gated' });
   assert.equal(gatedButton.children[0], '复制会话Id', 'button renders through the gated ctx');
+  // The settings section renders with live services behind the gate (0.18.2
+  // blank-panel regression: a render/effect throw abdicates the entry and
+  // blanks the panel — the stub React runs no effects, so this asserts the
+  // render-body path with a bound scope + remote face stays crash-free).
+  Object.defineProperty(globalThis, 'document', { value: { querySelector: () => ({}) }, configurable: true });
+  const gatedTab = gatedSlotInjections[1].thunk();
+  const gatedTabTree = gatedTab.component({});
+  assert.equal(gatedTabTree.type, 'div', 'settings section renders through the gated ctx with live services');
+  if (docDesc) Object.defineProperty(globalThis, 'document', docDesc);
+  else delete globalThis.document;
   if (navDesc) Object.defineProperty(globalThis, 'navigator', navDesc);
   else delete globalThis.navigator;
 }

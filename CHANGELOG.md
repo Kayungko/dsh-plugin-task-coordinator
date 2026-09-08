@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-09-09
+
+### Fixed
+
+- **真机回归：一级「任务编排」页右侧空白（0.18.1 用户报告）**。宿主渲染器对 slot 占用者有 `SlotErrorBoundary`：组件 render/effect 抛错会被边界捕获、`console.error` 后**abdicate 该条目**（`reportEntryError {abdicate: true}`，条目从 `entriesOfSlot` 投影中除名直至注册生命周期结束）——左侧导航行仍在（导航读全量台账），右侧面板永久空白，且错误只在浏览器控制台，宿主日志无镜像。0.18.2 把组件改为**防崩溃构造**：①服务同步寻视（设置服务是设置页自身的前置依赖，不存在晚到问题；删除 0.18.1 的 setTimeout 定时重试环——客户端 bundle 不该假设定时器环境）；②每个 effect 体独立 try/catch（effect 抛错同样进边界）；③派生计算+整棵渲染树包 try/catch，**崩溃时自渲染错误文本 + 重试按钮**——面板永不空白，故障原因不再依赖控制台取证；④存储值非对象防御（`stored` 仅在 value 为真对象时采纳）；⑤手动重试按钮覆盖服务未寻视/命名空间未注册/读取失败三种降级态。
+- 静态排查已穷尽并逐一排除的候选（记录备查）：schema envelope 跨端序列化（无头实验：真实 ui-settings bundle + 本插件 schema → ready/writable/value 全通）、describe redaction（仅剥 `role('secret')` 字段）、`only` 过滤（按 options.id 匹配，契约文档确认）、remote.session 子命名空间门控（facade 无门控）、denyContext 拒绝（session 命名空间是普通方法对象非 cordis Context）、zustand subscribe 返回值（标准反注册函数，React effect 契约安全）、settings.section 注册形状（与官方契约 registerOptions 逐项吻合）。
+
+### Tests
+
+- verify-installed 门控回归块扩展：门控 Proxy 后放置**活体 settingsScope/remote 假服务**，断言设置页组件在“服务可达”状态下渲染不抛错（0.18.2 空白面板回归的正向探针）；95 单测保持全绿。
+
 ## [0.18.1] - 2026-09-09
 
 ### Fixed

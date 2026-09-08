@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.18.1)
+ * dsh-plugin-task-coordinator — client module (0.18.2)
  *
  * Two surfaces:
  *  1. `conversation.session.header.utilities` slot — the "Copy session id"
@@ -39,6 +39,16 @@
  * plain property kept only as a direct-require fallback for test hosts.
  * The bundle still injects only ["slots"], so older hosts keep the header
  * button working, and every degraded state renders a real diagnostics line.
+ *
+ * 0.18.2: the settings section is crash-proof by construction — services are
+ * sighted synchronously during render (the settings shell guarantees they
+ * exist; no timers involved), every effect body is guarded, and the whole
+ * derived+tree block sits in a try/catch that RENDERS the failure text
+ * itself. Rationale: the host's SlotErrorBoundary catches any render/effect
+ * throw, reports it only to the browser console, and ABDICATES the entry —
+ * the panel stays blank for the rest of the registration's life. Self-
+ * rendering the error keeps the page alive and makes the cause visible
+ * without console access.
  *
  * Contract notes (field-tested against DSH Desktop 2.0.5 / core 0.1.2-rc.1):
  * - The client-modules registry reads this file's path from the plugin's
@@ -117,7 +127,10 @@ window.__ModuleLoader__.load({
 				"invalid.pair": "provider 与 model 需成对设置，或两者都留空。",
 				"degraded.scope": "设置服务不可用（宿主缺少 settingsScope），本页暂不可编辑；派发仍按已存默认与宿主默认执行。",
 				"degraded.catalog": "模型目录不可用：{message}",
-				"degraded.namespace": "设置区未在宿主设置文档中注册（插件可能未随宿主装载），本页暂不可编辑。"
+				"degraded.namespace": "设置区未在宿主设置文档中注册（插件可能未随宿主装载），本页暂不可编辑。",
+				"degraded.read": "设置读取失败：{message}",
+				"degraded.render": "页面渲染异常：{message}",
+				"action.retry": "重试"
 			},
 			en: {
 				"header.action": "Copy Session ID",
@@ -144,7 +157,10 @@ window.__ModuleLoader__.load({
 				"invalid.pair": "provider and model must be set together, or both left empty.",
 				"degraded.scope": "The settings service is unavailable (no settingsScope on this host); this page is read-only for now — spawns still follow the stored default and the host default.",
 				"degraded.catalog": "The model catalog is unavailable: {message}",
-				"degraded.namespace": "The settings section is not registered in the host settings document (the plugin may not be loaded with the host); this page is read-only for now."
+				"degraded.namespace": "The settings section is not registered in the host settings document (the plugin may not be loaded with the host); this page is read-only for now.",
+				"degraded.read": "Settings read failed: {message}",
+				"degraded.render": "This page failed to render: {message}",
+				"action.retry": "Retry"
 			}
 		};
 		/** Live LocaleRuntime (register/translate/getSnapshot/subscribe) when present. */
@@ -376,58 +392,71 @@ window.__ModuleLoader__.load({
 				const fallback = translateNow(key);
 				return params ? fallback.replace(/\{(\w+)\}/g, (whole, name) => (params[name] !== undefined ? String(params[name]) : whole)) : fallback;
 			};
-			const [services, setServices] = react.useState({ scope: null, remote: null, ticks: 0 });
 			const [scopeSnap, setScopeSnap] = react.useState(null);
-			const [catalog, setCatalog] = react.useState({ status: "loading" });
+			const [catalog, setCatalog] = react.useState({ status: "idle" });
 			const [catalogNonce, setCatalogNonce] = react.useState(0);
+			const [retryNonce, setRetryNonce] = react.useState(0);
 			const [draft, setDraft] = react.useState(null);
 			const [busy, setBusy] = react.useState(false);
 			const [message, setMessage] = react.useState(null);
-			// Sight the settings scope / remote face; short retry while either
-			// is missing (they activate with the settings page, so this almost
-			// always resolves on the first pass).
+			// Synchronous, guarded service sighting (0.18.2). The settings
+			// services are prerequisites of the settings shell itself — they are
+			// present by the time this section mounts, so the 0.18.1 timer
+			// retry loop is gone (no setTimeout dependency at all; a manual
+			// retry button re-runs the sighting instead). Every service touch
+			// is guarded: an effect-body throw is caught by the slot's error
+			// boundary, which abdicates the entry and blanks the panel for the
+			// rest of the registration's life.
+			const scope = getBoundScope();
+			const remote = getRemote();
+			// Follow the scope snapshot.
 			react.useEffect(() => {
-				if (services.scope && services.remote) return undefined;
-				if (services.ticks > 40) return undefined; // ~32s cap, then degraded
-				const id = setTimeout(() => {
-					setServices((previous) => ({ scope: getBoundScope(), remote: getRemote(), ticks: previous.ticks + 1 }));
-				}, services.ticks === 0 ? 0 : 800);
-				return () => clearTimeout(id);
-			}, [services]);
-			// Follow the scope snapshot (manual subscription keeps hook order
-			// stable while the scope is still unsighted).
-			react.useEffect(() => {
-				const scope = services.scope;
 				if (!scope) return undefined;
-				setScopeSnap(scope.getSnapshot());
-				return scope.subscribe(() => setScopeSnap(scope.getSnapshot()));
-			}, [services.scope]);
-			// Load the live model catalog once the remote face is sighted (and
-			// on every explicit refresh).
+				try {
+					setScopeSnap(scope.getSnapshot());
+					return scope.subscribe(() => {
+						try { setScopeSnap(scope.getSnapshot()); } catch { /* keep the last good snapshot */ }
+					});
+				} catch (error) {
+					setScopeSnap({ status: "error", error: String((error && error.message) || error) });
+					return undefined;
+				}
+			}, [scope, retryNonce]);
+			// Load the live model catalog (and on every explicit refresh); the
+			// synchronous `.session` reach is guarded like everything else.
 			react.useEffect(() => {
-				const remote = services.remote;
 				if (!remote) return undefined;
-				if (typeof remote.session?.modelCatalog !== "function") {
+				let catalogFn = null;
+				try {
+					catalogFn = typeof remote.session?.modelCatalog === "function" ? () => remote.session.modelCatalog() : null;
+				} catch (error) {
+					setCatalog({ status: "error", error: String((error && error.message) || error) });
+					return undefined;
+				}
+				if (!catalogFn) {
 					setCatalog({ status: "error", error: "sessionController.modelCatalog is unavailable on this host" });
 					return undefined;
 				}
 				let cancelled = false;
 				setCatalog({ status: "loading" });
-				Promise.resolve().then(() => remote.session.modelCatalog())
+				Promise.resolve().then(catalogFn)
 					.then((payload) => { if (!cancelled) setCatalog({ status: "ready", ...projectCatalog(payload) }); })
 					.catch((error) => { if (!cancelled) setCatalog({ status: "error", error: String((error && error.message) || error) }); });
 				return () => { cancelled = true; };
-			}, [services.remote, catalogNonce]);
+			}, [remote, catalogNonce, retryNonce]);
 			// Sync the staged draft from the stored value until the user edits.
-			const stored = scopeSnap && scopeSnap.value !== undefined ? scopeSnap.value : undefined;
+			const stored = scopeSnap && scopeSnap.value && typeof scopeSnap.value === "object" ? scopeSnap.value : undefined;
 			react.useEffect(() => {
-				if (stored === undefined) return;
-				setDraft((previous) => (previous === null || sameRoute(previous, stored) ? {
-					provider: String(stored.provider ?? ""),
-					model: String(stored.model ?? ""),
-					reasoningEffort: String(stored.reasoningEffort ?? "")
-				} : previous));
+				if (!stored) return;
+				try {
+					setDraft((previous) => (previous === null || sameRoute(previous, stored) ? {
+						provider: String(stored.provider ?? ""),
+						model: String(stored.model ?? ""),
+						reasoningEffort: String(stored.reasoningEffort ?? "")
+					} : previous));
+				} catch { /* a malformed stored value leaves the draft untouched */ }
 			}, [stored]);
+			try {
 			const writable = scopeSnap?.writable === true;
 			const dirty = draft !== null && stored !== undefined && !sameRoute(draft, stored);
 			const pairValid = draft === null || (draft.provider.length === 0 && draft.model.length === 0)
@@ -438,7 +467,6 @@ window.__ModuleLoader__.load({
 			const modelKnown = draft === null || draft.model.length === 0 || models.some((m) => m.id === draft.model);
 			const efforts = draft ? models.find((m) => m.id === draft.model)?.efforts ?? [] : [];
 			const save = async () => {
-				const scope = services.scope;
 				if (!scope || !draft || busy) return;
 				setBusy(true);
 				setMessage(null);
@@ -492,20 +520,28 @@ window.__ModuleLoader__.load({
 				: null;
 			const effective = routeText(stored);
 			const hostDefault = catalog.status === "ready" ? routeText(catalog.default) : null;
-			// Diagnostics (0.18.1): every degraded state renders a real line —
-			// the 0.18.0 build silently greyed the selects when the runner's
-			// inject gate hid the services (see getBoundScope).
-			const scopeMissing = !services.scope && services.ticks > 40;
-			const scopeLoading = !!services.scope && (scopeSnap === null || (scopeSnap.status !== "ready" && scopeSnap.status !== "unavailable"));
+			// Diagnostics (0.18.2): every degraded state renders a real line —
+			// and the whole derived+tree block sits in a try/catch below, so a
+			// crash renders its own message instead of tripping the host's
+			// SlotErrorBoundary (which abdicates the entry and blanks the
+			// panel for the rest of the registration's life).
+			const scopeMissing = !scope;
+			const scopeError = scopeSnap?.status === "error";
+			const scopeLoading = !!scope && !scopeError && (scopeSnap === null || (scopeSnap.status !== "ready" && scopeSnap.status !== "unavailable"));
 			const nsUnavailable = scopeSnap?.status === "unavailable";
+			const retryButton = (scopeMissing || nsUnavailable || scopeError)
+				? h("button", { type: "button", className: "tcSettingsBtn tcSettingsBtnGhost", onClick: () => setRetryNonce((n) => n + 1) }, t("action.retry"))
+				: null;
 			return h("div", null,
 				h("h2", { className: "tcSettingsPageTitle" }, t("tab.title")),
 				h("h3", { className: "tcSettingsHeading" }, t("card.title")),
 				h("p", { className: "tcSettingsIntro" }, t("card.intro")),
 				h("div", { className: "tcSettingsCard" },
 					scopeMissing ? h("p", { className: "tcSettingsStatus", "data-kind": "error" }, t("degraded.scope")) : null,
+					scopeError ? h("p", { className: "tcSettingsStatus", "data-kind": "error" }, t("degraded.read", { message: scopeSnap.error })) : null,
 					nsUnavailable ? h("p", { className: "tcSettingsStatus", "data-kind": "error" }, t("degraded.namespace")) : null,
 					scopeLoading ? h("p", { className: "tcSettingsStatus" }, t("status.loading")) : null,
+					retryButton,
 					h("div", { className: "tcSettingsRow" },
 						h("label", { className: "tcSettingsLabel" }, t("field.provider")),
 						h("select", {
@@ -551,7 +587,7 @@ window.__ModuleLoader__.load({
 						h("button", {
 							type: "button",
 							className: "tcSettingsBtn tcSettingsBtnGhost",
-							disabled: services.remote === null || busy,
+							disabled: !remote || busy,
 							onClick: () => { setCatalogNonce((nonce) => nonce + 1); }
 						}, t("action.refresh"))
 					),
@@ -561,6 +597,17 @@ window.__ModuleLoader__.load({
 						+ (hostDefault ? ` · ${t("status.hostDefault")}: ${hostDefault}` : ""))
 				)
 			);
+			} catch (error) {
+				// Last-resort net (0.18.2): render the failure ourselves — the
+				// host's SlotErrorBoundary would otherwise abdicate the entry
+				// and leave a blank panel with the reason only in the console.
+				const hh = react.createElement;
+				return hh("div", null,
+					hh("h2", { className: "tcSettingsPageTitle" }, t("tab.title")),
+					hh("p", { className: "tcSettingsStatus", "data-kind": "error" }, t("degraded.render", { message: String((error && error.message) || error) })),
+					hh("button", { type: "button", className: "tcSettingsBtn tcSettingsBtnGhost", onClick: () => setRetryNonce((n) => n + 1) }, t("action.retry"))
+				);
+			}
 		}
 
 		const inject = ["slots"];
