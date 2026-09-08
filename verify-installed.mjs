@@ -41,6 +41,7 @@ const liveAgents = new Map();
 const registrations = [];
 const calls = [];
 const createRequests = [];
+const installedSections = [];
 let createCount = 0;
 // The supervisor session is a member of exactly one workspace; every spawn it
 // performs must therefore carry workspaceId (host create: workspaceId XOR cwd).
@@ -100,6 +101,11 @@ const ctx = {
   plugin(pluginModule, config) {
     this.mountedPlugins.push([pluginModule, config]);
     return () => {};
+  },
+  // cordis ctx.inject stand-in (0.18.0): the settings service composes
+  // immediately, so the plugin's section installs during apply().
+  inject(deps, callback) {
+    if (deps.includes('settings')) callback({ settings: ctx.get('settings') });
   },
   commands: {
     register(definition) {
@@ -161,6 +167,18 @@ const ctx = {
         return { id: `session-migrated-${migrateCreateRequests.length}` };
       },
       async flush() { calls.push('sessions.flush'); },
+    };
+    if (name === 'settings') return {
+      // settings-service stand-in (0.18.0): one durable section the plugin
+      // installs, with a stored user layer the spawn path must fall back to.
+      get: (ns) => (ns === 'task-coordinator'
+        ? { provider: 'prov-verify', model: 'model-ok', reasoningEffort: 'high' }
+        : undefined),
+      installSection(owner, ns, schema, entry, hooks) {
+        installedSections.push(ns);
+        hooks.setSource(() => entry);
+        hooks.onChange();
+      },
     };
     if (name === 'llm') return {
       // catalog pre-validation stand-in (0.13.0): mirror resolveCallConfig
@@ -263,7 +281,7 @@ assert.equal(registrations.length, 11, `expected 11 tools, got ${registrations.l
 assert.equal(ctx.commandRegistrations.length, 1, 'expected the /tasks command');
 assert.equal(ctx.commandRegistrations[0].name, 'tasks');
 assert.ok(ctx.provides.taskCoordinator, 'taskCoordinator service not provided');
-assert.equal(ctx.provides.taskCoordinator.version, '0.16.2');
+assert.equal(ctx.provides.taskCoordinator.version, JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version);
 // the skill mount is fire-and-forget (dynamic import); give it a macrotask
 await new Promise((resolve) => setImmediate(resolve));
 assert.equal(ctx.mountedPlugins.length, 1, 'expected the skill provider mount');
@@ -567,6 +585,19 @@ assert.match(ghostSpawn.error, /models served by provider "prov-verify": model-o
 assert.equal((await byName.task_spawn.execute({ prompt: '不应创建', provider: 'prov-verify' }, supervisorExec)).code, 'bad-request');
 console.log('model selection    : OK -> installed before kickoff | invalid route rejected up front with route hint | pair enforced');
 
+// 0.18.0 spawn-model defaults: the settings section installed during apply(),
+// and a spawn omitting provider+model falls back to the stored default route.
+assert.ok(installedSections.includes('task-coordinator'), 'expected the task-coordinator settings section to be installed');
+const defaultSpawn = await byName.task_spawn.execute({ prompt: '默认路线验证' }, supervisorExec);
+assert.equal(defaultSpawn.ok, true);
+assert.deepEqual(defaultSpawn.model, { provider: 'prov-verify', model: 'model-ok', reasoningEffort: 'high' });
+assert.equal(defaultSpawn.modelSource, 'plugin-default');
+const defaultSelect = calls.lastIndexOf('selectModel');
+const defaultCreate = calls.lastIndexOf('create');
+const defaultPrompt = calls.lastIndexOf('prompt');
+assert.ok(defaultCreate >= 0 && defaultCreate < defaultSelect && defaultSelect < defaultPrompt, 'default route installed between create and kickoff');
+console.log('spawn defaults     : OK -> settings section installed | omitted route falls back to the stored default (plugin-default)');
+
 // 0.14.0 model-route discovery: the live catalog projection supervisors
 // consult before spawning with provider+model (per-deployment, never guessed).
 const catalog = await byName.task_models.execute({}, supervisorExec);
@@ -579,8 +610,8 @@ console.log('task_models        : OK -> live catalog projection (ids + efforts +
 
 // 0.15.0 UI localization: zh/en dictionaries + preference resolution ship with
 // the installed bundle (the static import above proves i18n.mjs deployed). The
-// mock host composes no settings service, so every card/kickoff in this run
-// already proved the graceful zh default end-to-end (汇报约定 asserts above).
+// mock settings service serves no locale section, so every card/kickoff in
+// this run already proved the graceful zh default end-to-end (汇报约定 asserts above).
 assert.deepEqual([resolveUiLocale('en'), resolveUiLocale('zh'), resolveUiLocale(undefined), resolveUiLocale('fr')], ['en', 'zh', 'zh', 'zh']);
 assert.equal(uiStrings('en').confirmApproveLabel, 'Dispatch as planned (Recommended)');
 assert.match(uiStrings('en').reportBackSuffix('session-x'), /^Reporting convention: .*session session-x via task_send/);
@@ -618,6 +649,9 @@ const fakeReact = {
   // present on the real host's React 18: the component subscribes to locale
   // snapshot revisions; the stand-in just reads the current snapshot
   useSyncExternalStore: (subscribe, getSnapshot) => getSnapshot(),
+  // 0.18.0 settings tab: effects (service sighting, catalog loads) never run
+  // under the stand-in, which is exactly the degraded first-render contract
+  useEffect: () => {},
 };
 const clientExports = clientEntry.factory((spec) => {
   assert.equal(spec, 'react', 'client module may only require shared graph deps');
@@ -634,11 +668,32 @@ const slotCtx = {
   },
 };
 clientExports.apply(slotCtx);
-assert.equal(slotInjections.length, 1);
+assert.equal(slotInjections.length, 2, 'header utilities + settings plugins tab');
 assert.equal(slotInjections[0].name, 'conversation.session.header.utilities');
 const occupation = slotInjections[0].thunk();
 assert.equal(occupation.options.id, 'copy-session-id');
 assert.equal(typeof occupation.component, 'function');
+
+// 0.18.0 settings tab: the second slot occupation registers the "任务编排"
+// tab. The thunk installs styles first — stub a minimal document whose
+// querySelector always hits (style already present) so no DOM is touched.
+const docDesc = Object.getOwnPropertyDescriptor(globalThis, 'document');
+Object.defineProperty(globalThis, 'document', {
+  value: { querySelector: () => ({}) },
+  configurable: true,
+});
+assert.equal(slotInjections[1].name, 'settings.plugins.tab');
+const tabOccupation = slotInjections[1].thunk();
+if (docDesc) Object.defineProperty(globalThis, 'document', docDesc);
+else delete globalThis.document;
+assert.equal(tabOccupation.options.id, 'task-coordinator');
+assert.equal(tabOccupation.options.order, 20);
+assert.match(tabOccupation.options.label(), /任务编排/);
+assert.equal(typeof tabOccupation.component, 'function');
+// The tab renders a degraded (never-crashing) tree before any service is
+// sighted: react stand-in has no useEffect, so call the component directly.
+const tabTree = tabOccupation.component({});
+assert.equal(tabTree.type, 'div', 'settings tab renders a root div without services');
 
 const wrote = [];
 const navDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
@@ -684,7 +739,7 @@ assert.equal(lateEn.children[0], 'Copy Session ID', 'en switch resolves through 
 assert.equal(lateEn.props.title, 'Copy Session ID (s-late)', 'en title uses ASCII parentheses off snapshot.active');
 if (navDesc) Object.defineProperty(globalThis, 'navigator', navDesc);
 else delete globalThis.navigator;
-console.log('client module      : OK -> dsh.client declared, bundle loads, slot occupied, copy writes sessionId');
+console.log('client module      : OK -> dsh.client declared, bundle loads, header slot occupied (copy writes sessionId), settings tab registered');
 console.log('client i18n        : OK -> bare-key t() falls back to zh, late locale service registers on first sight, zh/en resolve live');
 
 console.log('\nALL INTEGRATION CHECKS PASSED');

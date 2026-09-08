@@ -103,14 +103,14 @@ pwsh install.ps1 -Source .
 | `task_list` | 列出协调可见的任务（含稳定 sessionId、状态、标题、todo/goal 进度；可按 `team` 过滤） |
 | `task_progress` | 深入读取单个任务：实时/冷状态、排队消息、对话尾部、todos、goal |
 | `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`；`reference` 关联先前指令），返回 `messageId` + `queueDepth` 回执 `{nextTurn, nextStep}`（投递后口径；next-turn 每轮恰消费 1 条，深度 N ≈ N 轮后才被读） |
-| `task_spawn` | 创建 + 命名 + 启动新任务（标题遵循 `MMDD｜类型｜主题`；可用 `team` 编组），返回 `correlationId`；默认附带回报约定；新任务默认挂进调用方所在工作区；显式 `cwd` 与某工作区路径精确匹配时自动升级挂载该工作区（0.12.0）；可选 `provider`+`model`（+`reasoningEffort`）指定子会话模型路线，开场前安装（0.13.0） |
+| `task_spawn` | 创建 + 命名 + 启动新任务（标题遵循 `MMDD｜类型｜主题`；可用 `team` 编组），返回 `correlationId`；默认附带回报约定；新任务默认挂进调用方所在工作区；显式 `cwd` 与某工作区路径精确匹配时自动升级挂载该工作区（0.12.0）；可选 `provider`+`model`（+`reasoningEffort`）指定子会话模型路线，开场前安装（0.13.0）；省略时回退插件默认路线（设置 → 插件 → 任务编排，0.18.0），再回退宿主默认 |
 | `task_confirm` | 把拆分/派发方案做成**交互式审批卡**弹给用户，阻塞直到回答；批准返回单次 `confirmationId` |
 | `task_confirm_select` | 把任务清单做成**多选卡**（宿主中性提问 UI，非琥珀审批卡）：用户勾选要派发哪些（部分派发），可在自定义输入行写调整意见；批准把 `confirmationId` 绑定到选中子集，`task_spawn_batch` 强制校验（夹带未勾选标题报 `confirmation-mismatch`） |
 | `task_spawn_batch` | 一次批量创建整个拆分方案（`tasks: [{title?, prompt}]` + 统一 `team`）；达到确认阈值时必须携带 `confirmationId`；单条失败不中止整批 |
 | `task_wait` | 阻塞直到目标任务空闲（或超时）；支持多目标（`sessionIds` + `mode: all/any`）；冷目标（无 live agent）立即返回空闲——冷 ≠ 无待办 |
 | `task_cancel` | 取消目标的活动轮次（保留其排队消息；被停目标需下一条消息才被唤醒——取消不自动清队列） |
 | `task_workspace` | 列出宿主工作区，把**既有**会话挂入/移出工作区（归置落入「未分组」的会话），或 `migrate` **跨工作区真迁移**（0.16.0）：克隆完整历史到以目标路径为 cwd 出生的新会话、挂载克隆、工作区级归档原会话（展示层折叠：旧会话仍可读可续，对旧 id 发消息会分叉）、返回新 id；运行中的会话拒迁（先 `task_wait`）。直连宿主 workspace 实体，不触碰会话内容 |
-| `task_models` | 列出**本部署实际接入**的模型路线——provider/model/reasoning-effort 精确 id（宿主活体目录，GUI 选择器同源）+ 应用级默认；指定子会话模型前先查这里，永远不要猜 id（0.14.0） |
+| `task_models` | 列出**本部署实际接入**的模型路线——provider/model/reasoning-effort 精确 id（宿主活体目录，GUI 选择器同源）+ 应用级默认 + 插件默认路线 `pluginDefault`（0.18.0）；指定子会话模型前先查这里，永远不要猜 id（0.14.0） |
 
 ### `/tasks` —— 不进模型的快速通道
 
@@ -118,7 +118,7 @@ pwsh install.ps1 -Source .
 
 ### 复制会话 ID —— 会话头部一键完成
 
-插件随包一个 **Web 客户端模块**（`client.js`，由 `package.json` 的 `dsh.client` 声明），占用官方 `conversation.session.header.utilities` 槽位——与自带的 `session-log-export` 同一条接缝。每个会话头部右侧会出现「复制会话Id」按钮（面性胶囊，几何参数与「Session 日志」一致：亮色黑底白字、暗色白底黑字）：一键复制当前会话的完整 `sessionId`，直接粘给总控侧的 `task_send`、`task_progress` 或 `/tasks <id>`。（侧栏会话行右键菜单为宿主硬编码，实测不可扩展，故选择有官方先例的头部槽位。）
+插件随包一个 **Web 客户端模块**（`client.js`，由 `package.json` 的 `dsh.client` 声明），占用两个官方槽位。①`conversation.session.header.utilities`——与自带的 `session-log-export` 同一条接缝：每个会话头部右侧出现「复制会话Id」按钮（面性胶囊，几何参数与「Session 日志」一致：亮色黑底白字、暗色白底黑字），一键复制当前会话的完整 `sessionId`，直接粘给总控侧的 `task_send`、`task_progress` 或 `/tasks <id>`。（侧栏会话行右键菜单为宿主硬编码，实测不可扩展，故选择有官方先例的头部槽位。）②`settings.plugins.tab`（0.18.0，dsh-community-market 同款接缝）：设置 → 插件 → 「任务编排」页签，可视化配置派发默认模型（见上一节）。
 
 ### 工作区归置与迁移（0.12.0）
 
@@ -131,6 +131,16 @@ pwsh install.ps1 -Source .
 `task_spawn` 与 `task_spawn_batch` 的每个条目接受可选 `provider` + `model`（+ `reasoningEffort`）组合。路线先经宿主 LLM 目录在创建会话**之前**预校验（无效组合 `model-unavailable` 直接拒绝，零孤儿），再于**创建之后、开场之前**通过宿主 `sessionController.selectModel` 安装——子会话第一轮就跑在指定模型上；选择以持久会话事件写入，重启存活。预校验通过但安装失败时报 `model-select-failed` 并附可追踪的孤儿 sessionId，**绝不用错误模型开场**。宿主语义如实披露：安装会话级模型会**同时更新应用级默认模型**（GUI 模型选择器「最近选择即默认」的同一行为——`selectModel` 是宿主唯一公开入口），混合模型批量中最后一个子会话的路线会成为应用默认。
 
 市场现实：**每个用户接入的 provider/model 都不一样**，所以 id 从不写死、也不该靠猜——`task_models` 把宿主**活体模型目录**（GUI 模型选择器渲染的同一数据源）投影为 `task_spawn` 可直接使用的精确 id：provider 分组、model id、逐模型的 reasoning effort、应用级默认选择；目录列举失败的 provider 单点隔离上报（`failedProviders`）。`model-unavailable` 的拒绝错误同样自带可行动提示：列出该 provider 实际提供的模型（provider 本身不认识时列出全部可路由 provider）。宿主版本没有 `modelCatalog()` 时 `task_models` 降级为 `catalog-unavailable`，错误提示仍是兜底。
+
+### 派发默认模型：设置界面可视化配置（0.18.0）
+
+省略 `provider`+`model` 的派发不再只能落到宿主默认——**设置 → 插件 → 任务编排**新页签可视化配置一条默认路线，解析链变为：**工具显式指定 > 插件默认 > 宿主默认**。
+
+- **三级下拉**（Provider → 模型 → 推理力度），候选来自宿主活体模型目录（与 GUI 模型选择器、`task_models` 同一数据源）——自建网关路线（如 mana 接入的 provider）自动出现在列表里，零额外配置；已保存但目录中下线的路线显示为「（已下线）」仍可改选。
+- **durable 存储**：值写入宿主设置服务的 `task-coordinator` 命名空间（`installSection` 契约，subagent-model-selection 同款），GUI 改动即时生效于下一次派发，无需重启。
+- **同一条校验链**：默认路线与显式指定一样过目录预校验（无效路线 `model-unavailable` 零孤儿）；成对约束在写入边界即校验（半对拒绝）。存储层意外畸形时防御性降级为「未设置」，绝不破坏派发本身。
+- **可观测**：spawn 成功载荷回显 `modelSource`（`explicit` / `plugin-default` / `host-default`）；`task_models` 结果带 `pluginDefault`，一次读取看到完整解析链。
+- **降级**：宿主无设置服务 / 无模型目录时页签显示降级文案，工具行为回退 0.17（宿主默认），不崩溃。
 
 ### 界面文案跟随宿主语言（0.15.0）
 
@@ -283,7 +293,7 @@ dsh-plugin-task-coordinator/
 ├── ops.mjs             会话操作 · DI 工厂
 ├── tools.mjs           十一个 task_* 工具注册
 ├── commands.mjs        /tasks 斜杠命令（直接执行，不进模型）
-├── client.js           Web 客户端模块：复制会话 ID 头部按钮（dsh.client）
+├── client.js           Web 客户端模块：复制会话 ID 头部按钮 + 任务编排设置页签（dsh.client）
 ├── skills.mjs          隔离技能挂载（动态 import，fire-and-forget）
 ├── skills/task-coordination/   supervisor 操作手册（随包分发）
 ├── cordis.patch.yml    隔离插件组挂载描述

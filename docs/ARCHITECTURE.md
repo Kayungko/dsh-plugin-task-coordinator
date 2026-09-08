@@ -80,8 +80,9 @@ flowchart LR
 - **`ops.mjs`**：工厂函数 `createOps(deps)`，宿主对象（sessionController / agents / createUserMessage / limiter / registry / uuid / askUser）**全部经依赖注入**，离开宿主进程可完整测试；
 - **`tools.mjs`**：连 `defineTool` 都经注入——模型面注册与宿主包解耦；
 - **`commands.mjs`**：`/tasks` 斜杠命令（0.4.0）——仿官方 `dsh-command-goal` 的 `inject=['commands']` + `ctx.commands.register` 模式；宿主无命令注册表时降级为 warning，工具面不受影响；
-- **`client.js`**：Web 客户端模块（0.8.0）——插件唯一运行在**浏览器侧**的产物。不经 cordis 入口装配，而是由宿主 `dsh-client-modules` 依 `dsh.client` 声明 + `exports["./client"]` 原样装载（`window.__ModuleLoader__` factory 格式），占 `conversation.session.header.utilities` 槽渲染「复制会话Id」按钮（面性胶囊：亮色黑底白字 / 暗色白底黑字，走 `--dsw-alias-label-primary(-foreground)` 主题 token，几何对齐「Session 日志」）；与宿主侧十一个模块完全解耦，缺槽位只影响该按钮；
-- **`index.mjs`**：唯一直接 import 宿主包（`dsh-tools` / `dsh-llm`）的装配层；`skills.mjs` 对 `dsh-skill-filesystem` 用**动态 import**；`ctx.get('userQuestions')` 在 `task_confirm` 调用时**惰性解析**（不硬注入，宿主缺该接缝时其余工具不受影响）。
+- **`client.js`**：Web 客户端模块（0.8.0）——插件唯一运行在**浏览器侧**的产物。不经 cordis 入口装配，而是由宿主 `dsh-client-modules` 依 `dsh.client` 声明 + `exports["./client"]` 原样装载（`window.__ModuleLoader__` factory 格式）。两个占用：①`conversation.session.header.utilities` 槽渲染「复制会话Id」按钮（面性胶囊：亮色黑底白字 / 暗色白底黑字，走 `--dsw-alias-label-primary(-foreground)` 主题 token，几何对齐「Session 日志」）；②`settings.plugins.tab` 槽（0.18.0，dsh-community-market 先例）渲染设置 → 插件 → 「任务编排」页签——派发默认模型的可视化编辑器（三级下拉，候选 = `remote.session.modelCatalog()` 活体目录；写入 = `settingsScope.bind({namespace})` 队列写；`settingsScope`/`remote` 沿 0.16.1 懒服务纪律防御寻视，降级不崩溃）。与宿主侧模块完全解耦，缺槽位只影响对应浏览器面；
+- **`settings.mjs`**：派发默认模型的 durable 设置区（0.18.0，纯模块零宿主依赖）——`normalizeSpawnRoute`（空对=null/修剪/半对抛错，spawn 路径与写边界共用的单一真源）、`validateSpawnModelsSection`（installSection 的 validate 钩子：写入边界拒绝畸形）、`buildSpawnModelsSchema`（schemastery 形状）。`index.mjs` 经 `ctx.inject(['settings'])` 装配（宿主侧 installSection + 每次派发活读 `settings.get(ns)`）；`ops.mjs` 的 `spawnTask` 在调用未带 provider+model 时回退该路线（解析链：显式 > 插件默认 > 宿主默认；回退路线同走预校验+selectModel 两级链；读取异常防御性降级为未设置）；
+- **`index.mjs`**：唯一直接 import 宿主包（`dsh-tools` / `dsh-llm` / `schemastery`）的装配层；`skills.mjs` 对 `dsh-skill-filesystem` 用**动态 import**；`ctx.get('userQuestions')` 在 `task_confirm` 调用时**惰性解析**（不硬注入，宿主缺该接缝时其余工具不受影响）；`ctx.inject(['settings'])` 装载设置区（0.18.0，缺服务降级）。
 
 ## 机制设计（0.4.0–0.16.0 新增）
 

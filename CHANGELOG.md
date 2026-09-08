@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-09
+
+### Added
+
+- **编排模型设置入口（GUI 可视化配置派发默认模型）**：设置 → 插件 → 「任务编排」新页签，可视化选择 `task_spawn` / `task_spawn_batch` 未显式指定 provider+model 时使用的默认模型路线。三级下拉（Provider → 模型 → 推理力度）候选来自**宿主活体模型目录**（`remote.session.modelCatalog()`，GUI 模型选择器同一数据源——自建网关如 mana 路线自动出现，无需任何额外配置）；已保存但目录下线的路线仍显示为「（已下线）」可改选（对齐原生 subagent-model-selection 卡的 stored/available 合并纪律）；状态行常显「当前默认」与「宿主默认」对照。
+- **宿主侧 durable 设置区**：新 `settings.mjs`（纯模块）+ `ctx.inject(['settings'])` → `settings.installSection('task-coordinator', schema, base, hooks)`（subagent-model-selection 同款契约）：插件提供 base 层，用户层（设置文档/GUI 写入）叠加合成，`scope.get()` 解析。缺设置服务的宿主优雅降级（工具保持 0.17 行为）。写入边界经 `validateSpawnModelsSection` 校验（半对拒绝、非字符串拒绝）；空 = 跟随宿主默认。
+- **派发解析链三级化**：显式工具参数 > 插件默认 > 宿主默认。`spawnTask` 在调用未带 provider+model 时回退到存储的默认路线（含 reasoningEffort；显式 effort 优先），回退路线走**同一两级校验链**（`llm.resolveCallConfig` 目录预校验零孤儿 → `selectModel` 安装）；批量逐项走同一条路天然覆盖。成功载荷新增 `modelSource`（`explicit` / `plugin-default` / `host-default`）如实披露路线来源。`task_models` 结果新增 `pluginDefault` 字段（未设置时省略），一次读取看到完整解析链。
+- **懒服务纪律延续**：客户端 bundle 保持只 inject `["slots"]`，`settingsScope` / `remote` 按需防御性寻视（0.16.1 locale 同款：短重试 ~32s 封顶、降级文案而非崩溃）；settings 页签照抄 dsh-community-market 第三方注册先例（`settings.plugins.tab` slot）。
+
+### Changed
+
+- peer 依赖新增 `@deepseek-ai/schemastery >=3.18.0 <4`（宿主必有：cordis 生态 Config 基石，Desktop 2.0.5 实测 3.18.2）。
+- `task_spawn` / `task_spawn_batch` 的 provider/model 参数描述与 `task_models` 描述同步三级解析链；`model-unavailable`/成对约束错误文案指向「configured default / host default」。
+- 安装脚本 `install.ps1` 文件清单收录 `settings.mjs`；`verify-installed.mjs` 版本断言改为动态对齐 `package.json`（消除每次发版的手工硬编码）。
+
+### 测试
+
+- 单元 89 → 95：`normalizeSpawnRoute` 纯规则（空对/修剪/半对抛错）、`validateSpawnModelsSection` 写边界、fallback 链（默认安装+modelSource、显式优先、未设置走宿主默认零 selectModel、**畸形存储降级不破坏 spawn**——测试还抓住了 ops 层直接调用未包 try/catch 的真缺陷并修复）、默认路线同过预校验（零孤儿）、孤独 reasoningEffort 搭乘、批量继承、`pluginDefault` 投影（缺失/抛错降级）。
+- 安装态端到端全绿：设置区安装日志 + 省略路线的 spawn 走存储默认（create→selectModel→prompt 时序保持）+ 客户端 bundle 双 slot 注册断言（页签 id/order/label、无服务时降级渲染不崩溃，document/navigator 桩）。
+
 ## [0.17.0] - 2026-09-07
 
 ### Added

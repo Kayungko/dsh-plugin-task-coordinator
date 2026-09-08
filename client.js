@@ -1,13 +1,21 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.16.1)
+ * dsh-plugin-task-coordinator — client module (0.18.0)
  *
- * Occupies the `conversation.session.header.utilities` slot with a
- * "Copy session id" action, so any session's stable id can be grabbed with
- * one click and pasted into task_send / task_progress / /tasks on the
- * supervisor side.
+ * Two surfaces:
+ *  1. `conversation.session.header.utilities` slot — the "Copy session id"
+ *     action (0.8.0), so any session's stable id can be grabbed with one
+ *     click and pasted into task_send / task_progress / /tasks.
+ *  2. `settings.plugins.tab` slot (0.18.0) — the "任务编排" settings tab:
+ *     a GUI editor for the plugin's durable spawn-model default (the
+ *     `task-coordinator` settings section installed host-side). Candidates
+ *     come from the host's live model catalog (ctx.remote.session.
+ *     modelCatalog — the same source the GUI model picker renders, so
+ *     gateway providers such as a self-hosted mana route appear
+ *     automatically); writes go through ctx.settingsScope.bind({namespace})
+ *     — the same staged-write channel the native plugin cards use.
  *
- * Localization (0.15.0): button strings follow the host's live locale
- * runtime (@deepseek-ai/dsh-client-locale — the same channel the official
+ * Localization (0.15.0): strings follow the host's live locale runtime
+ * (@deepseek-ai/dsh-client-locale — the same channel the official
  * session-log-export button uses): dictionaries are registered under our own
  * namespace, translations resolve through locale.translate with re-render on
  * every locale/dictionary change (getSnapshot/subscribe is uSES-safe), and
@@ -18,6 +26,10 @@
  * echoes bare keys for unregistered dictionaries (the "header.action" button
  * regression). A bare-key guard around props.t backs the retry up, so a
  * missing dictionary can never render a raw key again.
+ * 0.18.0: the settings tab follows the same lazy-service discipline for
+ * `settingsScope` / `remote` (defensive per-use reads, a short retry while
+ * unsighted, graceful degraded states) — the bundle still injects only
+ * ["slots"], so older hosts keep the header button working.
  *
  * Contract notes (field-tested against DSH Desktop 2.0.5 / core 0.1.2-rc.1):
  * - The client-modules registry reads this file's path from the plugin's
@@ -30,6 +42,9 @@
  * - The slot contract is declared by dsh-cordis-client-runner: occupants
  *   receive the standard session props, including `sessionId` (and `t` when
  *   the slot plumbing binds the registration's `locale` namespace).
+ * - Third-party settings tabs follow the dsh-community-market precedent:
+ *   register into `settings.plugins.tab` and render inside the Plugins
+ *   settings section's tab bar.
  */
 window.__ModuleLoader__.load({
 	id: "dsh-plugin-task-coordinator",
@@ -70,12 +85,50 @@ window.__ModuleLoader__.load({
 			zh: {
 				"header.action": "复制会话Id",
 				"header.copied": "已复制 ✓",
-				"header.failed": "复制失败"
+				"header.failed": "复制失败",
+				"tab.title": "任务编排",
+				"card.title": "派发默认模型",
+				"card.intro": "task_spawn / task_spawn_batch 未显式指定 provider+model 时使用的默认路线；此处未设置则跟随宿主默认模型。生效顺序：工具显式指定 > 此处默认 > 宿主默认。",
+				"field.provider": "Provider",
+				"field.model": "模型",
+				"field.effort": "推理力度",
+				"option.none": "未设置（跟随宿主默认）",
+				"option.effortDefault": "跟随模型默认",
+				"option.unavailable": "（已下线）",
+				"action.save": "保存",
+				"action.discard": "放弃修改",
+				"action.refresh": "刷新目录",
+				"status.saved": "已保存 ✓",
+				"status.saving": "保存中…",
+				"status.loading": "读取设置与模型目录…",
+				"status.effective": "当前默认",
+				"status.hostDefault": "宿主默认",
+				"status.notSet": "未设置",
+				"invalid.pair": "provider 与 model 需成对设置，或两者都留空。"
 			},
 			en: {
 				"header.action": "Copy Session ID",
 				"header.copied": "Copied ✓",
-				"header.failed": "Copy failed"
+				"header.failed": "Copy failed",
+				"tab.title": "Task Orchestration",
+				"card.title": "Default spawn model",
+				"card.intro": "Default route for task_spawn / task_spawn_batch calls that omit provider+model; unset falls back to the host default model. Resolution order: explicit tool args > this default > host default.",
+				"field.provider": "Provider",
+				"field.model": "Model",
+				"field.effort": "Reasoning effort",
+				"option.none": "Not set (follow the host default)",
+				"option.effortDefault": "Follow the model default",
+				"option.unavailable": " (unavailable)",
+				"action.save": "Save",
+				"action.discard": "Discard changes",
+				"action.refresh": "Refresh catalog",
+				"status.saved": "Saved ✓",
+				"status.saving": "Saving…",
+				"status.loading": "Loading settings and model catalog…",
+				"status.effective": "Current default",
+				"status.hostDefault": "Host default",
+				"status.notSet": "Not set",
+				"invalid.pair": "provider and model must be set together, or both left empty."
 			}
 		};
 		/** Live LocaleRuntime (register/translate/getSnapshot/subscribe) when present. */
@@ -209,9 +262,275 @@ window.__ModuleLoader__.load({
 			}, label);
 		}
 
-		const inject = ["slots"];
+		// --- settings tab (0.18.0) --------------------------------------------
+		/** Durable settings namespace installed host-side (settings.mjs mirror). */
+		const NS_SETTINGS = "task-coordinator";
+		const STYLE_ID_SETTINGS = "dsh-plugin-task-coordinator/settings";
+		const SETTINGS_CSS = [
+			".tcSettingsCard{display:flex;flex-direction:column;gap:12px;padding:16px;border:1px solid var(--dsw-alias-border-l2,#00000014);border-radius:12px;max-width:560px}",
+			".tcSettingsRow{display:grid;grid-template-columns:120px minmax(0,1fr);align-items:center;gap:12px}",
+			".tcSettingsLabel{font-size:13px;color:var(--dsw-alias-label-secondary,#5b616e)}",
+			".tcSettingsSelect{height:32px;padding:0 8px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,#0000001f);background:var(--dsw-alias-bg-module-platform,transparent);color:var(--dsw-alias-label-primary,#0f1115);font-size:13px;min-width:0}",
+			".tcSettingsSelect:disabled{opacity:.5}",
+			".tcSettingsActions{display:flex;gap:8px;align-items:center}",
+			".tcSettingsBtn{height:30px;padding:0 14px;border-radius:15px;border:none;cursor:pointer;font-size:13px;background:var(--dsw-alias-label-primary,#0f1115);color:var(--dsw-alias-label-primary-foreground,#fff)}",
+			".tcSettingsBtn:disabled{opacity:.45;cursor:default}",
+			".tcSettingsBtnGhost{background:transparent;color:var(--dsw-alias-label-secondary,#5b616e);border:1px solid var(--dsw-alias-border-l2,#0000001f)}",
+			".tcSettingsStatus{margin:0;font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary,#5b616e)}",
+			".tcSettingsStatus[data-kind='error']{color:var(--dsw-alias-danger,#c0392b)}",
+			".tcSettingsIntro{margin:0 0 4px;font-size:13px;line-height:21px;color:var(--dsw-alias-label-secondary,#5b616e);max-width:560px}",
+			".tcSettingsHeading{margin:0;font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary,#0f1115)}"
+		].join("\n");
+		function installSettingsStyles() {
+			if (document.querySelector(`style[data-plugin="${STYLE_ID_SETTINGS}"]`) !== null) return () => {};
+			const style = document.createElement("style");
+			style.dataset.plugin = STYLE_ID_SETTINGS;
+			style.textContent = SETTINGS_CSS;
+			document.head.append(style);
+			return () => { style.remove(); };
+		}
+		/** Cached bound scope for our settings namespace (bind once sighted). */
+		let boundScope = null;
+		const getBoundScope = () => {
+			if (boundScope) return boundScope;
+			try {
+				const svc = hostCtx && hostCtx.settingsScope;
+				if (typeof svc?.bind === "function") {
+					const scope = svc.bind({ namespace: NS_SETTINGS });
+					if (scope && typeof scope.getSnapshot === "function") boundScope = scope;
+				}
+			} catch { /* retry on the next sight */ }
+			return boundScope;
+		};
+		/** Live remote face (model catalog) — defensive per-use read. */
+		const getRemote = () => {
+			try { return hostCtx && hostCtx.remote; } catch { return undefined; }
+		};
+		/** Project the host modelCatalog() payload onto select-friendly rows. */
+		function projectCatalog(catalog) {
+			const groups = catalog && Array.isArray(catalog.groups) ? catalog.groups : [];
+			return {
+				providers: groups.map((group) => ({
+					id: String(group?.id ?? ""),
+					name: typeof group?.name === "string" && group.name.length > 0 ? group.name : undefined,
+					models: (Array.isArray(group?.models) ? group.models : []).map((model) => ({
+						id: String(model?.id ?? ""),
+						name: typeof model?.name === "string" && model.name.length > 0 ? model.name : undefined,
+						efforts: Array.isArray(model?.reasoning?.efforts)
+							? model.reasoning.efforts.map((effort) => effort?.id).filter(Boolean)
+							: [],
+						defaultEffort: typeof model?.reasoning?.defaultEffort === "string" ? model.reasoning.defaultEffort : undefined
+					})).filter((model) => model.id.length > 0)
+				})).filter((provider) => provider.id.length > 0),
+				...(catalog?.default ? { default: catalog.default } : {})
+			};
+		}
+		/** Stable route equality over the three draft fields. */
+		function sameRoute(left, right) {
+			return String(left?.provider ?? "") === String(right?.provider ?? "")
+				&& String(left?.model ?? "") === String(right?.model ?? "")
+				&& String(left?.reasoningEffort ?? "") === String(right?.reasoningEffort ?? "");
+		}
 		/**
-		 * Client fiber entry: occupy the header utilities slot.
+		 * Settings tab: GUI editor for the plugin's spawn-model default.
+		 * Follows the lazy-service discipline (see the module header): the
+		 * scope and remote faces are re-sighted until present, and every
+		 * missing piece renders a degraded line instead of crashing.
+		 */
+		function TaskCoordinatorSettingsTab(props) {
+			ensureLocale();
+			const t = (key, params) => {
+				if (typeof props.t === "function") {
+					let value;
+					try { value = props.t(key); } catch { value = undefined; }
+					if (typeof value === "string" && value.length > 0 && value !== key && value !== `${NS}.${key}`) return value;
+				}
+				const fallback = translateNow(key);
+				return params ? fallback.replace(/\{(\w+)\}/g, (whole, name) => (params[name] !== undefined ? String(params[name]) : whole)) : fallback;
+			};
+			const [services, setServices] = react.useState({ scope: null, remote: null, ticks: 0 });
+			const [scopeSnap, setScopeSnap] = react.useState(null);
+			const [catalog, setCatalog] = react.useState({ status: "loading" });
+			const [catalogNonce, setCatalogNonce] = react.useState(0);
+			const [draft, setDraft] = react.useState(null);
+			const [busy, setBusy] = react.useState(false);
+			const [message, setMessage] = react.useState(null);
+			// Sight the settings scope / remote face; short retry while either
+			// is missing (they activate with the settings page, so this almost
+			// always resolves on the first pass).
+			react.useEffect(() => {
+				if (services.scope && services.remote) return undefined;
+				if (services.ticks > 40) return undefined; // ~32s cap, then degraded
+				const id = setTimeout(() => {
+					setServices((previous) => ({ scope: getBoundScope(), remote: getRemote(), ticks: previous.ticks + 1 }));
+				}, services.ticks === 0 ? 0 : 800);
+				return () => clearTimeout(id);
+			}, [services]);
+			// Follow the scope snapshot (manual subscription keeps hook order
+			// stable while the scope is still unsighted).
+			react.useEffect(() => {
+				const scope = services.scope;
+				if (!scope) return undefined;
+				setScopeSnap(scope.getSnapshot());
+				return scope.subscribe(() => setScopeSnap(scope.getSnapshot()));
+			}, [services.scope]);
+			// Load the live model catalog once the remote face is sighted (and
+			// on every explicit refresh).
+			react.useEffect(() => {
+				const remote = services.remote;
+				if (!remote) return undefined;
+				if (typeof remote.session?.modelCatalog !== "function") {
+					setCatalog({ status: "error", error: "sessionController.modelCatalog is unavailable on this host" });
+					return undefined;
+				}
+				let cancelled = false;
+				setCatalog({ status: "loading" });
+				Promise.resolve().then(() => remote.session.modelCatalog())
+					.then((payload) => { if (!cancelled) setCatalog({ status: "ready", ...projectCatalog(payload) }); })
+					.catch((error) => { if (!cancelled) setCatalog({ status: "error", error: String((error && error.message) || error) }); });
+				return () => { cancelled = true; };
+			}, [services.remote, catalogNonce]);
+			// Sync the staged draft from the stored value until the user edits.
+			const stored = scopeSnap && scopeSnap.value !== undefined ? scopeSnap.value : undefined;
+			react.useEffect(() => {
+				if (stored === undefined) return;
+				setDraft((previous) => (previous === null || sameRoute(previous, stored) ? {
+					provider: String(stored.provider ?? ""),
+					model: String(stored.model ?? ""),
+					reasoningEffort: String(stored.reasoningEffort ?? "")
+				} : previous));
+			}, [stored]);
+			const writable = scopeSnap?.writable === true;
+			const dirty = draft !== null && stored !== undefined && !sameRoute(draft, stored);
+			const pairValid = draft === null || (draft.provider.length === 0 && draft.model.length === 0)
+				|| (draft.provider.length > 0 && draft.model.length > 0);
+			const providers = catalog.status === "ready" ? catalog.providers : [];
+			const providerKnown = draft === null || draft.provider.length === 0 || providers.some((p) => p.id === draft.provider);
+			const models = draft ? providers.find((p) => p.id === draft.provider)?.models ?? [] : [];
+			const modelKnown = draft === null || draft.model.length === 0 || models.some((m) => m.id === draft.model);
+			const efforts = draft ? models.find((m) => m.id === draft.model)?.efforts ?? [] : [];
+			const save = async () => {
+				const scope = services.scope;
+				if (!scope || !draft || busy) return;
+				setBusy(true);
+				setMessage(null);
+				try {
+					await scope.set("provider", draft.provider);
+					await scope.set("model", draft.model);
+					await scope.set("reasoningEffort", draft.reasoningEffort);
+					setMessage({ kind: "ok", text: t("status.saved") });
+				} catch (error) {
+					setMessage({ kind: "error", text: String((error && error.message) || error) });
+				} finally {
+					setBusy(false);
+				}
+			};
+			// Discard restores the draft from the STORED value directly — the
+			// stored-sync effect above does not re-fire for an unchanged
+			// reference, so a null-out would leave the selects disabled.
+			const discard = () => {
+				setMessage(null);
+				setDraft(stored === undefined ? null : {
+					provider: String(stored.provider ?? ""),
+					model: String(stored.model ?? ""),
+					reasoningEffort: String(stored.reasoningEffort ?? "")
+				});
+			};
+			const h = react.createElement;
+			const optionRow = (key, value, label, selected) => h("option", { key, value }, label);
+			const providerOptions = [
+				optionRow("none", "", t("option.none"), draft?.provider === ""),
+				...providers.map((provider) => optionRow(provider.id, provider.id, provider.name && provider.name !== provider.id ? `${provider.name} (${provider.id})` : provider.id, draft?.provider === provider.id)),
+				...(draft && draft.provider.length > 0 && !providerKnown
+					? [optionRow("stored-provider", draft.provider, `${draft.provider}${t("option.unavailable")}`, true)]
+					: [])
+			];
+			const modelOptions = [
+				optionRow("none", "", t("option.none"), draft?.model === ""),
+				...models.map((model) => optionRow(model.id, model.id, model.name && model.name !== model.id ? `${model.name} (${model.id})` : model.id, draft?.model === model.id)),
+				...(draft && draft.model.length > 0 && !modelKnown
+					? [optionRow("stored-model", draft.model, `${draft.model}${t("option.unavailable")}`, true)]
+					: [])
+			];
+			const effortOptions = [
+				optionRow("effort-default", "", t("option.effortDefault"), (draft?.reasoningEffort ?? "") === ""),
+				...efforts.map((effort) => optionRow(effort, effort, effort, draft?.reasoningEffort === effort)),
+				...(draft && draft.reasoningEffort.length > 0 && !efforts.includes(draft.reasoningEffort)
+					? [optionRow("stored-effort", draft.reasoningEffort, `${draft.reasoningEffort}${t("option.unavailable")}`, true)]
+					: [])
+			];
+			const routeText = (route) => route && (route.provider || route.model)
+				? `${route.provider || "?"} / ${route.model || "?"}${route.reasoningEffort ? ` · ${route.reasoningEffort}` : ""}`
+				: null;
+			const effective = routeText(stored);
+			const hostDefault = catalog.status === "ready" ? routeText(catalog.default) : null;
+			return h("div", null,
+				h("h3", { className: "tcSettingsHeading" }, t("card.title")),
+				h("p", { className: "tcSettingsIntro" }, t("card.intro")),
+				h("div", { className: "tcSettingsCard" },
+					!services.scope && services.ticks > 40 ? h("p", { className: "tcSettingsStatus", "data-kind": "error" }, t("degraded.scope")) : null,
+					h("div", { className: "tcSettingsRow" },
+						h("label", { className: "tcSettingsLabel" }, t("field.provider")),
+						h("select", {
+							className: "tcSettingsSelect",
+							value: draft ? draft.provider : "",
+							disabled: !draft || !writable,
+							onChange: (event) => setDraft((previous) => ({ provider: event.target.value, model: "", reasoningEffort: "" }))
+						}, providerOptions)
+					),
+					h("div", { className: "tcSettingsRow" },
+						h("label", { className: "tcSettingsLabel" }, t("field.model")),
+						h("select", {
+							className: "tcSettingsSelect",
+							value: draft ? draft.model : "",
+							disabled: !draft || !writable || (draft && draft.provider.length === 0),
+							onChange: (event) => setDraft((previous) => ({ provider: previous.provider, model: event.target.value, reasoningEffort: "" }))
+						}, modelOptions)
+					),
+					h("div", { className: "tcSettingsRow" },
+						h("label", { className: "tcSettingsLabel" }, t("field.effort")),
+						h("select", {
+							className: "tcSettingsSelect",
+							value: draft ? draft.reasoningEffort : "",
+							disabled: !draft || !writable || (draft && draft.model.length === 0) || efforts.length === 0,
+							onChange: (event) => setDraft((previous) => ({ ...previous, reasoningEffort: event.target.value }))
+						}, effortOptions)
+					),
+					!pairValid ? h("p", { className: "tcSettingsStatus", "data-kind": "error" }, t("invalid.pair")) : null,
+					catalog.status === "error" ? h("p", { className: "tcSettingsStatus", "data-kind": "error" }, t("degraded.catalog", { message: catalog.error })) : null,
+					h("div", { className: "tcSettingsActions" },
+						h("button", {
+							type: "button",
+							className: "tcSettingsBtn",
+							disabled: !dirty || busy || !pairValid || !writable,
+							onClick: () => { void save(); }
+						}, busy ? t("status.saving") : t("action.save")),
+						h("button", {
+							type: "button",
+							className: "tcSettingsBtn tcSettingsBtnGhost",
+							disabled: !dirty || busy,
+							onClick: discard
+						}, t("action.discard")),
+						h("button", {
+							type: "button",
+							className: "tcSettingsBtn tcSettingsBtnGhost",
+							disabled: services.remote === null || busy,
+							onClick: () => { setCatalogNonce((nonce) => nonce + 1); }
+						}, t("action.refresh"))
+					),
+					message ? h("p", { className: "tcSettingsStatus", "data-kind": message.kind }, message.text) : null,
+					h("p", { className: "tcSettingsStatus" },
+						`${t("status.effective")}: ${effective ?? t("status.notSet")}`
+						+ (hostDefault ? ` · ${t("status.hostDefault")}: ${hostDefault}` : ""))
+				)
+			);
+		}
+
+		const inject = ["slots"];
+
+		/**
+		 * Client fiber entry: occupy the header utilities slot and the
+		 * settings plugins tab.
 		 * @param ctx - Client cordis context (slots service; locale when the
 		 *   host provides @deepseek-ai/dsh-client-locale — accessed defensively,
 		 *   never hard-injected so older hosts keep the button in zh).
@@ -228,6 +547,20 @@ window.__ModuleLoader__.load({
 				locale: NS,
 				label: () => translateNow("header.action")
 			}, CopySessionIdHeaderAction));
+			// Settings tab (0.18.0, dsh-community-market precedent): one tab in
+			// the Plugins settings section editing the durable spawn-model
+			// default. Styles install once per document; the tab component
+			// itself degrades gracefully on hosts without settingsScope/remote.
+			ctx.slots.inject("settings.plugins.tab", () => {
+				installSettingsStyles();
+				return ctx.slots.register({
+					name: "settings.plugins.tab",
+					id: "task-coordinator",
+					order: 20,
+					locale: NS,
+					label: () => translateNow("tab.title")
+				}, TaskCoordinatorSettingsTab);
+			});
 		}
 		exports.apply = apply;
 		exports.inject = inject;

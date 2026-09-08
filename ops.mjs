@@ -197,7 +197,7 @@ export async function describeModelRoutes(provider, listProviders, listModels) {
  * @returns {TaskOps}
  */
 export function createOps(deps) {
-  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser, listWorkspaces, getWorkspace, resolveModelConfig, listModelProviders, listProviderModels, readUiLocale, readSessionSnapshot, createSeededSession, archiveSession } = deps;
+  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser, listWorkspaces, getWorkspace, resolveModelConfig, listModelProviders, listProviderModels, readUiLocale, readSpawnDefaults, readSessionSnapshot, createSeededSession, archiveSession } = deps;
 
   const fail = (code, message) => ({ ok: false, code, error: message });
   const failDeny = (denial) => fail(denial.code, denial.message);
@@ -485,10 +485,30 @@ export function createOps(deps) {
       // creates an orphan session; installed after creation via the host's
       // sessionController.selectModel (the same API the GUI model picker uses —
       // note it also updates the app-wide default model, host semantics).
+      // 0.18.0: a call that omits both falls back to the plugin's configured
+      // default route (durable "task-coordinator" settings section, GUI-editable
+      // in Settings → 插件 → 任务编排) before landing on the host default. The
+      // resolution order is: explicit tool args > plugin default > host default.
+      let modelFromDefaults = false;
+      if ((provider === undefined || provider === null || String(provider).trim().length === 0)
+        && (model === undefined || model === null || String(model).trim().length === 0)
+        && typeof readSpawnDefaults === 'function') {
+        const fallback = (() => {
+          try { return readSpawnDefaults(); } catch { return null; } // never breaks the spawn
+        })();
+        if (fallback) {
+          provider = fallback.provider;
+          model = fallback.model;
+          if (reasoningEffort === undefined || reasoningEffort === null || String(reasoningEffort).trim().length === 0) {
+            reasoningEffort = fallback.reasoningEffort;
+          }
+          modelFromDefaults = true;
+        }
+      }
       const hasProvider = provider !== undefined && provider !== null && String(provider).trim().length > 0;
       const hasModel = model !== undefined && model !== null && String(model).trim().length > 0;
       if (hasProvider !== hasModel) {
-        return fail(OP_CODES.BAD_REQUEST, 'provider and model must be supplied together (or both omitted to use the host default)');
+        return fail(OP_CODES.BAD_REQUEST, 'provider and model must be supplied together (or both omitted to use the configured default / host default model)');
       }
       const modelSpec = hasProvider
         ? {
@@ -499,6 +519,7 @@ export function createOps(deps) {
               : {}),
           }
         : undefined;
+      const modelSource = modelSpec === undefined ? 'host-default' : (modelFromDefaults ? 'plugin-default' : 'explicit');
       if (modelSpec && typeof resolveModelConfig === 'function') {
         const precheck = resolveModelConfig(modelSpec);
         if (precheck) {
@@ -656,7 +677,7 @@ export function createOps(deps) {
         title: appliedTitle,
         ...(cleanTeam !== undefined ? { team: cleanTeam } : {}),
         cwd: effectiveCwd ?? null,
-        ...(installedModel !== undefined ? { model: installedModel } : {}),
+        ...(installedModel !== undefined ? { model: installedModel, modelSource } : {}),
         started,
         correlationId,
         depth: childDepth,
@@ -1014,12 +1035,24 @@ export function createOps(deps) {
         })),
       }));
       const failures = Array.isArray(catalog?.failures) ? catalog.failures : [];
+      // 0.18.0: surface the plugin's configured spawn default (if any) beside
+      // the host default so a supervisor sees the whole resolution chain in
+      // one read: explicit tool args > pluginDefault > default.
+      let pluginDefault;
+      if (typeof readSpawnDefaults === 'function') {
+        try {
+          pluginDefault = readSpawnDefaults() ?? undefined;
+        } catch {
+          pluginDefault = undefined;
+        }
+      }
       return {
         ok: true,
         ...(catalog?.default ? { default: catalog.default } : {}),
+        ...(pluginDefault !== undefined ? { pluginDefault } : {}),
         providers,
         ...(failures.length > 0 ? { failedProviders: failures.map((entry) => ({ id: entry.id, message: entry.message })) } : {}),
-        hint: 'use these exact provider/model ids in task_spawn / task_spawn_batch; reasoningEffort must be one of the listed efforts',
+        hint: 'use these exact provider/model ids in task_spawn / task_spawn_batch; reasoningEffort must be one of the listed efforts; a spawn that omits provider+model uses the pluginDefault route (if listed), then the host default',
       };
     },
 

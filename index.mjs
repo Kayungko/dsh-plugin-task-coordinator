@@ -15,6 +15,7 @@
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import z from '@deepseek-ai/schemastery';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { resolveConfig } from './config.mjs';
@@ -25,6 +26,7 @@ import { registerCommands } from './commands.mjs';
 import { mountCoordinatorSkills } from './skills.mjs';
 import { SpawnRegistry } from './registry.mjs';
 import { resolveUiLocale, uiStrings } from './i18n.mjs';
+import { SPAWN_MODELS_NS, SPAWN_MODELS_BASE, buildSpawnModelsSchema, normalizeSpawnRoute, validateSpawnModelsSection } from './settings.mjs';
 
 export const name = 'task-coordinator';
 export const inject = ['agents', 'tools', 'sessionController', 'commands'];
@@ -39,7 +41,7 @@ export function defaultRegistryFile() {
 
 export function apply(ctx, input = {}) {
   const config = resolveConfig(input);
-  ctx.provide('taskCoordinator', { config, version: '0.16.2' });
+  ctx.provide('taskCoordinator', { config, version: '0.18.0' });
   if (!config.enabled) {
     ctx.logger?.info('task-coordinator: disabled by config; no tools registered');
     return;
@@ -150,6 +152,40 @@ export function apply(ctx, input = {}) {
       return 'zh';
     }
   };
+  // Spawn-model defaults (0.18.0): a durable settings section the GUI edits
+  // (Settings → 插件 → 任务编排) and task_spawn falls back to when a call
+  // omits provider+model. Registered through the host settings service's
+  // installSection (subagent-model-selection precedent): our entry is the
+  // composition base, the user layer composes over it, scope.get() resolves.
+  // Optional dependency — hosts without the settings service keep the tools
+  // on the pre-0.18 host-default behavior. The live read mirrors readUiLocale
+  // (read per call, never cached), so a GUI edit applies from the next spawn
+  // onward without a restart.
+  ctx.inject(['settings'], (settingsCtx) => {
+    try {
+      settingsCtx.settings.installSection(ctx, SPAWN_MODELS_NS, buildSpawnModelsSchema(z), SPAWN_MODELS_BASE, {
+        setSource: () => {},
+        validate: (value) => {
+          validateSpawnModelsSection(value);
+        },
+        onChange: () => {},
+      });
+      ctx.logger?.info?.(`task-coordinator: settings section "${SPAWN_MODELS_NS}" installed (spawn-model defaults)`);
+    } catch (error) {
+      ctx.logger?.warn?.(`task-coordinator: settings section install failed (${error?.message ?? error}); spawn-model defaults stay unset`);
+    }
+  });
+  const readSpawnDefaults = () => {
+    try {
+      const service = typeof ctx.get === 'function' ? ctx.get('settings') : undefined;
+      const stored = typeof service?.get === 'function' ? service.get(SPAWN_MODELS_NS) : undefined;
+      return normalizeSpawnRoute(stored); // throws only on a malformed half pair
+    } catch {
+      // Defensive by contract: a malformed stored layer (or a missing service)
+      // degrades to "no default route" and never breaks the spawn itself.
+      return null;
+    }
+  };
   // Cross-workspace migration (0.16.0): the host never rewrites a session's
   // stored cwd, so a true move is clone + archive — the route the host's own
   // fork() uses internally (sessions.create seeded with the full event log)
@@ -198,6 +234,7 @@ export function apply(ctx, input = {}) {
     listModelProviders,
     listProviderModels,
     readUiLocale,
+    readSpawnDefaults,
     readSessionSnapshot,
     createSeededSession,
     archiveSession,

@@ -104,14 +104,14 @@ Loose wordings ("/task plugin", "coordinate things") are recognized too — the 
 | `task_list` | List coordination-visible tasks with stable session ids, status, titles, todo/goal progress; filterable by `team` |
 | `task_progress` | Read one task in depth: live/cold state, queued messages, conversation tail, todos, goal |
 | `task_send` | Deliver a visible follow-up prompt (`mode: queue` or `steer`; `reference` links an earlier instruction); returns a `messageId` plus a `queueDepth` receipt `{nextTurn, nextStep}` (post-send; one next-turn message is consumed per round, so depth N ≈ N rounds before it is read) |
-| `task_spawn` | Create + name + kick off a brand-new task (title follows the `MMDD｜type｜topic` rule; groupable via `team`); returns a `correlationId`; appends the report-back convention by default; the child attaches to the caller's workspace, and an explicit `cwd` exactly matching a workspace path is upgraded to that workspace's attachment (0.12.0); optional `provider`+`model` (+`reasoningEffort`) select the child's LLM route, installed before the kickoff (0.13.0) |
+| `task_spawn` | Create + name + kick off a brand-new task (title follows the `MMDD｜type｜topic` rule; groupable via `team`); returns a `correlationId`; appends the report-back convention by default; the child attaches to the caller's workspace, and an explicit `cwd` exactly matching a workspace path is upgraded to that workspace's attachment (0.12.0); optional `provider`+`model` (+`reasoningEffort`) select the child's LLM route, installed before the kickoff (0.13.0); omitted, the spawn falls back to the plugin's configured default route (Settings → Plugins → Task Orchestration, 0.18.0), then the host default |
 | `task_confirm` | Present a decomposition/dispatch plan as an **interactive approval card** and block until the user answers; approval mints a single-use `confirmationId` |
 | `task_confirm_select` | Present the proposed task list as a **multi-select card** (host's neutral question UI — no amber styling): the user checks which tasks to dispatch (partial dispatch) with an optional custom-feedback row; approval binds the `confirmationId` to the selected subset and `task_spawn_batch` enforces it (`confirmation-mismatch` otherwise) |
 | `task_spawn_batch` | Spawn a whole decomposition plan in one call (`tasks: [{title?, prompt}]` + one `team`); requires the `confirmationId` once the batch reaches the confirmation threshold; one failed item does not abort the rest |
 | `task_wait` | Block until one task becomes idle (or timeout); multi-target (`sessionIds` + `mode: all/any`); cold targets (no live agent) report idle immediately — cold ≠ no pending work |
 | `task_cancel` | Cancel the target's active turn, keeping its queued messages (the stopped target needs a new message to wake — cancellation does not auto-drain the queue) |
 | `task_workspace` | List host workspaces, `attach` / `detach` an **existing** session (fix the ungrouped bucket), or `migrate` it to a **different** workspace (0.16.0): clones the full history into a new session born with the target cwd, attaches the clone, workspace-archives the original and returns the new id (workspace-level fold: the old session stays readable and resumable — messaging it would fork the work); refuses running sessions (`task_wait` first). Goes through the live workspace entity and never touches a session's conversation |
-| `task_models` | List the **exact model routes this deployment serves** — provider/model/reasoning-effort ids from the host's live catalog (the GUI picker's source) plus the app-wide default; consult before spawning with `provider`+`model`, never guess ids (0.14.0) |
+| `task_models` | List the **exact model routes this deployment serves** — provider/model/reasoning-effort ids from the host's live catalog (the GUI picker's source) plus the app-wide default and the plugin's configured `pluginDefault` (0.18.0); consult before spawning with `provider`+`model`, never guess ids (0.14.0) |
 
 ### `/tasks` — the no-model fast lane
 
@@ -119,7 +119,7 @@ Read-only lookups can bypass the model entirely: `/tasks` (all tasks), `/tasks t
 
 ### Copying session ids — one click in the session header
 
-The plugin ships a small **web client module** (`client.js`, declared via `dsh.client` in `package.json`) that occupies the official `conversation.session.header.utilities` slot — the same seam the shipped `session-log-export` package uses. Every session header gets a **Copy Session ID** button (filled pill matching the Session-log button geometry: black-on-white in light mode, white-on-black in dark mode) that copies the session's full `sessionId` to the clipboard, ready to paste into `task_send`, `task_progress` or `/tasks <id>` on the supervisor side. (The sidebar's per-session context menu is hard-coded in the host and cannot be extended — field-verified — so the header slot is the sanctioned place.)
+The plugin ships a small **web client module** (`client.js`, declared via `dsh.client` in `package.json`) that occupies two official slots. ① `conversation.session.header.utilities` — the same seam the shipped `session-log-export` package uses: every session header gets a **Copy Session ID** button (filled pill matching the Session-log button geometry: black-on-white in light mode, white-on-black in dark mode) that copies the session's full `sessionId` to the clipboard, ready to paste into `task_send`, `task_progress` or `/tasks <id>` on the supervisor side. (The sidebar's per-session context menu is hard-coded in the host and cannot be extended — field-verified — so the header slot is the sanctioned place.) ② `settings.plugins.tab` (0.18.0, the dsh-community-market seam): the Settings → Plugins → "Task Orchestration" tab that edits the default spawn model (see the section above).
 
 ### Workspace placement & migration (0.12.0)
 
@@ -132,6 +132,16 @@ True cross-workspace moves (0.16.0): `attach` can never move a session whose sto
 `task_spawn` — and every item of `task_spawn_batch` — accepts an optional `provider` + `model` pair (+ `reasoningEffort`). The route is validated against the host LLM catalog **before** the session is created (`model-unavailable` rejects an invalid pair with zero orphans), then installed through the host's `sessionController.selectModel` **between creation and kickoff**, so the child's very first turn runs on the requested model; the selection persists as a durable session event and survives restarts. Should installation fail after pre-validation, the spawn reports `model-select-failed` with the traceable orphan id and never kicks off on the wrong model. Host semantics, disclosed as-is: installing a session-local model **also updates the app-wide default model** (the GUI picker's "last selection wins" behavior — `selectModel` is the host's only public entry point), so in a mixed-model batch the last child's route becomes the app default.
 
 Marketplace reality: **every user connects different providers/models**, so ids are never hardcoded and never guessed — `task_models` projects the host's **live** model catalog (the same source the GUI model picker renders) into the exact ids `task_spawn` accepts, including per-model reasoning efforts and the app-wide default; providers whose catalog listing fails are reported in isolation (`failedProviders`). A rejected `model-unavailable` spawn carries an actionable hint too: the error lists what the requested provider actually serves (or the routable providers when the provider itself is unknown). On host builds without `modelCatalog()`, `task_models` degrades to `catalog-unavailable` and the error hints remain the fallback.
+
+### Default spawn model — a GUI settings entry (0.18.0)
+
+Spawns that omit `provider`+`model` no longer fall straight to the host default: the **Settings → Plugins → "Task Orchestration" tab** configures a default route, making the resolution chain **explicit tool args > plugin default > host default**.
+
+- **Three cascading selects** (Provider → Model → Reasoning effort) whose candidates come from the host's live model catalog (the same source the GUI picker and `task_models` render) — self-hosted gateway routes (a mana provider, for instance) appear automatically with zero extra configuration; a saved route that later disappears from the catalog still shows as "(unavailable)" and stays editable.
+- **Durable storage**: the value lives in the host settings service's `task-coordinator` namespace (the `installSection` contract, same as the native subagent-model-selection card); GUI edits apply from the very next spawn, no restart.
+- **Same validation chain**: the default route goes through the identical catalog pre-check (an invalid route is `model-unavailable` with zero orphans), and the pair rule is enforced at the write boundary (half pairs rejected). A malformed stored layer degrades defensively to "not set" and never breaks the spawn itself.
+- **Observable**: spawn results echo `modelSource` (`explicit` / `plugin-default` / `host-default`); `task_models` carries `pluginDefault` so one read shows the whole chain.
+- **Graceful degradation**: hosts without the settings service or the model catalog show a degraded line in the tab; tool behavior falls back to 0.17 semantics, never crashes.
 
 ### Localized UI strings (0.15.0)
 
@@ -284,7 +294,7 @@ dsh-plugin-task-coordinator/
 ├── ops.mjs             session operations · DI factory
 ├── tools.mjs           eleven task_* tool registrations
 ├── commands.mjs        /tasks slash command (direct execution, no model turn)
-├── client.js           web client module: copy-session-id header button (dsh.client)
+├── client.js           web client module: copy-session-id header button + Task Orchestration settings tab (dsh.client)
 ├── skills.mjs          isolated skill mount (dynamic import, fire-and-forget)
 ├── skills/task-coordination/   supervisor playbook (shipped with the bundle)
 ├── cordis.patch.yml    isolated plugin-group mount descriptor

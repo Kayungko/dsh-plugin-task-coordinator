@@ -399,6 +399,7 @@ function makeHarness(overrides = {}) {
     ...(overrides.listModelProviders ? { listModelProviders: overrides.listModelProviders } : {}),
     ...(overrides.listProviderModels ? { listProviderModels: overrides.listProviderModels } : {}),
     ...(overrides.readUiLocale ? { readUiLocale: overrides.readUiLocale } : {}),
+    ...(overrides.readSpawnDefaults ? { readSpawnDefaults: overrides.readSpawnDefaults } : {}),
     ...(overrides.readSessionSnapshot ? { readSessionSnapshot: overrides.readSessionSnapshot } : {}),
     ...(overrides.createSeededSession ? { createSeededSession: overrides.createSeededSession } : {}),
     ...(overrides.archiveSession ? { archiveSession: overrides.archiveSession } : {}),
@@ -969,6 +970,108 @@ test('describeModelRoutes: actionable hints, failure-tolerant (0.14.0)', async (
   // throwing or missing deps -> empty hint, never throws
   assert.equal(await describeModelRoutes('prov-a', () => { throw new Error('x'); }, undefined), '');
   assert.equal(await describeModelRoutes('prov-a', undefined, undefined), '');
+});
+
+/* ------------------------------------------------------------------ */
+/* spawn-model defaults (0.18.0)                                       */
+/* ------------------------------------------------------------------ */
+
+test('settings: normalizeSpawnRoute rules (0.18.0)', async () => {
+  const { normalizeSpawnRoute } = await import('../settings.mjs');
+  // absent / non-object / empty pair -> no default route
+  assert.equal(normalizeSpawnRoute(undefined), null);
+  assert.equal(normalizeSpawnRoute(null), null);
+  assert.equal(normalizeSpawnRoute('prov-a'), null);
+  assert.equal(normalizeSpawnRoute([]), null);
+  assert.equal(normalizeSpawnRoute({}), null);
+  assert.equal(normalizeSpawnRoute({ provider: '', model: '', reasoningEffort: '' }), null);
+  // valid pair, trimmed; empty effort dropped
+  assert.deepEqual(normalizeSpawnRoute({ provider: ' prov-a ', model: ' model-x ', reasoningEffort: '  ' }), { provider: 'prov-a', model: 'model-x' });
+  assert.deepEqual(normalizeSpawnRoute({ provider: 'prov-a', model: 'model-x', reasoningEffort: 'high' }), { provider: 'prov-a', model: 'model-x', reasoningEffort: 'high' });
+  // half pair -> malformed (throws)
+  assert.throws(() => normalizeSpawnRoute({ provider: 'prov-a', model: '' }), /provider and model together/);
+  assert.throws(() => normalizeSpawnRoute({ provider: '', model: 'model-x' }), /provider and model together/);
+});
+
+test('settings: validateSpawnModelsSection boundary (0.18.0)', async () => {
+  const { validateSpawnModelsSection } = await import('../settings.mjs');
+  // absent + empty + well-formed pass
+  validateSpawnModelsSection(undefined);
+  validateSpawnModelsSection(null);
+  validateSpawnModelsSection({ provider: '', model: '', reasoningEffort: '' });
+  validateSpawnModelsSection({ provider: 'prov-a', model: 'model-x' });
+  // malformed shapes rejected at the write boundary
+  assert.throws(() => validateSpawnModelsSection('prov-a'), /must be an object/);
+  assert.throws(() => validateSpawnModelsSection({ provider: 1, model: 'model-x' }), /"provider" must be a string/);
+  assert.throws(() => validateSpawnModelsSection({ provider: 'prov-a', model: '' }), /provider and model together/);
+});
+
+test('ops.spawnTask: plugin-default fallback chain (0.18.0)', async () => {
+  // omitted provider+model -> the configured default route is installed
+  const withDefault = makeHarness({ readSpawnDefaults: () => ({ provider: 'prov-a', model: 'model-x', reasoningEffort: 'high' }) });
+  const defaulted = await withDefault.ops.spawnTask({ prompt: 'follow the default' }, SUPERVISOR);
+  assert.equal(defaulted.ok, true);
+  assert.deepEqual(defaulted.model, { provider: 'prov-a', model: 'model-x', reasoningEffort: 'high' });
+  assert.equal(defaulted.modelSource, 'plugin-default');
+  assert.deepEqual(withDefault.calls.selectModel[0], { sessionId: defaulted.sessionId, provider: 'prov-a', model: 'model-x', reasoningEffort: 'high' });
+  // explicit args win over the configured default
+  const explicit = await withDefault.ops.spawnTask({ prompt: 'explicit wins', provider: 'prov-a', model: 'model-y' }, SUPERVISOR);
+  assert.equal(explicit.ok, true);
+  assert.deepEqual(explicit.model, { provider: 'prov-a', model: 'model-y' });
+  assert.equal(explicit.modelSource, 'explicit');
+  // unset default -> host default behavior (no selectModel call at all)
+  const noDefault = makeHarness({ readSpawnDefaults: () => null });
+  const plain = await noDefault.ops.spawnTask({ prompt: 'host default' }, SUPERVISOR);
+  assert.equal(plain.ok, true);
+  assert.equal(plain.model, undefined);
+  assert.equal(noDefault.calls.selectModel.length, 0);
+  // a malformed stored section degrades to unset instead of breaking spawns
+  const broken = makeHarness({ readSpawnDefaults: () => { throw new Error('malformed stored section'); } });
+  const survived = await broken.ops.spawnTask({ prompt: 'survives bad storage' }, SUPERVISOR);
+  assert.equal(survived.ok, true);
+  assert.equal(broken.calls.selectModel.length, 0);
+});
+
+test('ops.spawnTask: default route still prechecks, caller effort rides (0.18.0)', async () => {
+  // the fallback route goes through the same catalog precheck (zero orphans)
+  const rejected = makeHarness({
+    readSpawnDefaults: () => ({ provider: 'prov-a', model: 'ghost' }),
+    resolveModelConfig: () => Promise.reject(new Error('no such model "ghost"')),
+    listProviderModels: async (id) => (id === 'prov-a' ? [{ id: 'model-x' }] : []),
+    listModelProviders: () => [{ id: 'prov-a' }],
+  });
+  const result = await rejected.ops.spawnTask({ prompt: 'should not create' }, SUPERVISOR);
+  assert.equal(result.code, 'model-unavailable');
+  assert.match(result.error, /models served by provider "prov-a": model-x/);
+  // a lone reasoningEffort arg rides on top of the defaulted pair
+  const riding = makeHarness({ readSpawnDefaults: () => ({ provider: 'prov-a', model: 'model-x', reasoningEffort: 'low' }) });
+  const rode = await riding.ops.spawnTask({ prompt: 'effort override', reasoningEffort: 'max' }, SUPERVISOR);
+  assert.equal(rode.ok, true);
+  assert.deepEqual(rode.model, { provider: 'prov-a', model: 'model-x', reasoningEffort: 'max' });
+  assert.equal(rode.modelSource, 'plugin-default');
+});
+
+test('ops.spawnBatch: items inherit the plugin default (0.18.0)', async () => {
+  const harness = makeHarness({ readSpawnDefaults: () => ({ provider: 'prov-a', model: 'model-x' }) });
+  const result = await harness.ops.spawnBatch({ tasks: [{ prompt: 'batch default' }], team: 'defaults' }, SUPERVISOR);
+  assert.equal(result.ok, true);
+  assert.equal(result.results[0].ok, true);
+  assert.equal(harness.calls.selectModel.length, 1);
+  assert.deepEqual(harness.calls.selectModel[0].provider, 'prov-a');
+  assert.deepEqual(harness.calls.selectModel[0].model, 'model-x');
+});
+
+test('ops.models: pluginDefault surfaced beside the host default (0.18.0)', async () => {
+  const harness = makeHarness({ readSpawnDefaults: () => ({ provider: 'prov-a', model: 'model-x' }) });
+  const result = await harness.ops.models({}, SUPERVISOR);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.pluginDefault, { provider: 'prov-a', model: 'model-x' });
+  assert.match(result.hint, /pluginDefault/);
+  // absent reader -> no field; throwing reader -> degraded to absent
+  const bare = makeHarness();
+  assert.equal((await bare.ops.models({}, SUPERVISOR)).pluginDefault, undefined);
+  const broken = makeHarness({ readSpawnDefaults: () => { throw new Error('bad'); } });
+  assert.equal((await broken.ops.models({}, SUPERVISOR)).pluginDefault, undefined);
 });
 
 test('ops.spawnTask: model-unavailable error carries the route hint (0.14.0)', async () => {

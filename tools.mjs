@@ -118,6 +118,7 @@ export function registerTools(ctx, ops, deps, config) {
       + 'The new task appears in the session list immediately. Returns the new session id for follow-up coordination. '
       + 'With reportBack (default on) the child is told to send its result summary back and end its turn right after, so your reply auto-opens a new round on the idle child. '
       + 'Optional provider+model select the child\'s LLM route (installed before the kickoff, so its first turn uses it; '
+      + 'omit both to use the plugin\'s configured default route — Settings → 插件 → 任务编排 — and then the host default model; '
       + 'host semantics: this also updates the app-wide default model, like picking a model in the GUI). '
       + spawnTitleRule,
     parameters: {
@@ -134,7 +135,7 @@ export function registerTools(ctx, ops, deps, config) {
       reportBack: { type: 'boolean', description: 'Default true: append an instruction telling the new task to push its result summary back to your session via task_send when it finishes. Set false for fire-and-forget tasks you will only read with task_progress.' },
       sessionId: { type: 'string', description: 'Optional explicit session id; creation is idempotent for the same id and cwd.' },
       agentPreset: { type: 'string', description: 'Optional agent preset name for the new task.' },
-      provider: { type: 'string', description: 'LLM provider route for the child session. Supply together with model; omit both to inherit the host default model.' },
+      provider: { type: 'string', description: 'LLM provider route for the child session. Supply together with model; omit both to use the plugin\'s configured default route (Settings → 任务编排), then the host default model.' },
       model: { type: 'string', description: 'Model id interpreted by provider. Supply together with provider; an invalid pair is rejected up front (model-unavailable) without creating the session.' },
       reasoningEffort: { type: 'string', description: 'Optional reasoning effort for the selected route; only meaningful together with provider+model.' },
     },
@@ -313,7 +314,7 @@ export function registerTools(ctx, ops, deps, config) {
 
   disposers.push(ctx.tools.register(defineTool({
     name: 'task_models',
-    description: 'List the EXACT model routes available in THIS deployment — providers, model ids, and reasoning efforts — from the host\'s live model catalog (the same source the GUI model picker renders). '
+    description: 'List the EXACT model routes available in THIS deployment — providers, model ids, and reasoning efforts — from the host\'s live model catalog (the same source the GUI model picker renders), plus the plugin\'s configured spawn default (pluginDefault) when one is set. '
       + 'Every user connects different providers/models, so never guess ids: consult this before task_spawn / task_spawn_batch with provider+model. Read-only, needs no session.',
     parameters: {},
     output: OUTPUT,
