@@ -1,5 +1,15 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.21.1)
+ * dsh-plugin-task-coordinator — client module (0.22.0)
+ *
+ * 0.22.0: the card topology is BACK as the orchestration view's form (user
+ * verdict after living with the 0.21.x lane timeline: cards + directional
+ * SVG edges read better for supervision than abstract lanes). Kept from
+ * the lane era: the centered 1040px content column (the 0.20.0 canvas
+ * hugged the left edge), the useSession hasMore seat + "load older
+ * records" history paging (long sessions keep spawn records outside the
+ * finite transcript window), and the scanned-count empty state. The lane
+ * pure functions (layoutLanes/laneEvents/orchTimeWindow) are retired with
+ * 0.21.x; layoutTopology/orchEdgePath return.
  *
  * Two surfaces:
  *  1. `conversation.session.header.utilities` slot — the "Copy session id"
@@ -61,18 +71,13 @@
  *
  * 0.20.0: third slot — the "编排" (Orchestration) conversation view.
  * Registers `conversation.view` (id 'orchestration', order 20, after the
- * native chat/trajectory tabs) and renders the LIVE orchestration anchored
- * on the CURRENT session as the supervisor. 0.21.0 redesign (product-design
- * direction 2 · live lanes): the node/edge topology became a lane timeline —
- * the supervisor lane on top, one lane per child grouped by team, time
- * flowing left→right through a zoomable window (30m/2h/8h/all + live-follow
- * pause), status segments (running pulse / completed tint / idle hairline),
- * event dots (spawn/send/report/wait/cancel) with a ping inside RECENT_MS,
- * a centered 1040px content column (the 0.20.0 canvas hugged the left
- * edge), and live running/todos/goal states joined from useSessions
- * projections. Pure client-side READ-ONLY view — zero host changes, zero
- * writes. Design contracts are field-researched
- * (research/orchestration-view-contracts.md):
+ * native chat/trajectory tabs) and renders the LIVE topology anchored on
+ * the CURRENT session as the supervisor: a supervisor node on top, child
+ * session cards grouped into team rows below, spawn/send/report edges,
+ * live running/todos/goal states joined from useSessions projections, and
+ * a dash-flow shimmer on edges active within RECENT_MS. Pure client-side
+ * READ-ONLY view — zero host changes, zero writes. Design contracts are
+ * field-researched (research/orchestration-view-contracts.md):
  * - data comes from the standard seats only: useChat (transcript nodes),
  *   useSessions (live SessionSummary rows incl. projectionValues todos /
  *   goal), sessionId; jumps go through ctx.get('sessions')?.open(id)
@@ -86,11 +91,9 @@
  *   form='relay' + senderSessionId, task_wait/task_cancel land as notes;
  *   malformed shapes (call === null results, unfinished streaming JSON,
  *   missing fields) are SKIPPED, never thrown;
- * - layout is pure and deterministic (no physics): layoutLanes groups the
- *   children into team lanes (no-team children fall into the "未编组"
- *   group, which sorts last), laneEvents/coordinatorEvents fold the
- *   extraction into per-lane time-sorted event streams, and orchTimeWindow
- *   resolves the visible [start, end] from zoom/pause/fit-all — all depend
+ * - layout is a pure deterministic layered function (no physics): the
+ *   supervisor node centered on top, team rows below (no-team children
+ *   fall into the "未编组" row, which sorts last); coordinates depend
  *   only on the extraction output;
  * - the transcript is a finite window (the chat store's live projection):
  *   extraction re-runs per snapshot change over the loaded window only
@@ -218,21 +221,6 @@ window.__ModuleLoader__.load({
 				"orch.legend.send": "指令",
 				"orch.legend.report": "汇报",
 				"orch.legend.recent": "2 分钟内有活动",
-				"orch.zoom.30m": "30分钟",
-				"orch.zoom.2h": "2小时",
-				"orch.zoom.8h": "8小时",
-				"orch.zoom.all": "全部",
-				"orch.live.on": "跟随最新",
-				"orch.live.off": "已暂停 · 点击恢复",
-				"orch.event.spawn": "派发",
-				"orch.event.send": "指令 · {mode}",
-				"orch.event.report": "汇报",
-				"orch.event.wait": "等待",
-				"orch.event.cancel": "取消",
-				"orch.group.running": "运行 {running}/{total}",
-				"orch.legend.segRunning": "运行中泳道段",
-				"orch.legend.segDone": "已完成泳道段",
-				"orch.axis.now": "现在",
 				"orch.history.more": "载入更早记录",
 				"orch.history.loading": "正在加载更早记录…",
 				"orch.history.failed": "载入更早记录失败：{message}",
@@ -303,21 +291,6 @@ window.__ModuleLoader__.load({
 				"orch.legend.send": "message",
 				"orch.legend.report": "report",
 				"orch.legend.recent": "active within 2 min",
-				"orch.zoom.30m": "30m",
-				"orch.zoom.2h": "2h",
-				"orch.zoom.8h": "8h",
-				"orch.zoom.all": "All",
-				"orch.live.on": "Follow latest",
-				"orch.live.off": "Paused · resume",
-				"orch.event.spawn": "spawn",
-				"orch.event.send": "message · {mode}",
-				"orch.event.report": "report",
-				"orch.event.wait": "wait",
-				"orch.event.cancel": "cancel",
-				"orch.group.running": "running {running}/{total}",
-				"orch.legend.segRunning": "running segment",
-				"orch.legend.segDone": "completed segment",
-				"orch.axis.now": "now",
 				"orch.history.more": "Load older records",
 				"orch.history.loading": "Loading older records…",
 				"orch.history.failed": "Loading older records failed: {message}",
@@ -835,73 +808,53 @@ window.__ModuleLoader__.load({
 			}
 		}
 
-		// --- orchestration view (0.20.0, lanes redesign 0.21.0) ----------------
+		// --- orchestration view (0.20.0) ---------------------------------------
 		/** Style element id for the orchestration view (deduped per document). */
 		const STYLE_ID_ORCH = "dsh-plugin-task-coordinator/orchestration-view";
-		// 0.21.0 (direction 2 · live lanes): centered content column (the
-		// 0.20.0 canvas hugged the left edge — no max-width, no auto margins),
-		// supervisor lane on top, one lane per child grouped by team, time
-		// flowing left→right with status segments, event dots and a ping on
-		// RECENT_MS activity. Spacing/grouping/typography first, hairline
-		// dividers second, tinted surfaces third — per the host quality bar.
 		const ORCH_CSS = [
-			".orchViewRoot{max-width:1040px;margin:0 auto;padding:24px 24px 48px;box-sizing:border-box;display:flex;flex-direction:column;gap:14px;min-height:100%;font-family:var(--dsw-font-family,inherit)}",
-			".orchViewToolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}",
+			".orchViewRoot{max-width:1040px;margin:0 auto;padding:24px 24px 48px;box-sizing:border-box;display:flex;flex-direction:column;gap:12px;min-height:100%;font-family:var(--dsw-font-family,inherit)}",
+			".orchViewToolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}",
 			".orchViewTitle{margin:0;font-size:16px;font-weight:600;color:var(--dsw-alias-label-primary,#0f1115)}",
 			".orchViewMeta{font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary,#5b616e)}",
 			".orchViewFlash{margin:0;font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary,#5b616e)}",
 			".orchViewFlash[data-kind='error']{color:var(--dsw-alias-danger,#c0392b)}",
-			".orchViewBtn{height:28px;padding:0 12px;border-radius:14px;border:1px solid var(--dsw-alias-border-l2,#0000001f);background:transparent;color:var(--dsw-alias-label-secondary,#5b616e);cursor:pointer;font-size:12px;font-family:var(--dsw-font-family,inherit)}",
+			".orchViewBtn{height:28px;padding:0 12px;border-radius:14px;border:1px solid var(--dsw-alias-border-l2,#0000001f);background:transparent;color:var(--dsw-alias-label-secondary,#5b616e);cursor:pointer;font-size:12px;font-family:var(--dsh-font-family,inherit)}",
 			".orchViewBtn:hover{color:var(--dsw-alias-label-primary,#0f1115)}",
-			".orchViewBtn[data-active='true']{color:var(--dsw-alias-label-primary,#0f1115);border-color:var(--dsw-alias-label-secondary,#8a919e);font-weight:600}",
-			".orchViewSpacer{flex:1 1 auto}",
-			".orchViewLanes{display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-l2,#00000014);border-radius:12px;background:var(--dsw-alias-bg-module-platform,#fafbfc);padding:6px 0 10px;overflow:hidden}",
-			".orchViewAxis{display:grid;grid-template-columns:248px minmax(0,1fr);align-items:center;gap:0 12px;padding:2px 16px 4px}",
-			".orchViewAxisTicks{position:relative;height:16px}",
-			".orchViewAxisTick{position:absolute;top:0;left:0;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary,#5b616e);white-space:nowrap;transform:translateX(-50%)}",
-			".orchViewAxisTick[data-edge='first']{transform:none}",
-			".orchViewAxisTick[data-edge='last']{transform:translateX(-100%)}",
-			".orchViewGroupHead{display:flex;align-items:baseline;gap:8px;padding:10px 16px 2px;font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary,#5b616e)}",
-			".orchViewGroupCount{font-weight:400;font-size:11px}",
-			".orchViewLane{display:grid;grid-template-columns:248px minmax(0,1fr);align-items:center;gap:0 12px;min-height:52px;padding:0 16px}",
-			".orchViewLane + .orchViewLane{border-top:1px solid var(--dsw-alias-border-l2,#0000000f)}",
-			".orchViewLaneLabel{display:flex;flex-direction:column;gap:3px;padding:8px 0;cursor:pointer;background:transparent;border:none;text-align:left;font-family:inherit;min-width:0}",
-			".orchViewLaneLabel:hover .orchViewLaneTitle{color:var(--dsw-alias-accent,#2563eb)}",
-			".orchViewLane[data-role='coordinator'] .orchViewLaneLabel{cursor:default}",
-			".orchViewLaneTitle{font-size:13px;font-weight:600;line-height:18px;color:var(--dsw-alias-label-primary,#0f1115);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-			".orchViewLaneSub{display:flex;gap:6px;align-items:center;min-width:0;flex-wrap:wrap}",
+			".orchViewCanvas{position:relative;overflow:auto;border:1px solid var(--dsw-alias-border-l2,#00000014);border-radius:12px;background:var(--dsw-alias-bg-module-platform,#fafbfc)}",
+			".orchViewLayer{position:relative}",
+			".orchViewSvg{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}",
+			".orchViewRowLabel{position:absolute;font-size:12px;line-height:22px;color:var(--dsw-alias-label-secondary,#5b616e);white-space:nowrap}",
+			".orchViewNode{position:absolute;box-sizing:border-box;width:240px;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2,#0000001f);border-radius:10px;background:var(--dsw-alias-bg-module-platform,#fff);color:var(--dsw-alias-label-primary,#0f1115);cursor:pointer;text-align:left;font-family:var(--dsw-font-family,inherit)}",
+			".orchViewNode:hover{border-color:var(--dsw-alias-label-secondary,#5b616e)}",
+			".orchViewNode[data-role='coordinator']{border-width:2px;cursor:default}",
+			".orchViewNodeTitle{font-size:13px;font-weight:600;line-height:18px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}",
+			".orchViewNodeMeta{display:flex;gap:8px;align-items:baseline;margin-top:2px;min-width:0}",
 			".orchViewId{font-size:11px;color:var(--dsw-alias-label-secondary,#5b616e);font-family:ui-monospace,SFMono-Regular,Consolas,monospace}",
+			".orchViewModel{font-size:11px;color:var(--dsw-alias-label-secondary,#5b616e);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+			".orchViewChips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}",
 			".orchViewChip{font-size:11px;line-height:18px;padding:0 8px;border-radius:9px;background:var(--dsw-alias-bg-module-embed,#f0f1f3);color:var(--dsw-alias-label-secondary,#5b616e);white-space:nowrap}",
 			".orchViewChip[data-kind='team']{color:var(--dsw-alias-label-primary,#0f1115)}",
 			".orchViewChip[data-kind='status'][data-state='running']{color:var(--dsw-alias-accent,#2563eb);background:rgba(37,99,235,.12)}",
 			".orchViewChip[data-kind='status'][data-state='completed']{color:var(--dsw-alias-success,#16a34a);background:rgba(22,163,74,.12)}",
 			".orchViewChip[data-kind='status'][data-state='unknown']{opacity:.7}",
-			".orchViewTrack{position:relative;height:36px;border-radius:8px;background:var(--dsw-alias-bg-module-embed,#f0f1f3);min-width:0;overflow:hidden}",
-			".orchViewGridline{position:absolute;top:0;bottom:0;width:1px;background:var(--dsw-alias-border-l2,#00000014);pointer-events:none}",
-			".orchViewSeg{position:absolute;top:4px;bottom:4px;border-radius:6px;pointer-events:none}",
-			".orchViewSeg[data-state='running']{background:rgba(37,99,235,.14);box-shadow:inset 0 0 0 1px rgba(37,99,235,.4);animation:orchViewPulseKf 2s ease-in-out infinite}",
-			".orchViewSeg[data-state='completed']{background:rgba(22,163,74,.14)}",
-			".orchViewSeg[data-state='idle']{top:16px;bottom:16px;background:var(--dsw-alias-border-l2,#c9ced6)}",
-			".orchViewSeg[data-state='unknown']{top:16px;bottom:16px;background:var(--dsw-alias-border-l2,#0000001f)}",
-			".orchViewDot{position:absolute;top:50%;width:9px;height:9px;border-radius:50%;transform:translate(-50%,-50%)}",
-			".orchViewDot[data-kind='spawn']{background:var(--dsw-alias-label-secondary,#8a919e)}",
-			".orchViewDot[data-kind='send']{background:var(--dsw-alias-accent,#2563eb)}",
-			".orchViewDot[data-kind='report']{background:var(--dsw-alias-bg-module-platform,#fff);box-shadow:inset 0 0 0 2px var(--dsw-alias-success,#16a34a)}",
-			".orchViewDot[data-kind='wait']{background:var(--dsw-alias-border-l2,#c9ced6)}",
-			".orchViewDot[data-kind='cancel']{background:var(--dsw-alias-danger,#c0392b)}",
-			".orchViewDot[data-recent='true']{animation:orchViewPingKf 1.6s ease-in-out infinite}",
-			"@keyframes orchViewPulseKf{0%,100%{opacity:1}50%{opacity:.5}}",
-			"@keyframes orchViewPingKf{0%,100%{transform:translate(-50%,-50%) scale(1)}50%{transform:translate(-50%,-50%) scale(1.55)}}",
+			".orchViewNodeTime{margin-top:4px;font-size:11px;color:var(--dsw-alias-label-secondary,#5b616e)}",
+			".orchViewBreath{animation:orchViewBreathKf 2s ease-in-out infinite}",
+			"@keyframes orchViewBreathKf{0%,100%{box-shadow:0 0 0 0 rgba(37,99,235,.3)}50%{box-shadow:0 0 0 7px rgba(37,99,235,0)}}",
+			".orchViewEdge{fill:none;stroke-width:1.5}",
+			".orchViewEdgeSpawn{stroke:var(--dsw-alias-border-l2,#c9ced6)}",
+			".orchViewEdgeSend{stroke:var(--dsw-alias-accent,#2563eb)}",
+			".orchViewEdgeReport{stroke:var(--dsw-alias-label-secondary,#8a919e);stroke-dasharray:6 4}",
+			".orchViewFlow{stroke-dasharray:8 6;animation:orchViewFlowKf 1.1s linear infinite}",
+			"@keyframes orchViewFlowKf{to{stroke-dashoffset:-28}}",
+			".orchViewEdgeLabel{font-size:10px;fill:var(--dsw-alias-label-secondary,#5b616e)}",
 			".orchViewLegend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--dsw-alias-label-secondary,#5b616e);align-items:center}",
-			".orchViewLegendDot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:middle;background:var(--dsw-alias-label-secondary,#8a919e)}",
-			".orchViewLegendDot[data-kind='send']{background:var(--dsw-alias-accent,#2563eb)}",
-			".orchViewLegendDot[data-kind='report']{background:transparent;box-shadow:inset 0 0 0 2px var(--dsw-alias-success,#16a34a)}",
-			".orchViewLegendSeg{display:inline-block;width:18px;height:10px;border-radius:4px;margin-right:4px;vertical-align:middle;background:rgba(37,99,235,.14);box-shadow:inset 0 0 0 1px rgba(37,99,235,.4)}",
-			".orchViewLegendSeg[data-kind='done']{background:rgba(22,163,74,.14);box-shadow:none}",
+			".orchViewLegendKey{display:inline-block;width:18px;height:0;border-top:2px solid var(--dsw-alias-border-l2,#c9ced6);vertical-align:middle;margin-right:4px}",
+			".orchViewLegendKey[data-kind='send']{border-top-color:var(--dsw-alias-accent,#2563eb)}",
+			".orchViewLegendKey[data-kind='report']{border-top-style:dashed;border-top-color:var(--dsw-alias-label-secondary,#8a919e)}",
 			".orchViewEmpty{display:flex;flex-direction:column;gap:8px;padding:32px 24px;border:1px dashed var(--dsw-alias-border-l2,#0000001f);border-radius:12px;max-width:560px;margin:24px auto 0;text-align:center}",
 			".orchViewEmptyTitle{margin:0;font-size:15px;font-weight:600;color:var(--dsw-alias-label-primary,#0f1115)}",
 			".orchViewEmptyText{margin:0;font-size:13px;line-height:21px;color:var(--dsw-alias-label-secondary,#5b616e)}",
-			"@media (prefers-reduced-motion: reduce){.orchViewSeg[data-state='running']{animation:none}.orchViewDot[data-recent='true']{animation:none}}"
+			"@media (prefers-reduced-motion: reduce){.orchViewBreath{animation:none}.orchViewFlow{animation:none}}"
 		].join("\n");
 		function installOrchStyles() {
 			if (document.querySelector(`style[data-plugin="${STYLE_ID_ORCH}"]`) !== null) return () => {};
@@ -915,13 +868,8 @@ window.__ModuleLoader__.load({
 		const RECENT_MS = 120000;
 		/** Sentinel node id for the supervisor (the CURRENT session anchors the view). */
 		const ORCH_COORD = "coordinator";
-		/** Zoom windows for the lane timeline; ms 0 = fit-all (first event → now). */
-		const ORCH_ZOOMS = [
-			{ id: "30m", ms: 1800000 },
-			{ id: "2h", ms: 7200000 },
-			{ id: "8h", ms: 28800000 },
-			{ id: "all", ms: 0 }
-		];
+		/** Deterministic layered-layout metrics (px). */
+		const ORCH_LAYOUT = { nodeW: 240, nodeH: 108, gapX: 24, rowGap: 56, labelH: 22, padX: 16, padTop: 16, padBottom: 16 };
 
 		/** Best-effort JSON object parse: malformed / streaming-incomplete text → null. */
 		function orchParseJson(text) {
@@ -1089,13 +1037,15 @@ window.__ModuleLoader__.load({
 			return out;
 		}
 		/**
-		 * PURE deterministic lane grouping (0.21.0 lanes redesign): teams in
-		 * code-point order, the ungrouped team LAST; lanes inside a group by
-		 * spawn time, then session id — same input → same lanes on every call
-		 * and every machine.
-		 * @returns {{ groups: { team: string, sessionIds: string[] }[] }}
+		 * PURE deterministic layered layout (no physics, no randomness): the
+		 * supervisor node centered on top; one row per team below (teams in
+		 * code-point order, the ungrouped row LAST); children inside a row in
+		 * extraction order (spawn time, then session id). Same input → same
+		 * output on every call and every machine.
+		 * @returns {{ nodes: Record<string, {x:number,y:number}>, rows: {team:string,y:number,ids:string[]}[], size: {width:number,height:number} }}
 		 */
-		function layoutLanes(extraction) {
+		function layoutTopology(extraction) {
+			const L = ORCH_LAYOUT;
 			const children = extraction && Array.isArray(extraction.children) ? extraction.children : [];
 			const groups = new Map();
 			for (const child of children) {
@@ -1107,95 +1057,36 @@ window.__ModuleLoader__.load({
 			}
 			const grouped = [...groups.keys()].filter((team) => team !== "").sort((left, right) => (left < right ? -1 : 1));
 			const ordered = groups.has("") ? [...grouped, ""] : grouped;
-			return {
-				groups: ordered.map((team) => ({
+			const rows = ordered.map((team, index) => {
+				// In-row order is the extraction's (spawn time, then session id) —
+				// re-sorted here so the pure layout stays deterministic even when
+				// fed unsorted children directly.
+				const bucket = groups.get(team).slice()
+					.sort((left, right) => ((left.time ?? 0) - (right.time ?? 0)) || (left.sessionId < right.sessionId ? -1 : 1));
+				return {
 					team,
-					sessionIds: groups.get(team).slice()
-						.sort((left, right) => ((left.time ?? 0) - (right.time ?? 0)) || (left.sessionId < right.sessionId ? -1 : 1))
-						.map((child) => child.sessionId)
-				}))
+					y: L.padTop + L.nodeH + L.rowGap + L.labelH + index * (L.labelH + L.nodeH + L.rowGap),
+					ids: bucket.map((child) => child.sessionId),
+					width: bucket.length * L.nodeW + (bucket.length - 1) * L.gapX
+				};
+			});
+			const contentWidth = Math.max(L.nodeW, ...rows.map((row) => row.width));
+			const nodes = {};
+			nodes[ORCH_COORD] = { x: (contentWidth - L.nodeW) / 2, y: L.padTop };
+			for (const row of rows) {
+				row.ids.forEach((id, column) => {
+					nodes[id] = { x: (contentWidth - row.width) / 2 + column * (L.nodeW + L.gapX), y: row.y + L.labelH };
+				});
+			}
+			const lastRow = rows.length > 0 ? rows[rows.length - 1] : null;
+			return {
+				nodes,
+				rows,
+				size: {
+					width: contentWidth + L.padX * 2,
+					height: lastRow ? lastRow.y + L.labelH + L.nodeH + L.padBottom : L.padTop + L.nodeH + L.padBottom
+				}
 			};
-		}
-		/**
-		 * PURE per-lane event list (0.21.0): spawn/send edges targeting the
-		 * session and report edges from it, time-sorted (untimed events last,
-		 * insertion-stable). The child record's own time backs the spawn anchor
-		 * when no spawn edge survived the transcript window.
-		 * @returns {{ kind: string, time?: number, mode?: string }[]}
-		 */
-		function laneEvents(extraction, sessionId) {
-			const out = [];
-			const edges = extraction && Array.isArray(extraction.edges) ? extraction.edges : [];
-			let hasSpawn = false;
-			for (const edge of edges) {
-				if (!edge || typeof edge !== "object") continue;
-				if (edge.kind === "spawn" && edge.to === sessionId) {
-					hasSpawn = true;
-					out.push({ kind: "spawn", time: typeof edge.time === "number" ? edge.time : undefined });
-				} else if (edge.kind === "send" && edge.to === sessionId) {
-					out.push({ kind: "send", time: typeof edge.time === "number" ? edge.time : undefined, ...(typeof edge.mode === "string" && edge.mode.length > 0 ? { mode: edge.mode } : {}) });
-				} else if (edge.kind === "report" && edge.from === sessionId) {
-					out.push({ kind: "report", time: typeof edge.time === "number" ? edge.time : undefined });
-				}
-			}
-			if (!hasSpawn) {
-				const children = extraction && Array.isArray(extraction.children) ? extraction.children : [];
-				for (const child of children) {
-					if (child && child.sessionId === sessionId && typeof child.time === "number") {
-						out.push({ kind: "spawn", time: child.time });
-						break;
-					}
-				}
-			}
-			out.sort((left, right) => (left.time ?? Number.POSITIVE_INFINITY) - (right.time ?? Number.POSITIVE_INFINITY));
-			return out;
-		}
-		/**
-		 * PURE coordinator-lane events (0.21.0): every outbound spawn/send,
-		 * every inbound report, plus wait/cancel notes — the supervisor's own
-		 * activity stream on the top lane.
-		 */
-		function coordinatorEvents(extraction) {
-			const out = [];
-			const edges = extraction && Array.isArray(extraction.edges) ? extraction.edges : [];
-			const notes = extraction && Array.isArray(extraction.notes) ? extraction.notes : [];
-			for (const edge of edges) {
-				if (!edge || typeof edge !== "object") continue;
-				if (edge.kind === "spawn" && edge.from === ORCH_COORD) out.push({ kind: "spawn", time: typeof edge.time === "number" ? edge.time : undefined });
-				else if (edge.kind === "send" && edge.from === ORCH_COORD) out.push({ kind: "send", time: typeof edge.time === "number" ? edge.time : undefined, ...(typeof edge.mode === "string" && edge.mode.length > 0 ? { mode: edge.mode } : {}) });
-				else if (edge.kind === "report" && edge.to === ORCH_COORD) out.push({ kind: "report", time: typeof edge.time === "number" ? edge.time : undefined });
-			}
-			for (const note of notes) {
-				if (!note || typeof note !== "object") continue;
-				if (note.kind === "wait" || note.kind === "cancel") out.push({ kind: note.kind, time: typeof note.time === "number" ? note.time : undefined });
-			}
-			out.sort((left, right) => (left.time ?? Number.POSITIVE_INFINITY) - (right.time ?? Number.POSITIVE_INFINITY));
-			return out;
-		}
-		/**
-		 * PURE timeline window: a live window ends at `now`; a paused window
-		 * ends at the frozen stamp. The 'all' zoom fits the earliest event
-		 * (30s pad); fixed zooms span their duration; minimum span 60s so a
-		 * lane never degenerates.
-		 * @returns {{ start: number, end: number }}
-		 */
-		function orchTimeWindow(zoom, now, frozenEnd, earliestEventTime) {
-			const end = typeof frozenEnd === "number" && Number.isFinite(frozenEnd) ? frozenEnd : now;
-			let start;
-			if (!zoom || zoom.ms === 0) {
-				start = typeof earliestEventTime === "number" && Number.isFinite(earliestEventTime) && earliestEventTime < end
-					? earliestEventTime - 30000
-					: end - 1800000;
-			} else {
-				start = end - zoom.ms;
-			}
-			if (end - start < 60000) start = end - 60000;
-			return { start, end };
-		}
-		/** PURE HH:MM axis-tick label (locale-independent, 24h). */
-		function orchClockLabel(ms) {
-			const date = new Date(ms);
-			return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 		}
 		/** Live SessionSummary projection for one session id (pure; missing → null). */
 		function orchSessionInfo(byId, sessionId) {
@@ -1234,6 +1125,11 @@ window.__ModuleLoader__.load({
 			if (hours < 24) return t("orch.time.hour", { n: hours });
 			return t("orch.time.day", { n: Math.floor(hours / 24) });
 		}
+		/** SVG curve between a source node's bottom edge and a target node's top edge. */
+		function orchEdgePath(x1, y1, x2, y2) {
+			const bend = Math.max(24, Math.abs(y2 - y1) * 0.45);
+			return `M ${x1} ${y1} C ${x1} ${y1 + bend} ${x2} ${y2 - bend} ${x2} ${y2}`;
+		}
 		/** Guarded extraction wrapper: never throws, reports the failure instead. */
 		function safeExtractOrchestration(snapshot) {
 			try {
@@ -1243,8 +1139,8 @@ window.__ModuleLoader__.load({
 			}
 		}
 		/**
-		 * The "编排" conversation view: live orchestration lane timeline with
-		 * the CURRENT session as the supervisor. Pure client-side READ-ONLY view
+		 * The "编排" conversation view: live orchestration topology with the
+		 * CURRENT session as the supervisor. Pure client-side READ-ONLY view
 		 * (zero host changes, zero writes). Seats come from the standard
 		 * session-scoped set: useChat (transcript), useSessions (live rows),
 		 * sessionId; `t` arrives through the registration's locale namespace.
@@ -1269,14 +1165,9 @@ window.__ModuleLoader__.load({
 			const [refreshNonce, setRefreshNonce] = react.useState(0);
 			const [nowTick, setNowTick] = react.useState(() => Date.now());
 			const [flash, setFlash] = react.useState(null);
-			// 0.21.0 lanes: timeline zoom window + live-follow. A paused window
-			// freezes its end at the pause stamp; resuming snaps back to now.
-			const [zoomId, setZoomId] = react.useState("30m");
-			const [live, setLive] = react.useState(true);
-			const [frozenEnd, setFrozenEnd] = react.useState(null);
-			// 0.21.1: manual history paging (the better-display pattern) — the
-			// transcript is a finite window, so long supervisor sessions can hold
-			// spawn records OUTSIDE it; loadOlder() pages the store back and the
+			// 0.21.1 (kept in 0.22.0): manual history paging — the transcript is
+			// a finite window, so long supervisor sessions can hold spawn
+			// records OUTSIDE it; loadOlder() pages the store back and the
 			// snapshot change re-runs extraction automatically.
 			const [loadingOlder, setLoadingOlder] = react.useState(false);
 			const localeSnapshot = useStore ? useStore(subscribeLocale, getLocaleSnapshot) : NO_LOCALE_SNAPSHOT;
@@ -1309,7 +1200,7 @@ window.__ModuleLoader__.load({
 			const coordinatorId = typeof props.sessionId === "string" && props.sessionId.length > 0 ? props.sessionId : "";
 			const extraction = chat !== null ? safeExtractOrchestration(chat) : { ok: true, children: [], edges: [], notes: [] };
 			const children = extraction.children;
-			const lanes = layoutLanes(extraction);
+			const layout = layoutTopology(extraction);
 			const byId = sessionsList && sessionsList.byId && typeof sessionsList.byId === "object" ? sessionsList.byId : null;
 			const coordinatorLive = orchSessionInfo(byId, coordinatorId);
 			const now = nowTick;
@@ -1345,11 +1236,11 @@ window.__ModuleLoader__.load({
 				});
 			};
 			const h = react.createElement;
-			// 0.21.1 history paging: sessions face → binding(sessionId).session
-			// → loadOlder() (better-display index.tsx L33-38 does exactly this
-			// with its declared inject; we sight the same service through
-			// ctx.get() under our slots-only declaration). Every failure lands
-			// as a flash line — never a throw.
+			// 0.21.1 history paging (kept in 0.22.0): sessions face →
+			// binding(sessionId).session → loadOlder() (better-display index.tsx
+			// L33-38 does exactly this with its declared inject; we sight the
+			// same service through ctx.get() under our slots-only declaration).
+			// Every failure lands as a flash line — never a throw.
 			const loadOlderHistory = () => {
 				if (loadingOlder) return;
 				try { setLoadingOlder(true); } catch { /* noop */ }
@@ -1389,6 +1280,7 @@ window.__ModuleLoader__.load({
 					onClick: loadOlderHistory
 				}, loadingOlder ? t("orch.history.loading") : t("orch.history.more"))
 				: null;
+			const L = ORCH_LAYOUT;
 			const statusChip = (state) => h("span", { className: "orchViewChip", "data-kind": "status", "data-state": state },
 				t(state === "running" ? "orch.status.running" : state === "completed" ? "orch.status.completed" : state === "idle" ? "orch.status.idle" : "orch.status.unknown"));
 			const liveState = (live) => (live ? (live.running ? "running" : live.completed ? "completed" : "idle") : "unknown");
@@ -1397,106 +1289,94 @@ window.__ModuleLoader__.load({
 				live && live.goalPhase ? h("span", { key: "goal", className: "orchViewChip", "data-kind": "goal" }, t("orch.goal", { phase: live.goalPhase })) : null
 			];
 			// NOTE (phase B placeholder): a child that itself spawned grandchildren
-			// should render a nested-supervisor badge on its lane label (its own
-			// task_spawn records live in ITS transcript — a second-window lookup,
-			// deferred to the registry-endpoint phase).
-			// --- lane timeline (0.21.0, direction 2 · live lanes) ----------------
-			const zoom = ORCH_ZOOMS.find((entry) => entry.id === zoomId) || ORCH_ZOOMS[0];
-			const laneRows = lanes.groups.map((group) => ({
-				team: group.team,
-				rows: group.sessionIds.map((sessionId) => {
-					const child = children.find((entry) => entry && entry.sessionId === sessionId) || { sessionId };
-					return { child, events: laneEvents(extraction, sessionId), live: orchSessionInfo(byId, sessionId) };
-				})
-			}));
-			const coordEvts = coordinatorEvents(extraction);
-			// Earliest event across every lane feeds the 'all' zoom window.
-			let earliest = null;
-			for (const group of laneRows) {
-				for (const row of group.rows) {
-					for (const event of row.events) {
-						if (typeof event.time === "number" && event.time > 0 && (earliest === null || event.time < earliest)) earliest = event.time;
-					}
+			// should render a nested-supervisor badge here (its own task_spawn
+			// records live in ITS transcript — a second-window lookup, deferred).
+			const childCard = (child) => {
+				const pos = layout.nodes[child.sessionId];
+				if (!pos) return null;
+				const live = orchSessionInfo(byId, child.sessionId);
+				const state = liveState(live);
+				return h("button", {
+					type: "button",
+					key: child.sessionId,
+					className: `orchViewNode${state === "running" ? " orchViewBreath" : ""}`,
+					"data-role": "child",
+					"data-state": state,
+					style: { left: `${pos.x}px`, top: `${pos.y}px`, width: `${L.nodeW}px` },
+					onClick: () => openChild(child),
+					title: child.sessionId
+				},
+					h("div", { className: "orchViewNodeTitle" }, (live && live.title) || child.title || child.sessionId),
+					h("div", { className: "orchViewNodeMeta" },
+						h("span", { className: "orchViewId" }, child.shortId || child.sessionId.slice(-8)),
+						child.model && typeof child.model.model === "string" && child.model.model.length > 0
+							? h("span", { className: "orchViewModel" }, child.model.model) : null
+					),
+					h("div", { className: "orchViewChips" },
+						child.team ? h("span", { className: "orchViewChip", "data-kind": "team" }, child.team) : null,
+						statusChip(state),
+						...chipsFor(live)
+					),
+					h("div", { className: "orchViewNodeTime" }, orchAgoText(live && live.updatedAt ? live.updatedAt : child.time, now, t))
+				);
+			};
+			const coordPos = layout.nodes[ORCH_COORD] || { x: 0, y: L.padTop };
+			const coordinatorState = liveState(coordinatorLive);
+			const coordinatorCard = h("div", {
+				className: `orchViewNode${coordinatorState === "running" ? " orchViewBreath" : ""}`,
+				"data-role": "coordinator",
+				"data-state": coordinatorState,
+				style: { left: `${coordPos.x}px`, top: `${coordPos.y}px`, width: `${L.nodeW}px` }
+			},
+				h("div", { className: "orchViewNodeTitle" }, (coordinatorLive && coordinatorLive.title) || coordinatorId || t("orch.coordinator")),
+				h("div", { className: "orchViewChips" },
+					h("span", { className: "orchViewChip", "data-kind": "team" }, t("orch.coordinator")),
+					statusChip(coordinatorState),
+					...chipsFor(coordinatorLive)
+				),
+				h("div", { className: "orchViewNodeTime" }, orchAgoText(coordinatorLive && coordinatorLive.updatedAt, now, t))
+			);
+			// Edges: spawn (solid, downward), send (accent, downward, mode label),
+			// report (dashed, upward from the child to the supervisor). Edges with
+			// activity inside RECENT_MS get the dash-flow shimmer.
+			const edgeElements = [];
+			for (const edge of extraction.edges) {
+				if (edge.kind !== "spawn" && edge.kind !== "send" && edge.kind !== "report") continue;
+				const from = layout.nodes[edge.from];
+				const to = layout.nodes[edge.to];
+				if (!from || !to) continue; // e.g. a send aimed at a session this window never saw spawning
+				const recent = typeof edge.time === "number" && edge.time > 0 && now - edge.time < RECENT_MS;
+				const downward = edge.kind !== "report";
+				const x1 = from.x + L.nodeW / 2;
+				const y1 = downward ? from.y + L.nodeH : from.y;
+				const x2 = to.x + L.nodeW / 2;
+				const y2 = downward ? to.y : to.y + L.nodeH;
+				const className = `orchViewEdge orchViewEdge${edge.kind === "spawn" ? "Spawn" : edge.kind === "send" ? "Send" : "Report"}${recent ? " orchViewFlow" : ""}`;
+				const marker = edge.kind === "send" ? "url(#orchViewArrowSend)" : "url(#orchViewArrow)";
+				edgeElements.push(h("path", { key: `edge:${edge.kind}:${edge.to}:${edge.time ?? ""}:${edge.messageId ?? ""}:${edgeElements.length}`, d: orchEdgePath(x1, y1, x2, y2), className, markerEnd: marker }));
+				if (edge.kind === "send" && typeof edge.mode === "string") {
+					edgeElements.push(h("text", { key: `label:${edgeElements.length}`, className: "orchViewEdgeLabel", x: (x1 + x2) / 2, y: (y1 + y2) / 2 - 4, textAnchor: "middle" }, edge.mode));
 				}
 			}
-			for (const event of coordEvts) {
-				if (typeof event.time === "number" && event.time > 0 && (earliest === null || event.time < earliest)) earliest = event.time;
-			}
-			const timeWindow = orchTimeWindow(zoom, now, live ? null : frozenEnd, earliest);
-			const span = Math.max(1, timeWindow.end - timeWindow.start);
-			const pctOf = (ms) => ((ms - timeWindow.start) / span) * 100;
-			const ticks = [0, 1, 2, 3, 4].map((index) => {
-				const ms = timeWindow.start + (span * index) / 4;
-				return { ms, label: index === 4 && live ? t("orch.axis.now") : orchClockLabel(ms), edge: index === 0 ? "first" : index === 4 ? "last" : "" };
-			});
-			const gridlines = ticks.map((tick) => h("span", { key: `grid:${tick.ms}`, className: "orchViewGridline", style: { left: `${pctOf(tick.ms)}%` } }));
-			const eventDot = (event, laneKey, index) => {
-				if (typeof event.time !== "number" || event.time <= 0) return null;
-				const pct = pctOf(event.time);
-				if (pct < -2 || pct > 102) return null; // outside the visible window
-				const recent = now - event.time >= 0 && now - event.time < RECENT_MS;
-				const label = `${t(`orch.event.${event.kind}`, event.mode ? { mode: event.mode } : undefined)} · ${orchClockLabel(event.time)}`;
-				return h("span", {
-					key: `${laneKey}:dot:${index}`,
-					className: "orchViewDot",
-					"data-kind": event.kind,
-					...(recent ? { "data-recent": "true" } : {}),
-					style: { left: `${Math.min(100, Math.max(0, pct))}%` },
-					title: label
-				});
-			};
-			const track = (events, laneKey, state, anchorTime) => {
-				const segStart = typeof anchorTime === "number" && anchorTime > timeWindow.start ? Math.max(0, pctOf(anchorTime)) : 0;
-				return h("div", { key: `${laneKey}:track`, className: "orchViewTrack" },
-					...gridlines,
-					h("span", { className: "orchViewSeg", "data-state": state, style: { left: `${segStart}%`, right: 0 } }),
-					...events.map((event, index) => eventDot(event, laneKey, index))
-				);
-			};
-			const childLane = (row) => {
-				const state = liveState(row.live);
-				const child = row.child;
-				const anchor = row.events.length > 0 ? row.events[0].time : child.time;
-				return h("div", { key: `lane:${child.sessionId}`, className: "orchViewLane", "data-role": "child", "data-state": state },
-					h("button", {
-						type: "button",
-						className: "orchViewLaneLabel",
-						onClick: () => openChild(child),
-						title: child.sessionId
-					},
-						h("span", { className: "orchViewLaneTitle" }, (row.live && row.live.title) || child.title || child.sessionId),
-						h("span", { className: "orchViewLaneSub" },
-							h("span", { className: "orchViewId" }, child.shortId || String(child.sessionId).slice(-8)),
-							statusChip(state),
-							...chipsFor(row.live),
-							h("span", { className: "orchViewId" }, orchAgoText(row.live && row.live.updatedAt ? row.live.updatedAt : child.time, now, t))
-						)
-					),
-					track(row.events, child.sessionId, state, anchor)
-				);
-			};
-			const coordState = liveState(coordinatorLive);
-			const coordinatorLane = h("div", { key: "lane:coordinator", className: "orchViewLane", "data-role": "coordinator", "data-state": coordState },
-				h("div", { className: "orchViewLaneLabel" },
-					h("span", { className: "orchViewLaneTitle" }, (coordinatorLive && coordinatorLive.title) || coordinatorId || t("orch.coordinator")),
-					h("span", { className: "orchViewLaneSub" },
-						h("span", { className: "orchViewChip", "data-kind": "team" }, t("orch.coordinator")),
-						statusChip(coordState),
-						...chipsFor(coordinatorLive)
-					)
+			const svg = h("svg", {
+				className: "orchViewSvg",
+				width: layout.size.width,
+				height: layout.size.height,
+				viewBox: `0 0 ${layout.size.width} ${layout.size.height}`
+			},
+				h("defs", null,
+					h("marker", { id: "orchViewArrow", markerWidth: 7, markerHeight: 7, refX: 6, refY: 3.5, orient: "auto", markerUnits: "userSpaceOnUse" },
+						h("path", { d: "M0,0 L7,3.5 L0,7 Z", fill: "var(--dsw-alias-border-l2,#c9ced6)" })),
+					h("marker", { id: "orchViewArrowSend", markerWidth: 7, markerHeight: 7, refX: 6, refY: 3.5, orient: "auto", markerUnits: "userSpaceOnUse" },
+						h("path", { d: "M0,0 L7,3.5 L0,7 Z", fill: "var(--dsw-alias-accent,#2563eb)" }))
 				),
-				track(coordEvts, ORCH_COORD, coordState, coordEvts.length > 0 ? coordEvts[0].time : undefined)
+				...edgeElements
 			);
-			const laneGroups = laneRows.map((group) => {
-				const running = group.rows.filter((row) => liveState(row.live) === "running").length;
-				return [
-					h("div", { key: `group:${group.team}`, className: "orchViewGroupHead" },
-						h("span", null, group.team === "" ? t("orch.ungrouped") : group.team),
-						h("span", { className: "orchViewGroupCount" }, t("orch.group.running", { running, total: group.rows.length }))
-					),
-					...group.rows.map(childLane)
-				];
-			}).flat();
+			const rowLabels = layout.rows.map((row) => h("div", {
+				key: `row:${row.team}`,
+				className: "orchViewRowLabel",
+				style: { left: `${L.padX}px`, top: `${row.y}px` }
+			}, `${row.team === "" ? t("orch.ungrouped") : row.team} · ${row.ids.length}`));
 			const diagnostics = [];
 			if (chatError !== null) diagnostics.push(h("p", { key: "chat-err", className: "orchViewFlash", "data-kind": "error" }, t("orch.degraded.chat", { message: chatError })));
 			else if (chat === null) diagnostics.push(h("p", { key: "chat-missing", className: "orchViewFlash", "data-kind": "error" }, t("orch.degraded.chat", { message: "useChat seat unavailable" })));
@@ -1513,27 +1393,14 @@ window.__ModuleLoader__.load({
 					h("h2", { className: "orchViewTitle" }, t("view.tab")),
 					h("span", { className: "orchViewMeta" }, t("orch.children", { n: children.length })),
 					notesMeta.length > 0 ? h("span", { className: "orchViewMeta" }, notesMeta.join(" · ")) : null,
-					h("span", { className: "orchViewSpacer" }),
-					...ORCH_ZOOMS.map((entry) => h("button", {
-						key: `zoom:${entry.id}`,
-						type: "button",
-						className: "orchViewBtn",
-						"data-active": entry.id === zoom.id ? "true" : "false",
-						onClick: () => { try { setZoomId(entry.id); } catch { /* noop */ } }
-					}, t(`orch.zoom.${entry.id}`))),
-					h("button", {
-						type: "button",
-						className: "orchViewBtn",
-						"data-active": live ? "true" : "false",
-						onClick: () => {
-							try {
-								if (live) { setFrozenEnd(Date.now()); setLive(false); }
-								else { setFrozenEnd(null); setLive(true); setNowTick(Date.now()); }
-							} catch { /* noop */ }
-						}
-					}, t(live ? "orch.live.on" : "orch.live.off")),
 					historyButton,
-					h("button", { type: "button", className: "orchViewBtn", onClick: () => { try { setRefreshNonce((nonce) => nonce + 1); setNowTick(Date.now()); } catch { /* noop */ } } }, t("orch.refresh"))
+					h("button", { type: "button", className: "orchViewBtn", onClick: () => { try { setRefreshNonce((nonce) => nonce + 1); setNowTick(Date.now()); } catch { /* noop */ } } }, t("orch.refresh")),
+					h("span", { className: "orchViewLegend" },
+						h("span", null, h("i", { className: "orchViewLegendKey", "data-kind": "spawn" }), t("orch.legend.spawn")),
+						h("span", null, h("i", { className: "orchViewLegendKey", "data-kind": "send" }), t("orch.legend.send")),
+						h("span", null, h("i", { className: "orchViewLegendKey", "data-kind": "report" }), t("orch.legend.report")),
+						h("span", null, t("orch.legend.recent"))
+					)
 				),
 				flash ? h("p", { className: "orchViewFlash", "data-kind": flash.kind }, flash.text) : null,
 				...diagnostics,
@@ -1547,30 +1414,13 @@ window.__ModuleLoader__.load({
 							? h("p", { className: "orchViewEmptyText" }, t("orch.empty.windowHint")) : null,
 						historyButton,
 						h("p", { className: "orchViewEmptyText" }, t("orch.empty.suffix")))
-					: [
-						h("div", { key: "legend", className: "orchViewLegend" },
-							h("span", null, h("i", { className: "orchViewLegendDot", "data-kind": "spawn" }), t("orch.legend.spawn")),
-							h("span", null, h("i", { className: "orchViewLegendDot", "data-kind": "send" }), t("orch.legend.send")),
-							h("span", null, h("i", { className: "orchViewLegendDot", "data-kind": "report" }), t("orch.legend.report")),
-							h("span", null, h("i", { className: "orchViewLegendSeg", "data-kind": "running" }), t("orch.legend.segRunning")),
-							h("span", null, h("i", { className: "orchViewLegendSeg", "data-kind": "done" }), t("orch.legend.segDone")),
-							h("span", null, t("orch.legend.recent"))
-						),
-						h("div", { key: "lanes", className: "orchViewLanes" },
-							h("div", { className: "orchViewAxis" },
-								h("span", null),
-								h("div", { className: "orchViewAxisTicks" },
-									...ticks.map((tick) => h("span", {
-										key: `tick:${tick.ms}`,
-										className: "orchViewAxisTick",
-										...(tick.edge !== "" ? { "data-edge": tick.edge } : {}),
-										style: { left: `${pctOf(tick.ms)}%` }
-									}, tick.label)))
-							),
-							coordinatorLane,
-							...laneGroups
-						)
-					]
+					: h("div", { className: "orchViewCanvas" },
+						h("div", { className: "orchViewLayer", style: { width: `${layout.size.width}px`, height: `${layout.size.height}px` } },
+							svg,
+							...rowLabels,
+							coordinatorCard,
+							...children.map(childCard)
+						))
 			);
 			return tree;
 			} catch (error) {
@@ -1626,10 +1476,9 @@ window.__ModuleLoader__.load({
 					label: () => translateNow("tab.title")
 				}, TaskCoordinatorSettingsTab);
 			});
-			// Orchestration view (0.20.0, lanes 0.21.0): the third conversation
-			// tab (after the native chat=0 / trajectory=10 tabs) — a live,
-			// read-only lane timeline of everything this session supervises.
-			// Session-scoped slot: it remounts
+			// Orchestration view (0.20.0): the third conversation tab (after the
+			// native chat=0 / trajectory=10 tabs) — a live, read-only topology of
+			// everything this session supervises. Session-scoped slot: it remounts
 			// per session identity, which the empty state covers for child/plain
 			// sessions. All data comes from the standard seats (useChat /
 			// useSessions / sessionId); navigation sights the sessions service
@@ -1651,18 +1500,15 @@ window.__ModuleLoader__.load({
 		// drives synthetic fixtures through these; never used by the UI itself).
 		exports.__orchestration = {
 			extractOrchestration,
-			layoutLanes,
-			laneEvents,
-			coordinatorEvents,
-			orchTimeWindow,
-			orchClockLabel,
+			layoutTopology,
 			orchToolFacts,
 			orchParseJson,
 			orchSessionInfo,
 			orchAgoText,
+			orchEdgePath,
 			RECENT_MS,
 			ORCH_COORD,
-			ORCH_ZOOMS
+			ORCH_LAYOUT
 		};
 		return module.exports;
 	}

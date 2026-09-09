@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-09
+
+### Changed
+
+- **「编排」视图回归卡片拓扑形态（用户真机裁决）**——0.21.x 泳道时间轴试用与混合形态样张预览后，用户结论「还是卡片样式合理」：卡片+方向性箭头的信息密度与方向感优于抽象泳道。呈现层从 v0.20.0 完整恢复（总控节点卡顶部居中、子会话卡片按 team 分组行、spawn 实线下行/send 强调色下行带 mode 标签/report 虚线上行的 SVG 连线、RECENT_MS 流光、运行节点呼吸脉冲），并**前向移植泳道时代的全部改进**：
+  - 版心修复保留：内容列 max-width 1040px 水平居中 + 24px 页边距（v0.20.0 画布靠左贴边的原始缺陷不回潮）；
+  - 长会话历史分页保留（0.21.1）：`useSession` hasMore 席 + 「载入更早记录」按钮（工具栏+空态），`ctx.get("sessions").binding(id).session.loadOlder()` 分页，快照更新自动重提取；
+  - 空态扫描计数保留：「已扫描当前转录窗口 N 条节点」+ 窗口截断提示；
+  - 泳道纯函数退役（layoutLanes/laneEvents/coordinatorEvents/orchTimeWindow/orchClockLabel/ORCH_ZOOMS），layoutTopology/orchEdgePath/ORCH_LAYOUT 复位；`exports.__orchestration` 测试面随之还原。
+- 0.21.x 的调研遗产留档不丢：三份可视化调研（业界盘点/时序可行性/状态流转模式）中的「聚焦模式」（选中单会话的真时序视图）与「活动流抽屉」列为后续候选；子会话历史运行区间不可得的约束下，卡片态芯片+连线流光仍是最诚实的表达。
+
+### Tests
+
+- `verify-installed.mjs` 编排段还原为卡片断言（节点/边/流光/行标签）+ 保留 0.21.1 增量（门控 sessions fake 带 binding、hasMore 席注入、历史按钮点击经门控 face 分页、空态扫描计数探针、`.binding(coordinatorId)` 静态断言）。仿真安装态 + 真实安装位 ALL INTEGRATION CHECKS PASSED；105 单测保持全绿（宿主面零改动，纯客户端变更——硬刷新即生效）。
+
 ## [0.21.1] - 2026-09-09
 
 ### Fixed

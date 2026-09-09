@@ -920,8 +920,9 @@ const orchByText = (root, pattern) => {
     revision: 1,
   };
   // 0.20.0: the sessions service stands in behind the gate — the view's
-  // lane-label click must sight it through ctx.get() and call open(id);
-  // 0.21.1: binding(id).session.loadOlder() is the history-paging face.
+  // child-card click must sight it through ctx.get() and call open(id);
+  // 0.21.1 (kept in 0.22.0): binding(id).session.loadOlder() is the
+  // history-paging face for long-session window truncation.
   const gatedOpened = [];
   const gatedLoaded = [];
   const gatedServices = {
@@ -979,11 +980,11 @@ const orchByText = (root, pattern) => {
   const gatedTab = gatedSlotInjections[1].thunk();
   const gatedTabTree = gatedTab.component({});
   assert.equal(gatedTabTree.type, 'div', 'settings section renders through the gated ctx with live services');
-  // 0.20.0 orchestration view (0.21.0 lanes) through the gate: the third slot
-  // registers with the contract shape (id/order/label), renders the synthetic
-  // lane timeline, and the lane-label click sights the sessions service through
-  // ctx.get() — the sidebar's authoritative navigation primitive (research
-  // Q3), unreachable via a direct hostCtx.sessions read under the runner gate.
+  // 0.20.0 orchestration view through the gate: the third slot registers with
+  // the contract shape (id/order/label), renders the synthetic topology, and
+  // the child-card click sights the sessions service through ctx.get() — the
+  // sidebar's authoritative navigation primitive (research Q3), unreachable
+  // via a direct hostCtx.sessions read under the runner gate.
   assert.equal(gatedSlotInjections[2].name, 'conversation.view');
   const gatedOrchOccupation = gatedSlotInjections[2].thunk();
   assert.equal(gatedOrchOccupation.options.id, 'orchestration');
@@ -992,13 +993,11 @@ const orchByText = (root, pattern) => {
   assert.equal(typeof gatedOrchOccupation.component, 'function');
   const gatedOrchTree = gatedOrchOccupation.component({ sessionId: 'session-superview', useChat: orchChatSeat, useSessions: orchSessionsSeat, useSession: (selector) => selector({ hasMore: true }) });
   assert.equal(gatedOrchTree.type, 'div', 'orchestration view renders through the gated ctx');
-  const gatedChildLanes = orchCollect(gatedOrchTree, (el) => el.props && String(el.props.className || '').includes('orchViewLane') && el.props['data-role'] === 'child');
-  assert.equal(gatedChildLanes.length, 2, 'both synthetic children render as lanes through the gated ctx');
-  const gatedAlphaLabel = orchCollect(gatedOrchTree, (el) => el.type === 'button' && el.props && String(el.props.className || '').includes('orchViewLaneLabel') && el.props.title === 'session-alpha')[0];
-  assert.ok(gatedAlphaLabel, 'the alpha lane label button renders');
-  gatedAlphaLabel.props.onClick();
-  assert.deepEqual(gatedOpened, ['session-alpha'], 'lane-label click must navigate via ctx.get("sessions").open');
-  // 0.21.1: hasMore seat → history button → loadOlder through the gated face.
+  const gatedChildCards = orchCollect(gatedOrchTree, (el) => el.props && String(el.props.className || '').includes('orchViewNode') && el.props['data-role'] === 'child');
+  assert.equal(gatedChildCards.length, 2, 'both synthetic children render through the gated ctx');
+  gatedChildCards[0].props.onClick();
+  assert.deepEqual(gatedOpened, ['session-alpha'], 'child-card click must navigate via ctx.get("sessions").open');
+  // 0.21.1 (kept): hasMore seat → history button → loadOlder through the gated face.
   const gatedHistoryBtn = orchCollect(gatedOrchTree, (el) => el.type === 'button' && Array.isArray(el.children) && el.children.some((text) => typeof text === 'string' && /载入更早记录|Load older/.test(text)))[0];
   assert.ok(gatedHistoryBtn, 'the hasMore seat surfaces the load-older button');
   gatedHistoryBtn.props.onClick();
@@ -1037,17 +1036,11 @@ console.log('client runner gate : OK -> apply/render survive the inject gate; lo
 const orchApi = clientExports.__orchestration;
 assert.ok(orchApi && typeof orchApi === 'object', 'exports.__orchestration test surface must exist');
 assert.equal(typeof orchApi.extractOrchestration, 'function');
-assert.equal(typeof orchApi.layoutLanes, 'function');
-assert.equal(typeof orchApi.laneEvents, 'function');
-assert.equal(typeof orchApi.coordinatorEvents, 'function');
-assert.equal(typeof orchApi.orchTimeWindow, 'function');
-assert.equal(typeof orchApi.orchClockLabel, 'function');
+assert.equal(typeof orchApi.layoutTopology, 'function');
 assert.equal(typeof orchApi.orchSessionInfo, 'function');
 assert.equal(typeof orchApi.orchAgoText, 'function');
 assert.equal(orchApi.RECENT_MS, 120000);
 assert.equal(orchApi.ORCH_COORD, 'coordinator');
-assert.deepEqual(orchApi.ORCH_ZOOMS.map((entry) => entry.id), ['30m', '2h', '8h', 'all']);
-assert.equal(orchApi.ORCH_ZOOMS[3].ms, 0, "the 'all' zoom fits the earliest event instead of a fixed span");
 
 // 8b. extraction over the synthetic snapshot: two children (spawn + batch
 // success), five edges (2 spawn, 1 steer send, 2 relay reports), one wait
@@ -1087,50 +1080,25 @@ assert.deepEqual(orchApi.extractOrchestration(null), { children: [], edges: [], 
 assert.deepEqual(orchApi.extractOrchestration({}).children, []);
 assert.deepEqual(orchApi.extractOrchestration({ order: 'not-an-array', nodes: null }).children, []);
 
-// 8c. lane layout determinism (0.21.0): same extraction → identical lane
-// grouping; teams in code-point order with the ungrouped group LAST; per-lane
-// events time-sorted; the coordinator stream folds outbound spawns/sends,
-// inbound reports and wait/cancel notes; the time window honors zoom, pause
-// and the fit-all mode.
-const orchLanesA = orchApi.layoutLanes(orchExtraction);
-const orchLanesB = orchApi.layoutLanes(orchExtraction);
-assert.equal(JSON.stringify(orchLanesA), JSON.stringify(orchLanesB), 'layoutLanes must be deterministic');
+// 8c. layout determinism: same extraction → identical layout; teams in
+// code-point order with the ungrouped row LAST; the supervisor sits on top.
+const orchLayoutA = orchApi.layoutTopology(orchExtraction);
+const orchLayoutB = orchApi.layoutTopology(orchExtraction);
+assert.equal(JSON.stringify(orchLayoutA), JSON.stringify(orchLayoutB), 'layoutTopology must be deterministic');
 // UTF-16 code-unit order: '乙' (U+4E59) sorts BEFORE '甲' (U+7532).
-assert.deepEqual(orchLanesA.groups.map((group) => group.team), ['编组乙', '编组甲']);
-assert.deepEqual(orchLanesA.groups[0].sessionIds, ['session-beta']);
-assert.deepEqual(orchLanesA.groups[1].sessionIds, ['session-alpha']);
-const orchLooseLanes = orchApi.layoutLanes({ children: [
+assert.deepEqual(orchLayoutA.rows.map((row) => row.team), ['编组乙', '编组甲']);
+assert.ok(orchLayoutA.nodes.coordinator, 'the supervisor node always exists');
+assert.equal(orchLayoutA.nodes.coordinator.y, orchApi.ORCH_LAYOUT.padTop, 'supervisor on the top row');
+assert.ok(orchLayoutA.rows.every((row) => row.y > orchLayoutA.nodes.coordinator.y), 'team rows sit below the supervisor');
+assert.ok(orchLayoutA.nodes['session-alpha'] && orchLayoutA.nodes['session-beta']);
+assert.ok(orchLayoutA.size.width > 0 && orchLayoutA.size.height > 0);
+const orchLooseLayout = orchApi.layoutTopology({ children: [
   { sessionId: 'session-loose-b', time: 2000 },
   { sessionId: 'session-loose-a', time: 1000 },
   { sessionId: 'session-teamed', team: 'Z 组', time: 1500 },
 ], edges: [], notes: [] });
-assert.deepEqual(orchLooseLanes.groups.map((group) => group.team), ['Z 组', ''], 'ungrouped children form the LAST group');
-assert.deepEqual(orchLooseLanes.groups[1].sessionIds, ['session-loose-a', 'session-loose-b'], 'in-group order follows spawn time');
-// laneEvents: alpha = spawn + steer send + stale report, time-sorted; beta =
-// spawn + the RECENT report; a child whose spawn edge fell out of the
-// transcript window anchors on its own record time.
-const orchAlphaEvents = orchApi.laneEvents(orchExtraction, 'session-alpha');
-assert.deepEqual(orchAlphaEvents.map((event) => event.kind), ['spawn', 'send', 'report']);
-assert.deepEqual(orchAlphaEvents.map((event) => event.time), [1000000, 1200000, 1300000]);
-assert.equal(orchAlphaEvents[1].mode, 'steer', 'the send event carries its delivery mode');
-const orchBetaEvents = orchApi.laneEvents(orchExtraction, 'session-beta');
-assert.deepEqual(orchBetaEvents.map((event) => event.kind), ['spawn', 'report']);
-assert.equal(orchBetaEvents[1].time, orchExtraction.edges.find((edge) => edge.kind === 'report' && edge.from === 'session-beta').time);
-const orchFallbackEvents = orchApi.laneEvents({ children: [{ sessionId: 'session-windowed', time: 424242 }], edges: [], notes: [] }, 'session-windowed');
-assert.deepEqual(orchFallbackEvents, [{ kind: 'spawn', time: 424242 }], 'a missing spawn edge falls back to the child record time');
-// coordinatorEvents: 2 spawns + 1 send + 2 reports + 1 wait note = 6, sorted.
-const orchCoordEvents = orchApi.coordinatorEvents(orchExtraction);
-assert.equal(orchCoordEvents.length, 6);
-assert.deepEqual(orchCoordEvents.map((event) => event.kind), ['spawn', 'spawn', 'send', 'report', 'wait', 'report']);
-assert.deepEqual(orchCoordEvents.map((event) => event.time), [1000000, 1100000, 1200000, 1300000, 1400000, orchBetaEvents[1].time]);
-// orchTimeWindow: fixed zoom, paused freeze, fit-all, minimum span.
-assert.deepEqual(orchApi.orchTimeWindow({ id: '30m', ms: 1800000 }, orchNow, null, 1000000), { start: orchNow - 1800000, end: orchNow });
-assert.deepEqual(orchApi.orchTimeWindow({ id: '30m', ms: 1800000 }, orchNow, 5000000, 1000000), { start: 5000000 - 1800000, end: 5000000 }, 'a paused window freezes its end');
-assert.deepEqual(orchApi.orchTimeWindow({ id: 'all', ms: 0 }, orchNow, null, 1000000), { start: 970000, end: orchNow }, "fit-all pads the earliest event by 30s");
-assert.deepEqual(orchApi.orchTimeWindow({ id: 'all', ms: 0 }, orchNow, null, null), { start: orchNow - 1800000, end: orchNow }, 'fit-all without events defaults to 30m');
-const orchMinSpan = orchApi.orchTimeWindow({ id: 'all', ms: 0 }, 100000, null, 99000);
-assert.equal(orchMinSpan.end - orchMinSpan.start, 60000, 'a fit-all window over a near-now earliest event never degenerates below 60s');
-assert.match(orchApi.orchClockLabel(orchNow), /^\d{2}:\d{2}$/, 'axis tick labels are locale-independent HH:MM');
+assert.deepEqual(orchLooseLayout.rows.map((row) => row.team), ['Z 组', ''], 'ungrouped children form the LAST row');
+assert.deepEqual(orchLooseLayout.rows[1].ids, ['session-loose-a', 'session-loose-b'], 'in-row order follows spawn time');
 
 // 8d. live-session join (pure): running/completed/title/todos/goal from the
 // useSessions projection rows — the same source task_list reads host-side.
@@ -1145,62 +1113,39 @@ assert.equal(orchApi.orchAgoText(orchNow - 5000, orchNow, (key) => (key === 'orc
 assert.equal(orchApi.orchAgoText(orchNow - 65000, orchNow, (key, params) => (key === 'orch.time.min' ? `${params.n} 分钟前` : key)), '1 分钟前');
 assert.equal(orchApi.orchAgoText(undefined, orchNow, (key) => key), 'orch.time.unknown');
 
-// 8e. render probes under the fake-react stand-in: live seats render the lane
-// timeline without throwing; MISSING seats render the empty-state card plus
+// 8e. render probes under the fake-react stand-in: live seats render the
+// topology without throwing; MISSING seats render the empty-state card plus
 // diagnostics; a THROWING seat renders a diagnostics line instead of letting
 // the render throw (the host SlotErrorBoundary abdicates entries that throw).
 const orchTree = orchOccupation.component({ sessionId: 'session-superview', useChat: orchChatSeat, useSessions: orchSessionsSeat });
 assert.equal(orchTree.type, 'div', 'the view renders a root div with live seats');
-const orchChildLanes = orchCollect(orchTree, (el) => el.props && String(el.props.className || '').includes('orchViewLane') && el.props['data-role'] === 'child');
-assert.equal(orchChildLanes.length, 2, 'both synthetic children render as lanes');
-assert.deepEqual(orchChildLanes.map((lane) => lane.props['data-state']).sort(), ['completed', 'running'], 'live running/completed states join from useSessions');
-const orchCoordLanes = orchCollect(orchTree, (el) => el.props && String(el.props.className || '').includes('orchViewLane') && el.props['data-role'] === 'coordinator');
-assert.equal(orchCoordLanes.length, 1, 'exactly one supervisor lane');
-assert.equal(orchCoordLanes[0].props['data-state'], 'running', 'the supervisor state comes from the same sessions source');
-// Status segments: one per lane (alpha running, beta completed, coordinator running).
-const orchSegEls = orchCollect(orchTree, (el) => el.props && String(el.props.className || '').includes('orchViewSeg'));
-assert.equal(orchSegEls.length, 3, 'every lane carries exactly one status segment');
-assert.equal(orchSegEls.filter((el) => el.props['data-state'] === 'running').length, 2);
-assert.equal(orchSegEls.filter((el) => el.props['data-state'] === 'completed').length, 1);
-// Event dots under the DEFAULT 30m live window: only beta's RECENT report is
-// inside the window — rendered twice (its own lane + the coordinator stream),
-// both with the RECENT_MS ping. The 1970-era synthetic stamps sit far outside.
-const orchDotEls = orchCollect(orchTree, (el) => el.props && String(el.props.className || '').includes('orchViewDot'));
-assert.equal(orchDotEls.length, 2, 'the recent report renders on the child lane and the coordinator lane');
-assert.ok(orchDotEls.every((el) => el.props['data-kind'] === 'report' && el.props['data-recent'] === 'true'), 'both visible dots are RECENT_MS reports with the ping');
-assert.match(orchDotEls[0].props.title, /汇报|report/, 'the dot tooltip names the event kind');
-// Axis + gridlines: 5 ticks (the live last tick reads 现在/now; exact class
-// match — includes() would also catch the orchViewAxisTicks container),
-// 5 gridlines per track × 3 tracks.
-const orchTickEls = orchCollect(orchTree, (el) => el.props && String(el.props.className || '') === 'orchViewAxisTick');
-assert.equal(orchTickEls.length, 5);
-assert.match(orchTickEls[4].children[0], /现在|now/);
-assert.equal(orchCollect(orchTree, (el) => el.props && String(el.props.className || '').includes('orchViewGridline')).length, 15);
-// Toolbar: 4 zoom buttons (30m active by default) + the live-follow toggle.
-const orchZoomBtns = orchCollect(orchTree, (el) => el.type === 'button' && el.props && el.props.key !== undefined && String(el.props.key).startsWith('zoom:'));
-assert.equal(orchZoomBtns.length, 4);
-assert.equal(orchZoomBtns.filter((btn) => btn.props['data-active'] === 'true').length, 1);
-assert.equal(orchZoomBtns[0].props['data-active'], 'true', 'the 30m window is the default zoom');
-assert.ok(orchByText(orchTree, /跟随最新|Follow latest/), 'the live-follow toggle renders its state');
+const orchChildCards = orchCollect(orchTree, (el) => el.props && String(el.props.className || '').includes('orchViewNode') && el.props['data-role'] === 'child');
+assert.equal(orchChildCards.length, 2, 'both synthetic children render');
+assert.deepEqual(orchChildCards.map((card) => card.props['data-state']).sort(), ['completed', 'running'], 'live running/completed states join from useSessions');
+const orchCoordCards = orchCollect(orchTree, (el) => el.props && el.props['data-role'] === 'coordinator');
+assert.equal(orchCoordCards.length, 1, 'exactly one supervisor card');
+assert.equal(orchCoordCards[0].props['data-state'], 'running', 'the supervisor state comes from the same sessions source');
+const orchEdgeEls = orchCollect(orchTree, (el) => el.type === 'path' && el.props && String(el.props.className || '').includes('orchViewEdge'));
+assert.equal(orchEdgeEls.length, 5, '2 spawn + 1 send + 2 report edges render');
+assert.equal(orchEdgeEls.filter((el) => String(el.props.className).includes('orchViewFlow')).length, 1, 'exactly the RECENT_MS report edge gets the dash-flow shimmer');
+assert.ok(orchByText(orchTree, /steer/), 'the send edge carries its mode label');
 assert.ok(orchByText(orchTree, /1\/3/), 'the todos chip joins n/m from the sessions projection');
-assert.ok(orchByText(orchTree, /编组甲/), 'team group heads render');
+assert.ok(orchByText(orchTree, /编组甲/), 'team names render (chip and/or row label)');
 const orchEmptyTree = orchOccupation.component({ sessionId: 'session-plain' });
 assert.equal(orchEmptyTree.type, 'div');
 assert.ok(orchByText(orchEmptyTree, /未派发子任务|No tasks dispatched/), 'missing seats render the empty-state card');
 assert.ok(orchCollect(orchEmptyTree, (el) => el.props && el.props['data-kind'] === 'error').length >= 1, 'missing seats render a diagnostics line');
-// 0.21.1: a chat window WITHOUT spawn records reports its scanned size (the
-// window-truncation diagnostic — the user sees why the fleet looks empty).
+// 0.21.1 (kept in 0.22.0): a chat window WITHOUT spawn records reports its
+// scanned size — the window-truncation diagnostic behind the empty state.
 const orchWindowTree = orchOccupation.component({ sessionId: 'session-superview', useChat: (selector) => selector({ order: ['n1'], nodes: { get: () => ({ kind: 'text', data: {} }) } }) });
 assert.ok(orchByText(orchWindowTree, /已扫描当前转录窗口 1 条|Scanned 1 nodes/), 'the empty state reports the scanned window size');
 const orchBrokenTree = orchOccupation.component({ sessionId: 'session-superview', useChat: () => { throw new Error('chat seat boom'); }, useSessions: orchSessionsSeat });
 assert.ok(orchByText(orchBrokenTree, /chat seat boom/), 'a throwing seat surfaces its reason in a diagnostics line');
 
 // 8f. degraded navigation: without a sessions service in sight (this slotCtx
-// exposes no ctx.get) the lane-label click falls back to copying the session id.
+// exposes no ctx.get) the child click falls back to copying the session id.
 Object.defineProperty(globalThis, 'navigator', { value: { clipboard: { writeText: async (text) => { wrote.push(text); } } }, configurable: true });
-const orchAlphaLabelBtn = orchCollect(orchTree, (el) => el.type === 'button' && el.props && String(el.props.className || '').includes('orchViewLaneLabel') && el.props.title === 'session-alpha')[0];
-assert.ok(orchAlphaLabelBtn, 'the alpha lane label button renders');
-orchAlphaLabelBtn.props.onClick();
+orchChildCards[0].props.onClick();
 await new Promise((resolve) => setImmediate(resolve));
 assert.deepEqual(wrote.slice(-1), ['session-alpha'], 'degraded click copies the session id');
 if (navDesc) Object.defineProperty(globalThis, 'navigator', navDesc);
@@ -1214,7 +1159,7 @@ assert.match(clientSrc, /\.binding\(coordinatorId\)/, 'history paging goes throu
 assert.doesNotMatch(clientSrc, /hostCtx\.sessions\b/, 'no direct hostCtx.sessions property read (runner inject gate)');
 assert.match(clientSrc, /name: "conversation\.view"/);
 assert.match(clientSrc, /id: "orchestration"/);
-console.log('client orchestration: OK -> view registered (id orchestration, order 20, ' + orchOccupation.options.label() + '), synthetic extraction (spawn/batch/steer/relay/malformed), deterministic lane layout + per-lane events + time window, live/empty/throwing render probes (lanes/segments/dots/ticks/zoom), degraded copy fallback, ctx.get("sessions") jump + static guards');
+console.log('client orchestration: OK -> view registered (id orchestration, order 20, ' + orchOccupation.options.label() + '), synthetic extraction (spawn/batch/steer/relay/malformed), deterministic layout, live/empty/throwing render probes, degraded copy fallback, ctx.get("sessions") jump + static guards');
 
 console.log('\nALL INTEGRATION CHECKS PASSED');
 // The degraded-click probe leaves a 6s flash timer behind; exit explicitly so
