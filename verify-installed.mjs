@@ -701,7 +701,9 @@ assert.equal(tabTree.type, 'div', 'settings section renders a root div without s
 // access, which is exactly how 0.18.0's selects greyed out for good.
 assert.match(clientSrc, /hostCtx\.get\("locale"\)/, 'ensureLocale must read the locale service through ctx.get()');
 assert.match(clientSrc, /hostCtx\.get\("settingsScope"\)/, 'getBoundScope must read settingsScope through ctx.get()');
-assert.match(clientSrc, /hostCtx\.get\("remote"\)/, 'getRemote must read remote through ctx.get()');
+assert.match(clientSrc, /hostCtx\.get\("remote"\)/, 'getCatalogFace must read remote through ctx.get()');
+assert.match(clientSrc, /"value" in response/, 'the catalog effect must unwrap the client result envelope (0.18.4)');
+assert.match(clientSrc, /hostCtx\.get\("remote\.session"\)/, 'the catalog face must try the dotted remote.session service first (0.18.3)');
 
 const wrote = [];
 const navDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
@@ -781,7 +783,9 @@ else delete globalThis.navigator;
         set: async () => {},
       }),
     },
-    remote: { session: { modelCatalog: async () => ({ groups: [], default: undefined }) } },
+    // 0.18.4: the CLIENT wire answers a result envelope ({ok, value}), not the
+    // bare catalog the host-side facade returns — the fake mirrors the wire.
+    remote: { session: { modelCatalog: async () => ({ ok: true, value: { groups: [], failures: [], default: undefined } }) } },
   };
   const gatedSlotInjections = [];
   const gatedSlotService = {

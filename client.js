@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.18.3)
+ * dsh-plugin-task-coordinator — client module (0.18.4)
  *
  * Two surfaces:
  *  1. `conversation.session.header.utilities` slot — the "Copy session id"
@@ -469,7 +469,20 @@ window.__ModuleLoader__.load({
 				let cancelled = false;
 				setCatalog({ status: "loading" });
 				Promise.resolve().then(() => face.modelCatalog())
-					.then((payload) => { if (!cancelled) setCatalog({ status: "ready", ...projectCatalog(payload) }); })
+					.then((response) => {
+						if (cancelled) return;
+						// 0.18.4: the CLIENT wire answers a result envelope
+						// ({ok, value: {groups, failures, default?}} — the shape
+						// the native subagent-model card consumes), while the
+						// host-side facade returns the bare catalog. Unwrap
+						// defensively so both shapes project.
+						if (response && response.ok === false) {
+							setCatalog({ status: "error", error: String((response.error && (response.error.message ?? response.error)) ?? "modelCatalog reported a failure") });
+							return;
+						}
+						const payload = response && typeof response === "object" && "value" in response ? response.value : response;
+						setCatalog({ status: "ready", ...projectCatalog(payload) });
+					})
 					.catch((error) => { if (!cancelled) setCatalog({ status: "error", error: String((error && error.message) || error) }); });
 				return () => { cancelled = true; };
 			}, [face, catalogNonce, retryNonce]);

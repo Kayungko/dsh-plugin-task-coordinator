@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [0.18.4] - 2026-09-09
+
+### Fixed
+
+- **Provider 下拉无选项（0.18.3 用户报告）**：客户端 `remote.session.modelCatalog()` 的 wire 应答是**结果信封** `{ok, value: {groups, failures, default?}}`（原生 subagent-model-selection 卡片消费形状，settings-plugins client L1405 实证），而宿主侧 facade 返回裸目录——`projectCatalog` 按裸形状读 `payload.groups` 得 undefined，providers 投影为空数组且状态仍是 ready（无错误行，纯静默空下拉）。修复：应答统一防御性解包（`ok === false` 转为带原因的错误行；`"value" in response` 解包，否则按裸目录处理），两种形状都能投影。
+- 至此 0.18.x 系列四个真机回归全部闭环：灰下拉（inject 门控）→ 空白面板（SlotErrorBoundary abdicate）→ `{message}` 裸占位符（插值单路径）→ 空下拉（信封形状）。每一发的教训都已固化为验证器探针或防崩溃构造。
+
+### Tests
+
+- verify-installed 门控假服务改为**信封形状**应答（与真实 wire 一致）+ 新增解包源码静态断言；95 单测保持全绿。
+
 ## [0.18.3] - 2026-09-09
 
 ### Fixed
