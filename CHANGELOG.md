@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-09-10
+
+### Added
+
+- **服务缝（service seam）**——把 ops 实例暴露给未来的桥接插件（`dsh-plugin-task-bridge` 的前置依赖），缝面恰为两处、对既有行为零变化（设计蓝图 `research/task-bridge-reanchoring.md` §1）：
+  - **provide 载荷扩面**：`ctx.provide('taskCoordinator', { config, version, ops })`——字段名恰为 `ops`，值是现有 `createOps` 产物**同一实例**（tools 已在用，不另建，限流/注册表/确认凭证状态天然共享）。双形状载荷：`enabled` 路径在 `createOps` 之后 provide 全量；`disabled` 早退路径 provide `{ config, version }`（ops 缺席）——服务恒存在，桥侧按 ops 缺席降级 503，而非服务缺失导致桥永不激活；
+  - **isolate 改共享 label**：`cordis.patch.yml` 的 `isolate: { taskCoordinator: true }` → `'dsh-task-bridge'`（cordis GlobalRealm 机制：字符串 label = 同 label 插件组共享同一 Symbol，`taskCoordinator@dsh-task-bridge`；布尔 true = entry-local 对外不可见）。可见性只扩大到「声明同 label 的插件组」，不扩大到全宿主——比删除 isolate 声明（回 root 全局）暴露面小。首次部署是冷加载不涉及迁移；已装环境升级会经历一次 loader 实现迁移（isolate.ts patch-context step 5，机制源码已验证，热切换实测未做，见调研 §6 未验证项 2）；
+  - **消费方约定**（docs/PROTOCOL.md §17 新增节）：桥侧只读 ops、不得篡改/包装成员；同 label 声明 + `ctx.get('taskCoordinator')` 惰性解析（不硬 inject——coordinator disabled 时桥仍需挂载路由并回 503）；桥不得 provide 同名服务（cordis provide 撞名抛错）。
+
+### Tests
+
+- smoke +2 块（110 全绿）：provide 两分支源形状钉扎（disabled 分支 ops 缺席/enabled 分支含 ops/时序在 createOps 之后/恰好一次 provide + 一次 createOps/registerTools 收同一变量/版本与 package.json 锁步）+ createOps 13 成员面钉扎（pendingCount/listTasks/progress/sendMessage/spawnTask/confirmPlan/confirmSelect/consumeConfirmation/workspaceOp/models/spawnBatch/waitFor/cancelTask 全为 function）。verify-installed：enabled 载荷含 ops 且 13 成员可调 + 经 provide 载荷直调 listTasks 端到端走通（活实例而非序列化副本）+ disabled 载荷 ops 缺席断言。
+
 ## [0.23.0] - 2026-09-09
 
 ### Added

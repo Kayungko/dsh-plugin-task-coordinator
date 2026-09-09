@@ -2260,3 +2260,48 @@ test('registerTools: eleven tools with delegation', async () => {
   dispose();
   assert.equal(registered.length, 0);
 });
+
+/* ------------------------------------------------------------------ */
+/* service seam: provide payload exposes the live ops (0.24.0)         */
+/* ------------------------------------------------------------------ */
+
+test('service seam: apply() provides a two-shaped taskCoordinator payload (0.24.0)', () => {
+  // The repo carries no host peer packages, so index.mjs cannot be imported
+  // here — pin the seam's source shape instead. verify-installed.mjs
+  // re-verifies the RUNNING payload (enabled: ops present and callable;
+  // disabled: ops absent) against the real installed copy.
+  const src = readFileSync(new URL('../index.mjs', import.meta.url), 'utf8');
+  // disabled branch: the service still exists, but ops is ABSENT — the
+  // bridge consumer's 503 degrade signal, never a missing service
+  assert.match(src, /ctx\.provide\('taskCoordinator', \{ config, version: '0\.24\.0' \}\);/, 'disabled branch must provide { config, version } with ops absent');
+  // enabled branch: the full payload — the field name is exactly `ops`
+  assert.match(src, /ctx\.provide\('taskCoordinator', \{ config, version: '0\.24\.0', ops \}\);/, 'enabled branch must provide { config, version, ops }');
+  // the ops-bearing provide must come after createOps (the instance only
+  // exists once the factory has run on the enabled path)
+  const opsAt = src.indexOf('const ops = createOps(');
+  const fullProvideAt = src.indexOf("ctx.provide('taskCoordinator', { config, version: '0.24.0', ops })");
+  assert.ok(opsAt >= 0 && fullProvideAt > opsAt, 'the ops-bearing provide must follow createOps');
+  // exactly one provide per branch — cordis throws on a duplicate provide of
+  // the same service, so there is no "provide early, provide again later"
+  assert.equal((src.match(/ctx\.provide\(/g) ?? []).length, 2, 'apply() must call ctx.provide exactly twice (one per branch)');
+  // the seam exposes the SAME instance the tools use: the factory runs once,
+  // and registerTools receives that very variable
+  assert.equal((src.match(/createOps\(/g) ?? []).length, 1, 'apply() must build the ops exactly once');
+  assert.match(src, /const dispose = registerTools\(ctx, ops, \{ defineTool \}, config\);/, 'registerTools must receive the same ops variable the provide carries');
+  // the version string stays in lockstep with package.json
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(pkg.version, '0.24.0');
+  assert.match(src, new RegExp(`ctx\\.provide\\('taskCoordinator', \\{ config, version: '${pkg.version}', ops \\}\\);`), 'the enabled provide must carry the package version');
+});
+
+test('service seam: the provided ops is the 13-member createOps surface (0.24.0)', () => {
+  const harness = makeHarness();
+  // index.mjs provides the exact object createOps returns — the same instance
+  // registerTools delegates to. The names below are ops.mjs's ACTUAL members
+  // (pendingCount + 12 async capabilities), not the task_* tool names.
+  const expected = ['pendingCount', 'listTasks', 'progress', 'sendMessage', 'spawnTask', 'confirmPlan', 'confirmSelect', 'consumeConfirmation', 'workspaceOp', 'models', 'spawnBatch', 'waitFor', 'cancelTask'];
+  assert.deepEqual(Object.keys(harness.ops), expected, 'the createOps surface is exactly the 13 members the seam pins');
+  for (const member of expected) {
+    assert.equal(typeof harness.ops[member], 'function', `ops.${member} must be a function (bridge consumers call it)`);
+  }
+});

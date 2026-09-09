@@ -287,6 +287,39 @@ assert.equal(ctx.commandRegistrations.length, 1, 'expected the /tasks command');
 assert.equal(ctx.commandRegistrations[0].name, 'tasks');
 assert.ok(ctx.provides.taskCoordinator, 'taskCoordinator service not provided');
 assert.equal(ctx.provides.taskCoordinator.version, JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version);
+// 0.24.0 service seam: the enabled provide payload carries the LIVE ops
+// instance — the same object the registered tools delegate to (bridge
+// consumers resolve the service and call these members directly). The names
+// are ops.mjs's actual members, not the task_* tool names.
+const provided = ctx.provides.taskCoordinator;
+const SEAM_MEMBERS = ['pendingCount', 'listTasks', 'progress', 'sendMessage', 'spawnTask', 'confirmPlan', 'confirmSelect', 'consumeConfirmation', 'workspaceOp', 'models', 'spawnBatch', 'waitFor', 'cancelTask'];
+assert.ok(provided.ops, 'enabled provide payload must carry ops (0.24.0 service seam)');
+for (const member of SEAM_MEMBERS) {
+  assert.equal(typeof provided.ops[member], 'function', `provided ops.${member} must be a function`);
+}
+// the payload is live, not a serialized copy: one direct call through the
+// provided instance exercises the same sessionController wiring the tools use
+const seamList = await provided.ops.listTasks({}, { sessionId: 'session-super', cwd: '/proj' });
+assert.equal(seamList.ok, true, 'a call through the provided ops must work end-to-end');
+assert.ok(Array.isArray(seamList.tasks), 'the provided ops returns the real listTasks shape');
+// disabled path: the service STILL exists (a missing service would leave a
+// bridge consumer forever inert), but ops is absent — the degrade signal
+// bridge consumers map to 503. Fresh minimal ctx: the disabled early return
+// touches nothing but provide + logger.
+{
+  const disabledProvides = {};
+  const disabledCtx = {
+    logger: { info: () => {}, warn: () => {} },
+    provide(key, value) { disabledProvides[key] = value; },
+    get: () => undefined,
+    inject() {},
+  };
+  plugin.apply(disabledCtx, { enabled: false });
+  assert.ok(disabledProvides.taskCoordinator, 'the service must be provided even when disabled');
+  assert.equal(disabledProvides.taskCoordinator.version, provided.version, 'disabled payload carries the same version');
+  assert.equal('ops' in disabledProvides.taskCoordinator, false, 'disabled provide payload must NOT carry ops');
+}
+console.log('service seam       : OK -> enabled payload carries the live ops (13 members, direct call works); disabled payload omits ops');
 // the skill mount is fire-and-forget (dynamic import); give it a macrotask
 await new Promise((resolve) => setImmediate(resolve));
 assert.equal(ctx.mountedPlugins.length, 1, 'expected the skill provider mount');

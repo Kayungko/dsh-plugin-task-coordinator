@@ -10,6 +10,13 @@
  *  - ctx.sessionController: @deepseek-ai/dsh-api-session-controller service
  *  - ctx.agents: live agent registry (`.get(sessionId)`)
  *  - ctx.tools: @deepseek-ai/dsh-tools registry
+ *
+ * Service seam (0.24.0): apply() provides 'taskCoordinator' with the live ops
+ * instance — { config, version, ops }, the same instance the tools use — on
+ * the enabled path, and a reduced { config, version } payload (ops absent)
+ * when disabled. The service lives in a shared-label isolate realm so future
+ * bridge plugins declaring the same label can resolve it: cordis.patch.yml
+ * and docs/PROTOCOL.md §17 carry the full seam contract.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -42,8 +49,13 @@ export function defaultRegistryFile() {
 
 export function apply(ctx, input = {}) {
   const config = resolveConfig(input);
-  ctx.provide('taskCoordinator', { config, version: '0.23.0' });
+  // 0.24.0 service seam: the service ALWAYS exists (a missing service would
+  // leave bridge consumers forever inert), but the payload is two-shaped.
+  // Disabled provides { config, version } with ops ABSENT — the degrade
+  // signal bridge consumers map to 503; enabled provides the full payload
+  // after createOps below (the instance only exists on that path).
   if (!config.enabled) {
+    ctx.provide('taskCoordinator', { config, version: '0.24.0' });
     ctx.logger?.info('task-coordinator: disabled by config; no tools registered');
     return;
   }
@@ -280,6 +292,13 @@ export function apply(ctx, input = {}) {
     archiveSession,
     probeWorktree,
   });
+  // 0.24.0 service seam: expose THE ops instance through the provide payload
+  // so future bridge plugins (dsh-plugin-task-bridge) reuse this exact
+  // limiter/registry/confirmation state instead of forking it. Read-only by
+  // contract (docs/PROTOCOL.md §17): consumers call members, never replace
+  // or wrap them. This is the enabled-branch provide; the disabled early
+  // return above provided the reduced payload.
+  ctx.provide('taskCoordinator', { config, version: '0.24.0', ops });
   const dispose = registerTools(ctx, ops, { defineTool }, config);
   const disposeCommands = registerCommands(ctx, ops, uiStrings(readUiLocale()));
   ctx.effect(() => () => {

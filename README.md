@@ -174,6 +174,10 @@ Spawns that omit `provider`+`model` no longer fall straight to the host default:
 
 User-facing strings follow the host's Language preference (Settings → General → Language; the durable `locale.preference`, zh/en — the same channel the official session-log button uses). The browser-side header button registers dictionaries with the live client locale runtime and re-renders on every language switch; host-side surfaces (dispatch-confirmation cards, the report-back kickoff suffix, `/tasks` metadata) resolve through `i18n.mjs` per call, so a switch applies from the next card/kickoff without a restart. An absent or unknown preference keeps the historical Chinese strings — the host side cannot see the "follow the browser" delegation, so the plugin never guesses a language it does not ship. Model-facing surfaces stay as documented: tool descriptions are the English model contract, the SKILL manual is Chinese, and titles follow the `MMDD｜type｜topic` convention.
 
+### Service seam for bridge plugins (0.24.0)
+
+The plugin's `taskCoordinator` service now carries the **live ops instance** in its provide payload (`{ config, version, ops }` — the exact object the tools use, so limiter / spawn-registry / confirmation state is shared with in-GUI supervisors, never forked), and the service sits in a **shared-label isolate realm** (`'dsh-task-bridge'`): a future bridge plugin declaring the same string label resolves it through `ctx.get('taskCoordinator')`, while everything else still cannot see it. When the plugin is disabled by config the service still exists but omits `ops` — the documented 503 degrade signal for bridge consumers. Consumers treat `ops` as **read-only**: call members, never wrap or replace them. Full seam contract: [docs/PROTOCOL.md §17](docs/PROTOCOL.md).
+
 ## Dispatch confirmation (the anti-black-box gate)
 
 Batch dispatches used to be a silent model decision — not anymore:

@@ -258,4 +258,59 @@
 
 - **安装入口**：`install.ps1`（仓库根为工作区便捷包装，`plugin/install.ps1` 为仓内等价版）——复制包文件、保证 profile `package.json` 的 `dependencies` + `dsh.profile.bundles` 登记，然后**必须重启宿主**才装载新 bundle。
 - **技能目录拷内容不拷目录**：`Copy-Item` 的源是目录且目标目录已存在时会拷**进去**（嵌套 `skills/skills/`），正式路径技能文件从此不再更新——0.4.0–0.8.3 的实际事故。现行脚本复制 `skills\*` 内容并清理历史嵌套残留；技能走 `patchReload: live`，内容更新**无需重启**即刻热刷新。
-- **安装态自检**：任何宿主/插件变更后，把 `verify-installed.mjs` 复制进安装目录运行（跑完删除），全绿才放行；它断言服务版本、11 工具、`/tasks`、确认闸门、多选确认子集强制、复用凭证跨批、task_workspace 实体链与 migrate 克隆五步链（目标 cwd 出生/元数据携带/同 cwd 拒绝零副作用）、spawn cwd 升级、**0.19.0 工作区落位（回执 placement/workspace 字段、祖先归一全链 workspaceId+根 cwd+i18n kickoff 提示+注册表 expectedWorkspace、未分组警告+task_list ungrouped 过滤）**、子会话模型指定（预校验拒绝/安装时序/成对约束/错误路线提示）、task_models 目录投影、客户端 i18n 回归（0.16.1：裸键 `t()` 回退内置词典、迟注册 locale 服务首见即注册、zh/en 实时解析）、工作区归属与客户端模块全链、0.17.0 投递回执（task_send queueDepth 分列断言、回报后缀让位协议句断言）。
+- **安装态自检**：任何宿主/插件变更后，把 `verify-installed.mjs` 复制进安装目录运行（跑完删除），全绿才放行；它断言服务版本、11 工具、`/tasks`、确认闸门、多选确认子集强制、复用凭证跨批、task_workspace 实体链与 migrate 克隆五步链（目标 cwd 出生/元数据携带/同 cwd 拒绝零副作用）、spawn cwd 升级、**0.19.0 工作区落位（回执 placement/workspace 字段、祖先归一全链 workspaceId+根 cwd+i18n kickoff 提示+注册表 expectedWorkspace、未分组警告+task_list ungrouped 过滤）**、子会话模型指定（预校验拒绝/安装时序/成对约束/错误路线提示）、task_models 目录投影、客户端 i18n 回归（0.16.1：裸键 `t()` 回退内置词典、迟注册 locale 服务首见即注册、zh/en 实时解析）、工作区归属与客户端模块全链、0.17.0 投递回执（task_send queueDepth 分列断言、回报后缀让位协议句断言）、**0.24.0 服务缝（enabled 载荷含活 ops 且 13 成员可调、经载荷直调 listTasks 端到端、disabled 载荷 ops 缺席）**。
+
+## 17. 服务缝（0.24.0 新增）
+
+本插件在宿主进程内 provide 一个 `taskCoordinator` 服务，供未来的桥接插件（`dsh-plugin-task-bridge`——Codex→DSH 控制面桥，进程外 HTTP 消费方的进程内代理）解析并复用。缝面恰为两处改动，对既有工具行为零变化（设计蓝图 `research/task-bridge-reanchoring.md` §1）。
+
+### 17.1 provide 契约（双形状载荷）
+
+```js
+ctx.provide('taskCoordinator', { config, version, ops });
+```
+
+| 字段 | 类型 | 语义 |
+|---|---|---|
+| `config` | object | `resolveConfig` 产物（含 `minSendIntervalMs`/`maxQueuePerTask` 等限流参数——桥侧据此计算 429 的 `retryAfterMs`） |
+| `version` | string | 与 package.json 锁步的插件版本（当前 `0.24.0`） |
+| `ops` | object | **`createOps` 产物同一实例**——`registerTools` 已在用的那个，不另建。13 成员：`pendingCount`、`listTasks`、`progress`、`sendMessage`、`spawnTask`、`confirmPlan`、`confirmSelect`、`consumeConfirmation`、`workspaceOp`、`models`、`spawnBatch`、`waitFor`、`cancelTask` |
+
+**时序与形状规则**：
+
+- **enabled 路径**（默认）：`ops` 在 `createOps(...)` 之后随全量载荷 provide——桥拿到的是活的实例，限流计数（`SendLimiter`）、spawn 注册表（`SpawnRegistry` 单写者）、确认凭证（进程内 Map）与 GUI 内总控**天然共享同一状态**，不存在双写者分叉；
+- **disabled 路径**（`config.enabled: false`）：早退分支 provide `{ config, version }`——**`ops` 缺席但服务存在**。这是刻意的降级信号：桥侧把 ops 缺席映射为 503（对齐 webhook-github 的 503 语义），而不是服务整体缺失导致桥永不激活；
+- provide 恰好一次（每分支一次）；`createOps` 恰好一次——不存在「先 provide 占位、后补 ops」的二次 provide（cordis 同名 provide 撞名抛错）。
+
+### 17.2 消费方约定（桥侧必守）
+
+1. **只读 ops**：桥只**调用** ops 成员，不得篡改、替换、包装（monkey-patch）任何成员或内部状态。ops 是 tools 面与桥面共享的活实例，任何篡改直接破坏 GUI 内总控的工具行为；
+2. **同 label 声明**：桥的 `cordis.patch.yml` 声明**同一字符串 label**（见 §17.3），否则宿主其他插件（含桥）用 root Symbol 查不到该服务实现；
+3. **惰性解析**：桥对 `taskCoordinator` 用 **`ctx.get('taskCoordinator')`** 按调用惰性解析，**不硬 inject**——coordinator disabled 或后装载时桥仍需挂载自己的路由并回 503/降级（同款先例：本插件对 `userQuestions` 的惰性解析，index.mjs）；
+4. **不得 provide 同名服务**：cordis 的 provide 撞名抛错（`reflect.ts`）——桥绝不 provide `taskCoordinator`；
+5. **伪 caller 语义**：桥没有 agent 上下文，须合成伪 caller（如 `{ sessionId: 'task-bridge-external', origin: undefined, cwd }`）。`checkCaller` 只校验 sessionId 非空 + origin ≠ subagent，可通过；连带语义：消息 source 落伪 senderSessionId（审计可辨）、registry 落伪 parentSessionId（桥 spawn 恒 depth 1）、**reportBack 必须强制 false**（伪 id 非真实会话，回报后缀指向不存在的目标）、确认凭证绑定伪 callerSessionId（GUI 会话预批的凭证桥用不了，桥须自走 confirm 闭环）；
+6. **方法白名单收敛**：桥获得的是 ops 全能力（含 `workspaceOp` migrate 等重操作）——桥侧只透传 MVP 端点所需的 6 方法子集（spawnTask/waitFor/progress/sendMessage/listTasks/models），其余不暴露。
+
+### 17.3 isolate 共享 label 语义
+
+`cordis.patch.yml`：
+
+```yaml
+- insert:
+    - id: task-coordinator
+      name: '@deepseek-ai/cordis-plugin-group'
+      group: true
+      isolate:
+        taskCoordinator: 'dsh-task-bridge'   # 0.24.0 前是 true（entry-local）
+```
+
+cordis 加载器的 isolate 机制（`@deepseek-ai/cordis-plugin-loader/src/config/isolate.ts`）：
+
+- `isolate: { <service>: true }` → **LocalRealm**（Symbol 后缀 `#<entry-id>`，仅该 entry 可见）——0.23.0 及以前的状态：服务实现存在 `Symbol('taskCoordinator#task-coordinator')` 下，宿主其他任何插件默认查不到；
+- `isolate: { <service>: '<label>' }`（字符串）→ **GlobalRealm**（后缀 `@<label>`，**同 label 的 entries 共享同一 Symbol**）——0.24.0 起：实现存在 `Symbol('taskCoordinator@dsh-task-bridge')` 下，声明同 label 的桥插件可解析，其余插件（root Symbol）仍不可见。
+
+**暴露面评估**：改共享 label 只把服务可见性扩大到「声明同 label 的插件组」，不扩大到全宿主——比「直接删除 isolate 声明（回 root 全局可见）」暴露面小，符合最小暴露原则。故障隔离（group 插件组结构）不受 label 改动影响。
+
+**热切换说明**（升级场景）：已装环境从 `true` 升级到共享 label 时，loader 的 `loader/patch-context` 钩子会走一次实现迁移（isolate.ts:96-153：新 isolate map → 服务 diff → fiber reload → 实现从旧 Symbol 迁到新 Symbol → notify 依赖方）。机制源码已验证（isolate.ts step 5, L132-136）；**热切换实测未做**（调研 §6 未验证项 2——需在测试宿主上验证「旧 label 运行中 → 热更 patch → 服务连续性」，总控部署后补跑）。首次部署是冷加载，不涉及迁移。
+
+**Realm GC**：entry dispose 时若无其他 entry 引用同 label 则回收（isolate.ts:155-172）。桥卸载不影响 coordinator；coordinator 卸载则桥的惰性 `ctx.get('taskCoordinator')` 返回 undefined → 桥降级 503。

@@ -1,11 +1,17 @@
 # Task Coordinator: cross-task coordination tools for supervisor agents.
 # Mounted as an isolated plugin group so a fault cannot take down the host.
+# 0.24.0 service seam: the taskCoordinator service lives in a SHARED label
+# realm ('dsh-task-bridge') instead of an entry-local one. Bridge plugins
+# that declare the SAME string label in their own cordis.patch.yml resolve
+# this service (GlobalRealm: one Symbol, 'taskCoordinator@dsh-task-bridge',
+# shared across the label group); everything else still cannot see it. See
+# docs/PROTOCOL.md §17 for the consumer contract (ops is read-only).
 - insert:
     - id: task-coordinator
       name: '@deepseek-ai/cordis-plugin-group'
       group: true
       isolate:
-        taskCoordinator: true
+        taskCoordinator: 'dsh-task-bridge'
       config:
         - id: task-coordinator-runtime
           name: 'dsh-plugin-task-coordinator'
