@@ -91,7 +91,7 @@
 | 判据 | 默认值 | 配置项 | 越限行为 |
 |---|---|---|---|
 | 同目标最小发送间隔 | 2000ms | `minSendIntervalMs` | `task_send` / `task_spawn` kickoff 拒绝（`rate-limited`），稍等重试即可 |
-| 目标排队深度上限 | 5 | `maxQueuePerTask` | `task_send` 拒绝（`queue-full`），防刷屏 |
+| 目标排队深度上限 | 5（0.23.0 起 GUI 可改：设置区 `maxQueuePerTask`，0=跟随 config，硬上限 50，限流器活取 getter 免重启生效） | `maxQueuePerTask` | `task_send` 拒绝（`queue-full`），防刷屏 |
 | `task_wait` 默认超时 | 120000ms | `waitDefaultTimeoutMs` | 超时返回——**不代表失败**，任务还在跑 |
 | `task_wait` 超时上限 | 600000ms | `waitMaxTimeoutMs` | 参数超过则收敛到上限（`waitDefault > waitMax` 时同样收敛） |
 | 单次批量上限 | 6 | `maxBatchSpawn` | `task_spawn_batch` 拒绝（`bad-request`），拆小批 [0.5.0 新增] |

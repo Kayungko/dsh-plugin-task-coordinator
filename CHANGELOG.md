@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-09-09
+
+### Added
+
+- **队列深度上限进 GUI 设置页**（设置 → 任务编排，第四字段 `maxQueuePerTask`）——用户问「排队 5/5 是上限么」后拍板可视化可调：
+  - 数字输入框（0–50，0 = 跟随部署配置即 config 默认 5）；**硬上限 `MAX_QUEUE_PER_TASK_CAP = 50`**（队列每轮消化约 1 条，更深无编排意义只有刷屏风险）；
+  - **免重启生效**：`SendLimiter.check()` 本就在检查时读 `config.maxQueuePerTask`（safety.mjs），index.mjs 把该属性换成活取 getter（`readQueueCap() ?? config`，与 readSpawnDefaults 同款 settings.get 活读）——GUI 保存后下一次 task_send 检查即用新上限；
+  - 消费端钳制：`normalizeQueueCap`（settings.mjs 纯函数）整数 ≥1 → `min(value, 50)`，0/缺失/畸形 → null 跟随 config——手改 yaml 超限值也被诚实钳到 50；
+  - 写边界维持 0.18.5 纪律：validate 钩子只做类型检查（number），范围执法在消费端钳制 + UI（input min/max + 越界禁 Save + 错误行）；
+  - 保存仍为单次原子 `mutate`（现四操作）+ 写后回读核对（sameRoute 扩为四字段等值）；状态行追加「队列深度上限: N / 跟随部署配置」；provider/model 切换不再丢队列字段（草稿保留）；
+  - schema `z.number().step(1).min(0).max(50).default(0)`（schemastery 3.18.x 无 .int() 的既定替代，web-search-mana 实测先例）。
+
+### Tests
+
+- smoke +3 块（108 全绿）：normalizeQueueCap 全规则（哨兵/畸形/钳制）、validate 队列字段类型边界（9999 过写边界、字符串拒）、SendLimiter 活 getter（运行中升降上限即时跟随）。verify-installed：settings mock 携 `maxQueuePerTask: 12`，**e2e 判别断言**——深度 7（>config 默认 5）放行证明设置覆盖生效、深度 12 拒绝 queue-full；客户端静态断言（四操作 mutate 含队列字段、QUEUE_CAP 常量镜像）。仿真 + 真实安装位 ALL PASSED。
+
 ## [0.22.3] - 2026-09-09
 
 ### Changed

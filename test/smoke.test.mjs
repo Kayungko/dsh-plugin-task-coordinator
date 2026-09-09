@@ -1349,6 +1349,54 @@ test('settings: validateSpawnModelsSection boundary (0.18.0, relaxed 0.18.5)', a
   assert.throws(() => validateSpawnModelsSection({ provider: 1, model: 'model-x' }), /"provider" must be a string/);
 });
 
+test('settings: normalizeQueueCap rules (0.23.0)', async () => {
+  const { normalizeQueueCap, MAX_QUEUE_PER_TASK_CAP, SPAWN_MODELS_BASE } = await import('../settings.mjs');
+  assert.equal(MAX_QUEUE_PER_TASK_CAP, 50);
+  assert.equal(SPAWN_MODELS_BASE.maxQueuePerTask, 0, 'base sentinel 0 = follow the patch config');
+  // absent / sentinel / junk -> null (follow config)
+  assert.equal(normalizeQueueCap(undefined), null);
+  assert.equal(normalizeQueueCap(null), null);
+  assert.equal(normalizeQueueCap('12'), null);
+  assert.equal(normalizeQueueCap({}), null);
+  assert.equal(normalizeQueueCap({ maxQueuePerTask: 0 }), null);
+  assert.equal(normalizeQueueCap({ maxQueuePerTask: -3 }), null);
+  assert.equal(normalizeQueueCap({ maxQueuePerTask: 2.5 }), null);
+  assert.equal(normalizeQueueCap({ maxQueuePerTask: '7' }), null);
+  assert.equal(normalizeQueueCap({ maxQueuePerTask: Number.NaN }), null);
+  // valid integers pass through; above the cap clamps (hand-edited yaml honesty)
+  assert.equal(normalizeQueueCap({ maxQueuePerTask: 1 }), 1);
+  assert.equal(normalizeQueueCap({ maxQueuePerTask: 7 }), 7);
+  assert.equal(normalizeQueueCap({ maxQueuePerTask: 50 }), 50);
+  assert.equal(normalizeQueueCap({ maxQueuePerTask: 51 }), 50);
+  assert.equal(normalizeQueueCap({ maxQueuePerTask: 9999 }), 50);
+});
+
+test('settings: validateSpawnModelsSection queue-cap type check (0.23.0)', async () => {
+  const { validateSpawnModelsSection } = await import('../settings.mjs');
+  // numbers pass (range is clamped at consumption, not at the write boundary —
+  // the 0.18.5 silent-rollback lesson)
+  validateSpawnModelsSection({ maxQueuePerTask: 0 });
+  validateSpawnModelsSection({ maxQueuePerTask: 12 });
+  validateSpawnModelsSection({ maxQueuePerTask: 9999 });
+  validateSpawnModelsSection({ provider: 'prov-a', model: 'model-x', maxQueuePerTask: 8 });
+  // wrong type rejected
+  assert.throws(() => validateSpawnModelsSection({ maxQueuePerTask: '8' }), /"maxQueuePerTask" must be a number/);
+});
+
+test('safety: SendLimiter honors a live maxQueuePerTask getter (0.23.0)', async () => {
+  const { SendLimiter } = await import('../safety.mjs');
+  // The plugin wires limiterConfig.maxQueuePerTask as a getter reading the
+  // settings section per check() — a GUI edit applies without a restart.
+  let cap = 5;
+  const liveConfig = { minSendIntervalMs: 0, get maxQueuePerTask() { return cap; } };
+  const limiter = new SendLimiter(liveConfig, () => 5, () => 1000);
+  assert.equal(limiter.check('t1').code, 'queue-full', 'depth 5 >= cap 5 denies');
+  cap = 10;
+  assert.equal(limiter.check('t1'), null, 'raising the cap live re-admits the same depth');
+  cap = 3;
+  assert.equal(limiter.check('t1').code, 'queue-full', 'lowering the cap live denies again');
+});
+
 test('ops.spawnTask: plugin-default fallback chain (0.18.0)', async () => {
   // omitted provider+model -> the configured default route is installed
   const withDefault = makeHarness({ readSpawnDefaults: () => ({ provider: 'prov-a', model: 'model-x', reasoningEffort: 'high' }) });

@@ -172,7 +172,7 @@ const ctx = {
       // settings-service stand-in (0.18.0): one durable section the plugin
       // installs, with a stored user layer the spawn path must fall back to.
       get: (ns) => (ns === 'task-coordinator'
-        ? { provider: 'prov-verify', model: 'model-ok', reasoningEffort: 'high' }
+        ? { provider: 'prov-verify', model: 'model-ok', reasoningEffort: 'high', maxQueuePerTask: 12 }
         : undefined),
       installSection(owner, ns, schema, entry, hooks) {
         installedSections.push(ns);
@@ -340,6 +340,23 @@ const steerResult = await byName.task_send.execute({ sessionId: 'session-worker'
 assert.equal(steerResult.ok, true);
 assert.equal(liveAgents.get('session-worker').delivered.at(-1).via, 'steer');
 console.log('task_send (steer)  : OK');
+
+// Queue-cap override (0.23.0): the settings mock carries maxQueuePerTask 12 —
+// depth 7 (above the config default 5) must still be admitted and depth 12
+// denied queue-full, proving the limiter reads the cap LIVE from the settings
+// section (getter wiring in index.mjs) with no restart.
+{
+  const workerAgent = liveAgents.get('session-worker');
+  for (let index = 0; index < 7; index += 1) workerAgent.inbox.nextTurn.push({ synthetic: index });
+  const underCap = await byName.task_send.execute({ sessionId: 'session-worker', message: '深度 7 仍应放行' }, supervisorExec);
+  assert.equal(underCap.ok, true, 'settings cap 12 must live-override the config default 5 (depth 7 admits)');
+  while (workerAgent.inbox.nextTurn.length < 12) workerAgent.inbox.nextTurn.push({ synthetic: 'fill' });
+  const atCap = await byName.task_send.execute({ sessionId: 'session-worker', message: '深度 12 应拒' }, supervisorExec);
+  assert.equal(atCap.ok, false, 'depth at the settings cap must deny');
+  assert.match(JSON.stringify(atCap), /queue-full|pending message/, 'the denial names the queue-full cause');
+  workerAgent.inbox.nextTurn.length = 0;
+  console.log('queue cap override : OK -> settings maxQueuePerTask=12 live-overrides config default 5 (depth 7 admits, 12 denies queue-full)');
+}
 
 const selfResult = await byName.task_send.execute({ sessionId: 'session-super', message: 'loop?' }, supervisorExec);
 assert.equal(selfResult.ok, false);
@@ -759,6 +776,8 @@ assert.match(clientSrc, /hostCtx\.get\("remote"\)/, 'getCatalogFace must read re
 assert.match(clientSrc, /"value" in response/, 'the catalog effect must unwrap the client result envelope (0.18.4)');
 assert.match(clientSrc, /hostCtx\.get\("remote\.session"\)/, 'the catalog face must try the dotted remote.session service first (0.18.3)');
 assert.match(clientSrc, /scope\.mutate\(/, 'save must write the section as ONE atomic mutate (0.18.5 — per-field writes composed half-pair states the host rejected)');
+assert.match(clientSrc, /\{ op: "set", path: \["maxQueuePerTask"\], value: draft\.maxQueuePerTask \}/, 'the atomic save must include the queue-cap field (0.23.0)');
+assert.match(clientSrc, /const QUEUE_CAP = 50;/, 'the client cap constant mirrors MAX_QUEUE_PER_TASK_CAP');
 assert.match(clientSrc, /sameRoute\(landed, draft\)/, 'save must verify the landed snapshot before reporting success (0.18.5 honest-save check)');
 
 const wrote = [];

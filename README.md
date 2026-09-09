@@ -168,6 +168,7 @@ Spawns that omit `provider`+`model` no longer fall straight to the host default:
 - **Same validation chain**: the default route goes through the identical catalog pre-check (an invalid route is `model-unavailable` with zero orphans), and the pair rule is enforced at the write boundary (half pairs rejected). A malformed stored layer degrades defensively to "not set" and never breaks the spawn itself.
 - **Observable**: spawn results echo `modelSource` (`explicit` / `plugin-default` / `host-default`); `task_models` carries `pluginDefault` so one read shows the whole chain.
 - **Graceful degradation**: hosts without the settings service or the model catalog show a degraded line in the tab; tool behavior falls back to 0.17 semantics, never crashes.
+- **Send-queue cap (0.23.0)**: the page's fourth field, `maxQueuePerTask` (number, 0–50; 0 = follow the deployment config, default 5) — the per-target `task_send` queue ceiling that denies with `queue-full` when full. The limiter reads the cap through a live getter, so **a GUI edit applies from the next send check without a restart**; hand-edited yaml values above 50 clamp down at consumption.
 
 ### Localized UI strings (0.15.0)
 

@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.22.3)
+ * dsh-plugin-task-coordinator — client module (0.23.0)
  *
  * 0.22.0: the card topology is BACK as the orchestration view's form (user
  * verdict after living with the 0.21.x lane timeline: cards + directional
@@ -180,6 +180,10 @@ window.__ModuleLoader__.load({
 				"status.hostDefault": "宿主默认",
 				"status.notSet": "未设置",
 				"invalid.pair": "provider 与 model 需成对设置，或两者都留空。",
+				"field.queue": "队列深度上限",
+				"field.queue.hint": "同一目标会话可排队的消息上限（0 = 跟随部署配置，默认 5；最大 {cap}）。队列每轮消化约 1 条，改完下一次 task_send 检查即生效。",
+				"queue.invalid": "队列深度上限须为 0–{cap} 的整数。",
+				"queue.follow": "跟随部署配置",
 				"degraded.scope": "设置服务不可用（宿主缺少 settingsScope），本页暂不可编辑；派发仍按已存默认与宿主默认执行。",
 				"degraded.catalog": "模型目录不可用：{message}",
 				"degraded.namespace": "设置区未在宿主设置文档中注册（插件可能未随宿主装载），本页暂不可编辑。",
@@ -250,6 +254,10 @@ window.__ModuleLoader__.load({
 				"status.hostDefault": "Host default",
 				"status.notSet": "Not set",
 				"invalid.pair": "provider and model must be set together, or both left empty.",
+				"field.queue": "Send-queue cap",
+				"field.queue.hint": "Max queued messages per target session (0 = follow the deployment config, default 5; ceiling {cap}). The queue drains ~1 per round; an edit applies from the next task_send check onward.",
+				"queue.invalid": "The send-queue cap must be an integer between 0 and {cap}.",
+				"queue.follow": "deployment config",
 				"degraded.scope": "The settings service is unavailable (no settingsScope on this host); this page is read-only for now — spawns still follow the stored default and the host default.",
 				"degraded.catalog": "The model catalog is unavailable: {message}",
 				"degraded.namespace": "The settings section is not registered in the host settings document (the plugin may not be loaded with the host); this page is read-only for now.",
@@ -454,6 +462,7 @@ window.__ModuleLoader__.load({
 			".tcSettingsStatus{margin:0;font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary,#5b616e)}",
 			".tcSettingsStatus[data-kind='error']{color:var(--dsw-alias-danger,#c0392b)}",
 			".tcSettingsIntro{margin:0 0 4px;font-size:13px;line-height:21px;color:var(--dsw-alias-label-secondary,#5b616e);max-width:560px}",
+			".tcSettingsHint{margin:0;font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary,#5b616e);max-width:560px}",
 			".tcSettingsHeading{margin:0;font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary,#0f1115)}",
 			".tcSettingsPageTitle{margin:0 0 12px;font-size:18px;font-weight:600;color:var(--dsw-alias-label-primary,#0f1115)}"
 		].join("\n");
@@ -527,11 +536,14 @@ window.__ModuleLoader__.load({
 				...(catalog?.default ? { default: catalog.default } : {})
 			};
 		}
-		/** Stable route equality over the three draft fields. */
+		/** Hard ceiling for the queue-cap field — mirrors MAX_QUEUE_PER_TASK_CAP in settings.mjs (host side clamps too). */
+		const QUEUE_CAP = 50;
+		/** Stable equality over the four draft fields (route triple + queue cap). */
 		function sameRoute(left, right) {
 			return String(left?.provider ?? "") === String(right?.provider ?? "")
 				&& String(left?.model ?? "") === String(right?.model ?? "")
-				&& String(left?.reasoningEffort ?? "") === String(right?.reasoningEffort ?? "");
+				&& String(left?.reasoningEffort ?? "") === String(right?.reasoningEffort ?? "")
+				&& Number(left?.maxQueuePerTask ?? 0) === Number(right?.maxQueuePerTask ?? 0);
 		}
 		/**
 		 * Settings tab: GUI editor for the plugin's spawn-model default.
@@ -620,7 +632,8 @@ window.__ModuleLoader__.load({
 					setDraft((previous) => (previous === null || sameRoute(previous, stored) ? {
 						provider: String(stored.provider ?? ""),
 						model: String(stored.model ?? ""),
-						reasoningEffort: String(stored.reasoningEffort ?? "")
+						reasoningEffort: String(stored.reasoningEffort ?? ""),
+						maxQueuePerTask: Number.isFinite(Number(stored.maxQueuePerTask)) ? Math.max(0, Math.trunc(Number(stored.maxQueuePerTask))) : 0
 					} : previous));
 				} catch { /* a malformed stored value leaves the draft untouched */ }
 			}, [stored]);
@@ -629,6 +642,10 @@ window.__ModuleLoader__.load({
 			const dirty = draft !== null && stored !== undefined && !sameRoute(draft, stored);
 			const pairValid = draft === null || (draft.provider.length === 0 && draft.model.length === 0)
 				|| (draft.provider.length > 0 && draft.model.length > 0);
+			// 0.23.0: queue cap must be an integer in [0, QUEUE_CAP]; 0 = follow
+			// the deployment config. Out-of-range disables Save (honest UI-side
+			// enforcement — the host write boundary stays types-only per 0.18.5).
+			const queueValid = draft === null || (Number.isInteger(draft.maxQueuePerTask) && draft.maxQueuePerTask >= 0 && draft.maxQueuePerTask <= QUEUE_CAP);
 			const providers = catalog.status === "ready" ? catalog.providers : [];
 			const providerKnown = draft === null || draft.provider.length === 0 || providers.some((p) => p.id === draft.provider);
 			const models = draft ? providers.find((p) => p.id === draft.provider)?.models ?? [] : [];
@@ -648,7 +665,8 @@ window.__ModuleLoader__.load({
 					const ops = [
 						{ op: "set", path: ["provider"], value: draft.provider },
 						{ op: "set", path: ["model"], value: draft.model },
-						{ op: "set", path: ["reasoningEffort"], value: draft.reasoningEffort }
+						{ op: "set", path: ["reasoningEffort"], value: draft.reasoningEffort },
+						{ op: "set", path: ["maxQueuePerTask"], value: draft.maxQueuePerTask }
 					];
 					if (typeof scope.mutate === "function") {
 						await scope.mutate(ops);
@@ -659,6 +677,7 @@ window.__ModuleLoader__.load({
 						await scope.set("provider", draft.provider);
 						await scope.set("model", draft.model);
 						await scope.set("reasoningEffort", draft.reasoningEffort);
+						await scope.set("maxQueuePerTask", draft.maxQueuePerTask);
 					}
 					// Honest-save verification: the write channel swallows host
 					// rejections, so read back the landed snapshot and compare
@@ -687,7 +706,8 @@ window.__ModuleLoader__.load({
 				setDraft(stored === undefined ? null : {
 					provider: String(stored.provider ?? ""),
 					model: String(stored.model ?? ""),
-					reasoningEffort: String(stored.reasoningEffort ?? "")
+					reasoningEffort: String(stored.reasoningEffort ?? ""),
+					maxQueuePerTask: Number.isFinite(Number(stored.maxQueuePerTask)) ? Math.max(0, Math.trunc(Number(stored.maxQueuePerTask))) : 0
 				});
 			};
 			const h = react.createElement;
@@ -746,7 +766,7 @@ window.__ModuleLoader__.load({
 							className: "tcSettingsSelect",
 							value: draft ? draft.provider : "",
 							disabled: !draft || !writable,
-							onChange: (event) => setDraft((previous) => ({ provider: event.target.value, model: "", reasoningEffort: "" }))
+							onChange: (event) => setDraft((previous) => ({ provider: event.target.value, model: "", reasoningEffort: "", maxQueuePerTask: previous ? previous.maxQueuePerTask : 0 }))
 						}, providerOptions)
 					),
 					h("div", { className: "tcSettingsRow" },
@@ -755,7 +775,7 @@ window.__ModuleLoader__.load({
 							className: "tcSettingsSelect",
 							value: draft ? draft.model : "",
 							disabled: !draft || !writable || (draft && draft.provider.length === 0),
-							onChange: (event) => setDraft((previous) => ({ provider: previous.provider, model: event.target.value, reasoningEffort: "" }))
+							onChange: (event) => setDraft((previous) => ({ provider: previous.provider, model: event.target.value, reasoningEffort: "", maxQueuePerTask: previous ? previous.maxQueuePerTask : 0 }))
 						}, modelOptions)
 					),
 					h("div", { className: "tcSettingsRow" },
@@ -767,13 +787,32 @@ window.__ModuleLoader__.load({
 							onChange: (event) => setDraft((previous) => ({ ...previous, reasoningEffort: event.target.value }))
 						}, effortOptions)
 					),
+					h("div", { className: "tcSettingsRow" },
+						h("label", { className: "tcSettingsLabel" }, t("field.queue")),
+						h("input", {
+							type: "number",
+							className: "tcSettingsSelect",
+							min: 0,
+							max: QUEUE_CAP,
+							step: 1,
+							value: draft ? String(draft.maxQueuePerTask) : "0",
+							disabled: !draft || !writable,
+							onChange: (event) => {
+								const raw = event.target.value;
+								const next = raw === "" ? 0 : Math.trunc(Number(raw));
+								setDraft((previous) => ({ ...previous, maxQueuePerTask: Number.isFinite(next) ? next : 0 }));
+							}
+						})
+					),
+					h("p", { className: "tcSettingsHint" }, t("field.queue.hint", { cap: QUEUE_CAP })),
 					!pairValid ? h("p", { className: "tcSettingsStatus", "data-kind": "error" }, t("invalid.pair")) : null,
+					!queueValid ? h("p", { className: "tcSettingsStatus", "data-kind": "error" }, t("queue.invalid", { cap: QUEUE_CAP })) : null,
 					catalog.status === "error" ? h("p", { className: "tcSettingsStatus", "data-kind": "error" }, t("degraded.catalog", { message: catalog.error })) : null,
 					h("div", { className: "tcSettingsActions" },
 						h("button", {
 							type: "button",
 							className: "tcSettingsBtn",
-							disabled: !dirty || busy || !pairValid || !writable,
+							disabled: !dirty || busy || !pairValid || !queueValid || !writable,
 							onClick: () => { void save(); }
 						}, busy ? t("status.saving") : t("action.save")),
 						h("button", {
@@ -792,7 +831,8 @@ window.__ModuleLoader__.load({
 					message ? h("p", { className: "tcSettingsStatus", "data-kind": message.kind }, message.text) : null,
 					h("p", { className: "tcSettingsStatus" },
 						`${t("status.effective")}: ${effective ?? t("status.notSet")}`
-						+ (hostDefault ? ` · ${t("status.hostDefault")}: ${hostDefault}` : ""))
+						+ (hostDefault ? ` · ${t("status.hostDefault")}: ${hostDefault}` : "")
+						+ ` · ${t("field.queue")}: ${Number(stored?.maxQueuePerTask ?? 0) > 0 ? String(stored.maxQueuePerTask) : t("queue.follow")}`)
 				)
 			);
 			} catch (error) {

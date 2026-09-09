@@ -20,11 +20,20 @@
 export const SPAWN_MODELS_NS = 'task-coordinator';
 
 /**
+ * Hard ceiling for the GUI-editable per-target send-queue cap (0.23.0).
+ * The limiter consumes ~1 queued message per target round, so depths beyond
+ * this are never useful orchestration — they are spam. Values above the cap
+ * clamp down (consumption side); the GUI input enforces the same range.
+ */
+export const MAX_QUEUE_PER_TASK_CAP = 50;
+
+/**
  * Base (fallback) section entry: no default route — spawned tasks without an
  * explicit provider+model keep the host default model, exactly the pre-0.18
- * behavior.
+ * behavior. maxQueuePerTask 0 = "not set — follow the patch config" (the
+ * config.mjs default is 5).
  */
-export const SPAWN_MODELS_BASE = Object.freeze({ provider: '', model: '', reasoningEffort: '' });
+export const SPAWN_MODELS_BASE = Object.freeze({ provider: '', model: '', reasoningEffort: '', maxQueuePerTask: 0 });
 
 /**
  * Build the host-side schema for the section.
@@ -36,7 +45,32 @@ export function buildSpawnModelsSchema(z) {
     provider: z.string().default(''),
     model: z.string().default(''),
     reasoningEffort: z.string().default(''),
+    // 0.23.0: per-target send-queue cap, 0 = follow the patch config.
+    // step(1).min().max() is the real integer/range enforcement — schemastery
+    // 3.18.x has no .int() and pattern() is display-only (web-search-mana
+    // field finding). The write boundary stays types-only (0.18.5 lesson);
+    // the range is clamped at consumption (normalizeQueueCap) and constrained
+    // in the GUI input.
+    maxQueuePerTask: z.number().step(1).min(0).max(MAX_QUEUE_PER_TASK_CAP).default(0),
   });
+}
+
+/**
+ * Normalize the stored section's queue-cap override (0.23.0).
+ *
+ * Contract:
+ *  - absent / not an object / field missing  -> null (follow patch config);
+ *  - 0 or any non-integer / negative / non-number -> null (sentinel or junk);
+ *  - integer >= 1 -> min(value, MAX_QUEUE_PER_TASK_CAP) (clamped, honest cap).
+ *
+ * @param {unknown} value - resolved section value from the settings service.
+ * @returns {number | null} the effective cap override, or null to follow config.
+ */
+export function normalizeQueueCap(value) {
+  if (value === undefined || value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value.maxQueuePerTask;
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || !Number.isInteger(raw) || raw < 1) return null;
+  return Math.min(raw, MAX_QUEUE_PER_TASK_CAP);
 }
 
 /**
@@ -95,5 +129,11 @@ export function validateSpawnModelsSection(value) {
     if (value[key] !== undefined && typeof value[key] !== 'string') {
       throw new Error(`spawn-model default field "${key}" must be a string`);
     }
+  }
+  // Types-only at the write boundary (0.18.5 lesson): the range clamp lives
+  // at consumption (normalizeQueueCap) and in the GUI input, never here —
+  // an over-strict hook silently rolls back the whole atomic save.
+  if (value.maxQueuePerTask !== undefined && typeof value.maxQueuePerTask !== 'number') {
+    throw new Error('spawn-model default field "maxQueuePerTask" must be a number');
   }
 }

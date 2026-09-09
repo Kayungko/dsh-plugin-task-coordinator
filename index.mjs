@@ -27,7 +27,7 @@ import { registerCommands } from './commands.mjs';
 import { mountCoordinatorSkills } from './skills.mjs';
 import { SpawnRegistry } from './registry.mjs';
 import { resolveUiLocale, uiStrings } from './i18n.mjs';
-import { SPAWN_MODELS_NS, SPAWN_MODELS_BASE, buildSpawnModelsSchema, normalizeSpawnRoute, validateSpawnModelsSection } from './settings.mjs';
+import { SPAWN_MODELS_NS, SPAWN_MODELS_BASE, buildSpawnModelsSchema, normalizeSpawnRoute, normalizeQueueCap, validateSpawnModelsSection } from './settings.mjs';
 
 export const name = 'task-coordinator';
 export const inject = ['agents', 'tools', 'sessionController', 'commands'];
@@ -42,7 +42,7 @@ export function defaultRegistryFile() {
 
 export function apply(ctx, input = {}) {
   const config = resolveConfig(input);
-  ctx.provide('taskCoordinator', { config, version: '0.22.3' });
+  ctx.provide('taskCoordinator', { config, version: '0.23.0' });
   if (!config.enabled) {
     ctx.logger?.info('task-coordinator: disabled by config; no tools registered');
     return;
@@ -55,7 +55,19 @@ export function apply(ctx, input = {}) {
   if (!agents || typeof agents.get !== 'function') {
     throw new Error('task-coordinator: ctx.agents is unavailable');
   }
-  const limiter = new SendLimiter(config, (targetId) => {
+  // 0.23.0: maxQueuePerTask becomes GUI-editable (Settings → 任务编排). The
+  // limiter reads its cap through a live getter, so a settings edit applies
+  // from the next check() onward without a restart — the same live-read
+  // pattern as readSpawnDefaults (defined below; the getter only runs after
+  // apply() completes, so the forward reference is safe). Any settings
+  // failure falls back to the resolved patch-config value.
+  const limiterConfig = { ...config };
+  Object.defineProperty(limiterConfig, 'maxQueuePerTask', {
+    enumerable: true,
+    configurable: true,
+    get: () => readQueueCap() ?? config.maxQueuePerTask,
+  });
+  const limiter = new SendLimiter(limiterConfig, (targetId) => {
     const agent = agents.get(targetId);
     if (!agent) return 0;
     return (agent.inbox?.nextTurn?.length ?? 0) + (agent.inbox?.nextStep?.length ?? 0);
@@ -184,6 +196,18 @@ export function apply(ctx, input = {}) {
     } catch {
       // Defensive by contract: a malformed stored layer (or a missing service)
       // degrades to "no default route" and never breaks the spawn itself.
+      return null;
+    }
+  };
+  // Queue-cap override (0.23.0): live-read like readSpawnDefaults; null means
+  // "follow the patch config" (config.mjs default 5). normalizeQueueCap
+  // clamps hand-edited yaml values above the ceiling (MAX_QUEUE_PER_TASK_CAP).
+  const readQueueCap = () => {
+    try {
+      const service = typeof ctx.get === 'function' ? ctx.get('settings') : undefined;
+      const stored = typeof service?.get === 'function' ? service.get(SPAWN_MODELS_NS) : undefined;
+      return normalizeQueueCap(stored);
+    } catch {
       return null;
     }
   };
