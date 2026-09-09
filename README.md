@@ -119,7 +119,18 @@ Read-only lookups can bypass the model entirely: `/tasks` (all tasks), `/tasks t
 
 ### Copying session ids — one click in the session header
 
-The plugin ships a small **web client module** (`client.js`, declared via `dsh.client` in `package.json`) that occupies two official slots. ① `conversation.session.header.utilities` — the same seam the shipped `session-log-export` package uses: every session header gets a **Copy Session ID** button (filled pill matching the Session-log button geometry: black-on-white in light mode, white-on-black in dark mode) that copies the session's full `sessionId` to the clipboard, ready to paste into `task_send`, `task_progress` or `/tasks <id>` on the supervisor side. (The sidebar's per-session context menu is hard-coded in the host and cannot be extended — field-verified — so the header slot is the sanctioned place.) ② `settings.section` (0.18.1): a first-level **Task Orchestration** page in the settings left nav (beside General/Models/Plugins/Agent presets, order 25) that edits the default spawn model (see the section above).
+The plugin ships a small **web client module** (`client.js`, declared via `dsh.client` in `package.json`) that occupies three official slots. ① `conversation.session.header.utilities` — the same seam the shipped `session-log-export` package uses: every session header gets a **Copy Session ID** button (filled pill matching the Session-log button geometry: black-on-white in light mode, white-on-black in dark mode) that copies the session's full `sessionId` to the clipboard, ready to paste into `task_send`, `task_progress` or `/tasks <id>` on the supervisor side. (The sidebar's per-session context menu is hard-coded in the host and cannot be extended — field-verified — so the header slot is the sanctioned place.) ② `settings.section` (0.18.1): a first-level **Task Orchestration** page in the settings left nav (beside General/Models/Plugins/Agent presets, order 25) that edits the default spawn model (see the section above). ③ `conversation.view` (0.20.0): the **Orchestration** conversation tab — a live topology overview with the current session as the supervisor (see below).
+
+### Orchestration view — a live topology with the current session as supervisor (0.20.0)
+
+The third conversation tab, "**Orchestration**" (after the native Chat / Trajectory tabs, order 20): it anchors on the CURRENT session as the supervisor and renders everything it dispatched in real time — the supervisor node centered on top, child sessions grouped into team rows below (no-team children fall into the Ungrouped row); spawn (solid, downward), message (steer/queue accent, downward, mode-labeled) and report-back (dashed, upward) edges at a glance; **edges active within the last two minutes carry a dash-flow shimmer, and running nodes breathe with a pulse**.
+
+- **Node cards**: title, short id, model, team chip, status chip (running/idle/completed), todos n/m, goal phase and a relative last-activity time — live states join from the same projection line `task_list` reads (`useSessions`), and the supervisor's own state comes from the same source;
+- **Click a child to jump** straight into that session (the sidebar's navigation primitive `sessions.open`); when the sessions service is not in sight or the target is unknown, the click degrades to copying the session id with a status-line notice;
+- **Read-only, zero writes**: data comes entirely from the transcript (task_spawn / task_spawn_batch / task_send tool records plus child report-back messages) and the session-list projections — zero host changes; malformed records (window truncation with `call: null`, unfinished streaming JSON) are skipped silently, never thrown;
+- **The empty state guides**: a card explains when the session never dispatched a sub-task; opening the tab inside a child session or a plain session shows the same empty state (the view remounts per session and always anchors on the current one).
+
+A nested-supervisor badge (grandchild subtrees) is planned for phase B.
 
 ### Workspace placement: the five-tier fallback chain, fully observable (0.19.0)
 
@@ -309,7 +320,7 @@ dsh-plugin-task-coordinator/
 ├── ops.mjs             session operations · DI factory
 ├── tools.mjs           eleven task_* tool registrations
 ├── commands.mjs        /tasks slash command (direct execution, no model turn)
-├── client.js           web client module: copy-session-id header button + Task Orchestration settings tab (dsh.client)
+├── client.js           web client module: copy-session-id header button + Task Orchestration settings page + Orchestration conversation view (dsh.client)
 ├── skills.mjs          isolated skill mount (dynamic import, fire-and-forget)
 ├── skills/task-coordination/   supervisor playbook (shipped with the bundle)
 ├── cordis.patch.yml    isolated plugin-group mount descriptor

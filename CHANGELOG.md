@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-09
+
+### Added
+
+- **「编排」会话视图（conversation.view 槽第三个页签）**——以**当前会话为总控**的活体编排拓扑总览（设计蓝图：`research/orchestration-view-contracts.md` 四问契约调研 + `research/orchestration-view-transcript-perf.md` 性能实测）。纯客户端只读视图，**零宿主侧改动、零写操作**：
+  - **注册**：`conversation.view` 槽占用者（id `orchestration`、order 20，排在原生 chat(0)/trajectory(10) 之后），字典复用 `task-coordinator` 命名空间（zh「编排」/ en "Orchestration"），语言切换实时跟随；
+  - **数据提取（纯函数，经 `exports.__orchestration` 暴露测试面）**：从 `useChat` 快照节点提取 task_spawn / task_spawn_batch（子会话 sessionId/title/team/correlationId/depth/model，结果 JSON 权威、args 兜底，batch 失败项不建节点）、task_send（mode/目标/messageId/reference）、入站 relay 汇报（`context` 节点 + `source={kind:'coordinator',form:'relay',senderSessionId}` → 汇报上行边）、task_wait / task_cancel（状态注记）；容错：call=null 窗口截断结果、流式未完 JSON、非 JSON 结果文本、缺字段、store 抛错、无关工具、RUNNING 未落定调用——一律跳过不抛错；
+  - **活体联接**：`useSessions` 按 sessionId 联查 running/completed/updatedAt/title/todos(n/m)/goal.phase（与宿主 task_list 同一条投影线），总控自身状态同源；
+  - **布局（纯函数，确定性分层）**：总控节点顶部居中，子会话按 team 分组排下方行（team 码元序、未编组行居末、组内按 spawn 时间+sessionId），坐标纯计算无物理引擎，同输入必同输出；
+  - **边语义**：spawn=实线下行、汇报=虚线上行、steer/queue=强调色下行（带 mode 标签）；RECENT_MS=120 秒内有活动的边加 CSS dash-flow 流光；运行中节点呼吸脉冲（prefers-reduced-motion 尊重）；
+  - **节点卡**：title、shortId、model、team 芯片、状态芯片（运行中/空闲/已完成/离线）、todos n/m、goal 阶段、最近活动相对时间（30 秒节拍保鲜）；
+  - **交互**：点击子节点 → `ctx.get('sessions')?.open(childId)`（侧栏同款权威导航原语；寻视或 open 失败降级为复制 sessionId + 状态行提示）；刷新按钮重读快照；
+  - **空态/降级**：无 spawn 记录 → 引导卡「本会话未派发子任务」（子会话/普通会话同款——视图随会话重挂，始终以当前会话为总控）；useChat/useSessions 席缺席或抛错 → 诊断行；提取异常 → 诊断行 + 重试；渲染树整体 try/catch 自渲染错误（0.18.2 SlotErrorBoundary 纪律）；
+  - **性能**：提取只跑在转录已加载窗口上（宿主推送已解析事件，每节点 µs 级；实测 176k 事件全量过滤仅 8.25ms），新事件经 chat store 增量到达自动重提取，无全史扫描、无文件读取。
+- 嵌套总控徽章（子会话的子树）为 **B 阶段**，本版代码注释留位。
+
+### Tests
+
+- `verify-installed.mjs` 追加编排视图断言段（**全合成 fixture**，虚构会话 id/标题/内容，绝不引入真实转录）：①`exports.__orchestration` 测试面存在性；②提取正确性（spawn 字段权威序 / batch 含失败项不建子节点与 team 继承 / steer 模式与 messageId / relay 汇报边 / 畸形容错矩阵 + scanned 计数）；③布局确定性（两次调用 deepEqual、team 码元序 + 未编组居末、行内按 spawn 时间——并驱动布局纯函数改为组内自排序，直接喂未排序 children 也确定）；④门控 Proxy ctx 下 apply + 视图注册（id/order/label/locale）+ 子卡点击经 `ctx.get("sessions").open` 跳转；⑤渲染探针（活体套件不抛错 + 节点/边/流光/标签/todos 断言、空套件出空态卡 + 诊断行、抛错套件出诊断行不抛渲染）；⑥降级导航复制 sessionId；⑦静态断言（sessions 经 ctx.get、无 hostCtx.sessions 属性读）。fakeReact 的 useState 桩补齐惰性初始化器语义（真 React 行为）。repo 无 peer 依赖，以「临时目录仿真安装态」运行（junction 指向宿主 `@deepseek-ai` + 拷贝插件文件）：ALL INTEGRATION CHECKS PASSED；105 单测保持全绿。
+
 ## [0.19.0] - 2026-09-09
 
 ### Added

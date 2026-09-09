@@ -697,7 +697,9 @@ assert.equal(clientEntry.id, pkg.name, 'client module id must match package name
 
 const fakeReact = {
   createElement: (type, props, ...children) => ({ type, props, children }),
-  useState: (initial) => [initial, () => {}],
+  // 0.20.0: lazy initializers are real React semantics the orchestration view
+  // relies on (useState(() => Date.now())) — invoke them like the host would.
+  useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
   // present on the real host's React 18: the component subscribes to locale
   // snapshot revisions; the stand-in just reads the current snapshot
   useSyncExternalStore: (subscribe, getSnapshot) => getSnapshot(),
@@ -720,7 +722,7 @@ const slotCtx = {
   },
 };
 clientExports.apply(slotCtx);
-assert.equal(slotInjections.length, 2, 'header utilities + settings section');
+assert.equal(slotInjections.length, 3, 'header utilities + settings section + orchestration view');
 assert.equal(slotInjections[0].name, 'conversation.session.header.utilities');
 const occupation = slotInjections[0].thunk();
 assert.equal(occupation.options.id, 'copy-session-id');
@@ -804,6 +806,95 @@ assert.equal(lateEn.props.title, 'Copy Session ID (s-late)', 'en title uses ASCI
 if (navDesc) Object.defineProperty(globalThis, 'navigator', navDesc);
 else delete globalThis.navigator;
 
+// 0.20.0 orchestration-view fixtures (SYNTHETIC data only: fictional session
+// ids, titles and payloads — never real transcript content). Shared by the
+// gated-ctx probe below and the main assertion section at the tail.
+const orchNow = Date.now();
+const orchNodeStore = new Map();
+const orchOrder = [];
+let orchSeq = 0;
+const orchPush = (node) => { const key = `orch-node-${orchSeq++}`; orchNodeStore.set(key, node); orchOrder.push(key); };
+const orchToolResult = (name, argsRaw, resultText, time) => orchPush({
+  kind: 'tool-call',
+  data: { root: { kind: 'tool-result', callId: `orch-call-${orchSeq}`, time, call: { name, argsRaw }, callTime: time, content: resultText === null ? [] : [{ type: 'text', text: resultText }], isError: false, subCalls: [] } },
+});
+const orchRelay = (senderSessionId, time) => orchPush({
+  kind: 'context',
+  data: { seq: orchSeq, time, content: [{ type: 'text', text: 'synthetic report payload' }], source: { kind: 'coordinator', form: 'relay', senderSessionId }, provenance: { role: 'inject', label: 'coordinator' }, form: 'relay' },
+});
+// A settled spawn whose result carries the child identity…
+orchToolResult('task_spawn', JSON.stringify({ title: '探索｜甲任务', team: '编组甲', prompt: 'synthetic kickoff' }),
+  JSON.stringify({ ok: true, sessionId: 'session-alpha', shortId: 'alpha', title: '0909｜探索｜甲任务', team: '编组甲', cwd: '/proj', started: true, correlationId: 'corr-alpha', depth: 1, model: { provider: 'prov-x', model: 'model-x' } }), 1000000);
+// …a batch with one failed item (no session was born for it)…
+orchToolResult('task_spawn_batch', JSON.stringify({ tasks: [{ title: '功能｜乙', prompt: 'synthetic b' }, { title: '功能｜丙', prompt: 'synthetic c' }], team: '编组乙' }),
+  JSON.stringify({ ok: true, startedCount: 1, failedCount: 1, team: '编组乙', results: [
+    { ok: true, sessionId: 'session-beta', title: '0909｜功能｜乙', correlationId: 'corr-beta', depth: 1 },
+    { ok: false, code: 'model-unavailable', error: 'synthetic rejection' },
+  ] }), 1100000);
+// …a steer send with its receipt…
+orchToolResult('task_send', JSON.stringify({ sessionId: 'session-alpha', message: 'synthetic course correction', mode: 'steer' }),
+  JSON.stringify({ ok: true, delivered: true, targetId: 'session-alpha', mode: 'steer', messageId: 'msg-1', placement: 'next-step (mid-run steering)', targetStatus: 'running', queueDepth: { nextTurn: 0, nextStep: 1 } }), 1200000);
+// …two inbound relay reports (one stale, one inside RECENT_MS → flow shimmer)…
+orchRelay('session-alpha', 1300000);
+orchRelay('session-beta', orchNow - 30000);
+// …and a wait note.
+orchToolResult('task_wait', JSON.stringify({ sessionIds: ['session-alpha'], mode: 'any' }),
+  JSON.stringify({ ok: true, settled: true, reason: 'idle', waitedMs: 10, count: 1, targets: [{ sessionId: 'session-alpha', idle: true, agentState: 'idle' }] }), 1400000);
+// Malformed shapes that must ALL be skipped without throwing: a
+// window-truncated result (call === null), a non-JSON result text, a failed
+// spawn (ok:false → note only, never a child), an unrelated tool, a RUNNING
+// call, a store that throws on one key, and a key whose node is missing.
+orchPush({ kind: 'tool-call', data: { root: { kind: 'tool-result', callId: 'orch-call-trunc', time: 1500000, call: null, callTime: 1500000, content: [{ type: 'text', text: '{}' }], isError: false, subCalls: [] } } });
+orchToolResult('task_spawn', JSON.stringify({ title: '畸｜无结果', team: '编组甲' }), 'not json at all', 1510000);
+orchToolResult('task_spawn', '{"title":"streaming incompl', JSON.stringify({ ok: false, code: 'spawn-create-failed', error: 'synthetic failure' }), 1520000);
+orchToolResult('read', '{"file_path":"synthetic.txt"}', 'file body', 1530000);
+orchPush({ kind: 'tool-call', data: { root: { callId: 'orch-call-run', name: 'task_send', argsRaw: '{"sessionId":"session-al', time: 1540000, turn: 1, step: 1, subCalls: [] } } });
+orchOrder.push('orch-node-boom', 'orch-node-missing');
+const orchSnapshot = {
+  order: [...orchOrder],
+  nodes: { get: (key) => { if (key === 'orch-node-boom') throw new Error('synthetic store glitch'); return orchNodeStore.get(key); } },
+};
+const orchSessionsList = {
+  ids: ['session-superview', 'session-alpha', 'session-beta'],
+  current: 'session-superview',
+  byId: {
+    'session-superview': { id: 'session-superview', displayTitle: 'Superview 合成总控', running: true, completed: false, blank: false, updatedAt: orchNow - 4000, projectionValues: { todos: [{ content: 'a', status: 'completed' }, { content: 'b', status: 'in_progress' }], goal: { goal: { phase: 'active', objective: 'synthetic' } } } },
+    'session-alpha': { id: 'session-alpha', displayTitle: 'Alpha 合成任务', running: true, completed: false, blank: false, updatedAt: orchNow - 5000, projectionValues: { todos: [{ content: 'a', status: 'completed' }, { content: 'b', status: 'pending' }, { content: 'c', status: 'pending' }], goal: { goal: { phase: 'active', objective: 'synthetic' } } } },
+    'session-beta': { id: 'session-beta', displayTitle: 'Beta 合成任务', running: false, completed: true, blank: false, updatedAt: orchNow - 65000, projectionValues: {} },
+  },
+};
+const orchChatSeat = (selector) => selector(orchSnapshot);
+const orchSessionsSeat = (selector) => selector(orchSessionsList);
+/** Depth-first collect over the fake-react element tree (elements only). */
+const orchIsElement = (node) => node !== null && typeof node === 'object' && typeof node.type !== 'undefined';
+const orchCollect = (root, predicate) => {
+  const found = [];
+  const walk = (node) => {
+    if (node === null || node === undefined || typeof node === 'string') return;
+    if (Array.isArray(node)) { for (const item of node) walk(item); return; }
+    if (!orchIsElement(node)) return;
+    if (predicate(node)) found.push(node);
+    if (Array.isArray(node.children)) for (const child of node.children) walk(child);
+    else walk(node.children);
+  };
+  walk(root);
+  return found;
+};
+/** True when any text node under the tree matches the pattern. */
+const orchByText = (root, pattern) => {
+  let hit = false;
+  const walk = (node) => {
+    if (node === null || node === undefined || hit) return;
+    if (typeof node === 'string') { if (pattern.test(node)) hit = true; return; }
+    if (Array.isArray(node)) { for (const item of node) walk(item); return; }
+    if (!orchIsElement(node)) return;
+    if (Array.isArray(node.children)) for (const child of node.children) walk(child);
+    else walk(node.children);
+  };
+  walk(root);
+  return hit;
+};
+
 // 0.18.1 runner-gate regression (the root cause of the permanently grey
 // selects): dsh-cordis-client-runner's dynamicCordisContext gates direct
 // ctx.serviceName property access behind the fiber's inject declaration —
@@ -828,6 +919,9 @@ else delete globalThis.navigator;
     writable: true,
     revision: 1,
   };
+  // 0.20.0: the sessions service stands in behind the gate — the view's
+  // child-card click must sight it through ctx.get() and call open(id).
+  const gatedOpened = [];
   const gatedServices = {
     locale: gatedRuntime,
     settingsScope: {
@@ -841,6 +935,7 @@ else delete globalThis.navigator;
     // 0.18.4: the CLIENT wire answers a result envelope ({ok, value}), not the
     // bare catalog the host-side facade returns — the fake mirrors the wire.
     remote: { session: { modelCatalog: async () => ({ ok: true, value: { groups: [], failures: [], default: undefined } }) } },
+    sessions: { open: (id) => gatedOpened.push(id) },
   };
   const gatedSlotInjections = [];
   const gatedSlotService = {
@@ -862,7 +957,7 @@ else delete globalThis.navigator;
   let gatedApplyError = null;
   try { freshExports.apply(gatedCtx); } catch (error) { gatedApplyError = error; }
   assert.equal(gatedApplyError, null, 'apply() must survive the runner inject gate (no direct undeclared service reads)');
-  assert.equal(gatedSlotInjections.length, 2, 'both slots register through the gated ctx');
+  assert.equal(gatedSlotInjections.length, 3, 'all three slots register through the gated ctx');
   // The eager ensureLocale inside apply() sights the runtime through
   // ctx.get('locale') under the gate — the 0.16.1 lazy sighting that never
   // actually engaged in production until this fix.
@@ -879,6 +974,23 @@ else delete globalThis.navigator;
   const gatedTab = gatedSlotInjections[1].thunk();
   const gatedTabTree = gatedTab.component({});
   assert.equal(gatedTabTree.type, 'div', 'settings section renders through the gated ctx with live services');
+  // 0.20.0 orchestration view through the gate: the third slot registers with
+  // the contract shape (id/order/label), renders the synthetic topology, and
+  // the child-card click sights the sessions service through ctx.get() — the
+  // sidebar's authoritative navigation primitive (research Q3), unreachable
+  // via a direct hostCtx.sessions read under the runner gate.
+  assert.equal(gatedSlotInjections[2].name, 'conversation.view');
+  const gatedOrchOccupation = gatedSlotInjections[2].thunk();
+  assert.equal(gatedOrchOccupation.options.id, 'orchestration');
+  assert.equal(gatedOrchOccupation.options.order, 20, 'order 20 sits after the native chat(0)/trajectory(10) tabs');
+  assert.match(gatedOrchOccupation.options.label(), /编排|Orchestration/);
+  assert.equal(typeof gatedOrchOccupation.component, 'function');
+  const gatedOrchTree = gatedOrchOccupation.component({ sessionId: 'session-superview', useChat: orchChatSeat, useSessions: orchSessionsSeat });
+  assert.equal(gatedOrchTree.type, 'div', 'orchestration view renders through the gated ctx');
+  const gatedChildCards = orchCollect(gatedOrchTree, (el) => el.props && String(el.props.className || '').includes('orchViewNode') && el.props['data-role'] === 'child');
+  assert.equal(gatedChildCards.length, 2, 'both synthetic children render through the gated ctx');
+  gatedChildCards[0].props.onClick();
+  assert.deepEqual(gatedOpened, ['session-alpha'], 'child-card click must navigate via ctx.get("sessions").open');
   if (docDesc) Object.defineProperty(globalThis, 'document', docDesc);
   else delete globalThis.document;
   if (navDesc) Object.defineProperty(globalThis, 'navigator', navDesc);
@@ -889,4 +1001,150 @@ console.log('client module      : OK -> dsh.client declared, bundle loads, heade
 console.log('client i18n        : OK -> bare-key t() falls back to zh, late locale service registers on first sight, zh/en resolve live');
 console.log('client runner gate : OK -> apply/render survive the inject gate; locale sights via ctx.get(); source reads settingsScope/remote through ctx.get()');
 
+// 8. orchestration view (0.20.0): registration shape, pure-function test
+// surface, synthetic-fixture extraction, deterministic layout, render probes
+// (live/empty/throwing seats), degraded navigation fallback and static source
+// guards. The fixtures are fully synthetic — fictional ids/titles/payloads,
+// never real transcript content.
+{
+  Object.defineProperty(globalThis, 'document', { value: { querySelector: () => ({}) }, configurable: true });
+  var orchOccupation = slotInjections[2].thunk();
+  if (docDesc) Object.defineProperty(globalThis, 'document', docDesc);
+  else delete globalThis.document;
+  assert.equal(slotInjections[2].name, 'conversation.view');
+  assert.equal(orchOccupation.options.name, 'conversation.view');
+  assert.equal(orchOccupation.options.id, 'orchestration');
+  assert.equal(orchOccupation.options.order, 20, 'order 20 sits after the native chat(0)/trajectory(10) tabs');
+  assert.match(orchOccupation.options.label(), /编排|Orchestration/);
+  assert.equal(orchOccupation.options.locale, 'task-coordinator', 'the view reuses the plugin dictionary namespace');
+  assert.equal(typeof orchOccupation.component, 'function');
+}
+
+// 8a. the pure-function test surface
+const orchApi = clientExports.__orchestration;
+assert.ok(orchApi && typeof orchApi === 'object', 'exports.__orchestration test surface must exist');
+assert.equal(typeof orchApi.extractOrchestration, 'function');
+assert.equal(typeof orchApi.layoutTopology, 'function');
+assert.equal(typeof orchApi.orchSessionInfo, 'function');
+assert.equal(typeof orchApi.orchAgoText, 'function');
+assert.equal(orchApi.RECENT_MS, 120000);
+assert.equal(orchApi.ORCH_COORD, 'coordinator');
+
+// 8b. extraction over the synthetic snapshot: two children (spawn + batch
+// success), five edges (2 spawn, 1 steer send, 2 relay reports), one wait
+// note + one spawn-failed note — and every malformed shape skipped silently.
+const orchExtraction = orchApi.extractOrchestration(orchSnapshot);
+assert.equal(orchExtraction.children.length, 2, 'spawn + batch-success children only (failed batch item never becomes a child)');
+assert.equal(orchExtraction.edges.length, 5, '2 spawn + 1 send + 2 report edges');
+const alphaChild = orchExtraction.children.find((child) => child.sessionId === 'session-alpha');
+const betaChild = orchExtraction.children.find((child) => child.sessionId === 'session-beta');
+assert.ok(alphaChild && betaChild, 'both synthetic children extracted');
+assert.equal(alphaChild.title, '0909｜探索｜甲任务', 'the result title wins over the args title');
+assert.equal(alphaChild.team, '编组甲');
+assert.equal(alphaChild.correlationId, 'corr-alpha');
+assert.equal(alphaChild.depth, 1);
+assert.equal(alphaChild.model && alphaChild.model.model, 'model-x');
+assert.equal(alphaChild.shortId, 'alpha');
+assert.equal(betaChild.team, '编组乙', 'batch children inherit the batch team');
+assert.equal(betaChild.correlationId, 'corr-beta');
+const orchSpawnEdges = orchExtraction.edges.filter((edge) => edge.kind === 'spawn');
+assert.deepEqual(orchSpawnEdges.map((edge) => edge.to).sort(), ['session-alpha', 'session-beta']);
+assert.ok(orchSpawnEdges.every((edge) => edge.from === 'coordinator'));
+const orchSendEdges = orchExtraction.edges.filter((edge) => edge.kind === 'send');
+assert.equal(orchSendEdges.length, 1);
+assert.equal(orchSendEdges[0].mode, 'steer');
+assert.equal(orchSendEdges[0].messageId, 'msg-1');
+assert.equal(orchSendEdges[0].to, 'session-alpha');
+const orchReportEdges = orchExtraction.edges.filter((edge) => edge.kind === 'report');
+assert.equal(orchReportEdges.length, 2, 'inbound relay context nodes become report edges');
+assert.ok(orchReportEdges.every((edge) => edge.to === 'coordinator' && /^session-/.test(edge.from)));
+const orchWaitNotes = orchExtraction.notes.filter((note) => note.kind === 'wait');
+assert.equal(orchWaitNotes.length, 1);
+assert.equal(orchWaitNotes[0].detail.settled, true);
+assert.equal(orchExtraction.notes.filter((note) => note.kind === 'spawn-failed').length, 1, 'the ok:false spawn lands as a note, never a child');
+assert.equal(orchExtraction.scanned, 11, 'scanned counts every non-null node including the malformed ones');
+// malformed inputs never throw
+assert.deepEqual(orchApi.extractOrchestration(null), { children: [], edges: [], notes: [], scanned: 0 });
+assert.deepEqual(orchApi.extractOrchestration({}).children, []);
+assert.deepEqual(orchApi.extractOrchestration({ order: 'not-an-array', nodes: null }).children, []);
+
+// 8c. layout determinism: same extraction → identical layout; teams in
+// code-point order with the ungrouped row LAST; the supervisor sits on top.
+const orchLayoutA = orchApi.layoutTopology(orchExtraction);
+const orchLayoutB = orchApi.layoutTopology(orchExtraction);
+assert.equal(JSON.stringify(orchLayoutA), JSON.stringify(orchLayoutB), 'layoutTopology must be deterministic');
+// UTF-16 code-unit order: '乙' (U+4E59) sorts BEFORE '甲' (U+7532).
+assert.deepEqual(orchLayoutA.rows.map((row) => row.team), ['编组乙', '编组甲']);
+assert.ok(orchLayoutA.nodes.coordinator, 'the supervisor node always exists');
+assert.equal(orchLayoutA.nodes.coordinator.y, orchApi.ORCH_LAYOUT.padTop, 'supervisor on the top row');
+assert.ok(orchLayoutA.rows.every((row) => row.y > orchLayoutA.nodes.coordinator.y), 'team rows sit below the supervisor');
+assert.ok(orchLayoutA.nodes['session-alpha'] && orchLayoutA.nodes['session-beta']);
+assert.ok(orchLayoutA.size.width > 0 && orchLayoutA.size.height > 0);
+const orchLooseLayout = orchApi.layoutTopology({ children: [
+  { sessionId: 'session-loose-b', time: 2000 },
+  { sessionId: 'session-loose-a', time: 1000 },
+  { sessionId: 'session-teamed', team: 'Z 组', time: 1500 },
+], edges: [], notes: [] });
+assert.deepEqual(orchLooseLayout.rows.map((row) => row.team), ['Z 组', ''], 'ungrouped children form the LAST row');
+assert.deepEqual(orchLooseLayout.rows[1].ids, ['session-loose-a', 'session-loose-b'], 'in-row order follows spawn time');
+
+// 8d. live-session join (pure): running/completed/title/todos/goal from the
+// useSessions projection rows — the same source task_list reads host-side.
+const orchAlphaInfo = orchApi.orchSessionInfo(orchSessionsList.byId, 'session-alpha');
+assert.equal(orchAlphaInfo.running, true);
+assert.equal(orchAlphaInfo.title, 'Alpha 合成任务');
+assert.deepEqual(orchAlphaInfo.todos, { done: 1, total: 3 });
+assert.equal(orchAlphaInfo.goalPhase, 'active');
+assert.equal(orchApi.orchSessionInfo(orchSessionsList.byId, 'session-ghost'), null);
+assert.equal(orchApi.orchSessionInfo(null, 'session-alpha'), null);
+assert.equal(orchApi.orchAgoText(orchNow - 5000, orchNow, (key) => (key === 'orch.time.now' ? '刚刚' : key)), '刚刚');
+assert.equal(orchApi.orchAgoText(orchNow - 65000, orchNow, (key, params) => (key === 'orch.time.min' ? `${params.n} 分钟前` : key)), '1 分钟前');
+assert.equal(orchApi.orchAgoText(undefined, orchNow, (key) => key), 'orch.time.unknown');
+
+// 8e. render probes under the fake-react stand-in: live seats render the
+// topology without throwing; MISSING seats render the empty-state card plus
+// diagnostics; a THROWING seat renders a diagnostics line instead of letting
+// the render throw (the host SlotErrorBoundary abdicates entries that throw).
+const orchTree = orchOccupation.component({ sessionId: 'session-superview', useChat: orchChatSeat, useSessions: orchSessionsSeat });
+assert.equal(orchTree.type, 'div', 'the view renders a root div with live seats');
+const orchChildCards = orchCollect(orchTree, (el) => el.props && String(el.props.className || '').includes('orchViewNode') && el.props['data-role'] === 'child');
+assert.equal(orchChildCards.length, 2, 'both synthetic children render');
+assert.deepEqual(orchChildCards.map((card) => card.props['data-state']).sort(), ['completed', 'running'], 'live running/completed states join from useSessions');
+const orchCoordCards = orchCollect(orchTree, (el) => el.props && el.props['data-role'] === 'coordinator');
+assert.equal(orchCoordCards.length, 1, 'exactly one supervisor card');
+assert.equal(orchCoordCards[0].props['data-state'], 'running', 'the supervisor state comes from the same sessions source');
+const orchEdgeEls = orchCollect(orchTree, (el) => el.type === 'path' && el.props && String(el.props.className || '').includes('orchViewEdge'));
+assert.equal(orchEdgeEls.length, 5, '2 spawn + 1 send + 2 report edges render');
+assert.equal(orchEdgeEls.filter((el) => String(el.props.className).includes('orchViewFlow')).length, 1, 'exactly the RECENT_MS report edge gets the dash-flow shimmer');
+assert.ok(orchByText(orchTree, /steer/), 'the send edge carries its mode label');
+assert.ok(orchByText(orchTree, /1\/3/), 'the todos chip joins n/m from the sessions projection');
+assert.ok(orchByText(orchTree, /编组甲/), 'team names render (chip and/or row label)');
+const orchEmptyTree = orchOccupation.component({ sessionId: 'session-plain' });
+assert.equal(orchEmptyTree.type, 'div');
+assert.ok(orchByText(orchEmptyTree, /未派发子任务|No tasks dispatched/), 'missing seats render the empty-state card');
+assert.ok(orchCollect(orchEmptyTree, (el) => el.props && el.props['data-kind'] === 'error').length >= 1, 'missing seats render a diagnostics line');
+const orchBrokenTree = orchOccupation.component({ sessionId: 'session-superview', useChat: () => { throw new Error('chat seat boom'); }, useSessions: orchSessionsSeat });
+assert.ok(orchByText(orchBrokenTree, /chat seat boom/), 'a throwing seat surfaces its reason in a diagnostics line');
+
+// 8f. degraded navigation: without a sessions service in sight (this slotCtx
+// exposes no ctx.get) the child click falls back to copying the session id.
+Object.defineProperty(globalThis, 'navigator', { value: { clipboard: { writeText: async (text) => { wrote.push(text); } } }, configurable: true });
+orchChildCards[0].props.onClick();
+await new Promise((resolve) => setImmediate(resolve));
+assert.deepEqual(wrote.slice(-1), ['session-alpha'], 'degraded click copies the session id');
+if (navDesc) Object.defineProperty(globalThis, 'navigator', navDesc);
+else delete globalThis.navigator;
+
+// 8g. static source guards: the orchestration jump must sight the sessions
+// service through ctx.get() (the runner's inject gate throws on direct
+// undeclared property reads), and the bundle never reads hostCtx.sessions.
+assert.match(clientSrc, /hostCtx\.get\("sessions"\)/, 'the child-card jump must sight sessions via ctx.get()');
+assert.doesNotMatch(clientSrc, /hostCtx\.sessions\b/, 'no direct hostCtx.sessions property read (runner inject gate)');
+assert.match(clientSrc, /name: "conversation\.view"/);
+assert.match(clientSrc, /id: "orchestration"/);
+console.log('client orchestration: OK -> view registered (id orchestration, order 20, ' + orchOccupation.options.label() + '), synthetic extraction (spawn/batch/steer/relay/malformed), deterministic layout, live/empty/throwing render probes, degraded copy fallback, ctx.get("sessions") jump + static guards');
+
 console.log('\nALL INTEGRATION CHECKS PASSED');
+// The degraded-click probe leaves a 6s flash timer behind; exit explicitly so
+// the harness does not wait for it (all output above is synchronous).
+process.exit(0);

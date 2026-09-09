@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.19.0)
+ * dsh-plugin-task-coordinator — client module (0.20.0)
  *
  * Two surfaces:
  *  1. `conversation.session.header.utilities` slot — the "Copy session id"
@@ -58,6 +58,42 @@
  * dotted names via ctx.get), with the facade walk as fallback — a
  * synchronous throw on the facade's `.session` reach is the prime suspect
  * for the 0.18.1 blank panel.
+ *
+ * 0.20.0: third slot — the "编排" (Orchestration) conversation view.
+ * Registers `conversation.view` (id 'orchestration', order 20, after the
+ * native chat/trajectory tabs) and renders the LIVE topology anchored on
+ * the CURRENT session as the supervisor: a supervisor node on top, child
+ * session cards grouped into team rows below, spawn/send/report edges,
+ * live running/todos/goal states joined from useSessions projections, and
+ * a dash-flow shimmer on edges active within RECENT_MS. Pure client-side
+ * READ-ONLY view — zero host changes, zero writes. Design contracts are
+ * field-researched (research/orchestration-view-contracts.md):
+ * - data comes from the standard seats only: useChat (transcript nodes),
+ *   useSessions (live SessionSummary rows incl. projectionValues todos /
+ *   goal), sessionId; jumps go through ctx.get('sessions')?.open(id)
+ *   (the sidebar's authoritative navigation primitive) with a
+ *   copy-session-id fallback when the sighting or the open fails;
+ * - extraction is a PURE function (exports.__orchestration test surface):
+ *   tool-call nodes' data.root yields task_spawn / task_spawn_batch
+ *   (child session id/title/team/correlationId/depth/model from the result
+ *   JSON), task_send (mode/target/messageId/reference), inbound relay
+ *   reports arrive as `context` nodes with source.kind='coordinator' +
+ *   form='relay' + senderSessionId, task_wait/task_cancel land as notes;
+ *   malformed shapes (call === null results, unfinished streaming JSON,
+ *   missing fields) are SKIPPED, never thrown;
+ * - layout is a pure deterministic layered function (no physics): the
+ *   supervisor node centered on top, team rows below (no-team children
+ *   fall into the "未编组" row, which sorts last); coordinates depend
+ *   only on the extraction output;
+ * - the transcript is a finite window (the chat store's live projection):
+ *   extraction re-runs per snapshot change over the loaded window only
+ *   (~µs per node; the full-history cost lives host-side, per the
+ *   transcript-perf research), so a 176k-event coordinator costs the
+ *   client nothing extra;
+ * - crash discipline follows the settings section (0.18.2): every seat
+ *   read and effect body is guarded, and the derived+tree block sits in
+ *   a try/catch that RENDERS the failure itself — the host's
+ *   SlotErrorBoundary must never abdicate this entry.
  *
  * Contract notes (field-tested against DSH Desktop 2.0.5 / core 0.1.2-rc.1):
  * - The client-modules registry reads this file's path from the plugin's
@@ -140,7 +176,41 @@ window.__ModuleLoader__.load({
 				"degraded.read": "设置读取失败：{message}",
 				"degraded.render": "页面渲染异常：{message}",
 				"save.rejected": "保存未生效：宿主拒绝了本次写入（已回读核对）。请重试；若持续失败请检查宿主日志。",
-				"action.retry": "重试"
+				"action.retry": "重试",
+				// 0.20.0 orchestration view (conversation.view slot, id 'orchestration')
+				"view.tab": "编排",
+				"orch.empty.title": "本会话未派发子任务",
+				"orch.empty.hint": "用 task_spawn / task_spawn_batch 派发子任务后，这里会实时呈现以本会话为总控的编排拓扑。",
+				"orch.empty.suffix": "在子会话或普通会话中打开本页时同样显示此空态——编排视图以当前会话为总控。",
+				"orch.coordinator": "总控",
+				"orch.ungrouped": "未编组",
+				"orch.status.running": "运行中",
+				"orch.status.idle": "空闲",
+				"orch.status.completed": "已完成",
+				"orch.status.unknown": "离线",
+				"orch.todos": "待办 {done}/{total}",
+				"orch.goal": "阶段 {phase}",
+				"orch.refresh": "刷新",
+				"orch.retry": "重试",
+				"orch.children": "{n} 个子会话",
+				"orch.notes.wait": "等待 ×{n}",
+				"orch.notes.cancel": "取消 ×{n}",
+				"orch.time.now": "刚刚",
+				"orch.time.sec": "{n} 秒前",
+				"orch.time.min": "{n} 分钟前",
+				"orch.time.hour": "{n} 小时前",
+				"orch.time.day": "{n} 天前",
+				"orch.time.unknown": "活动时间未知",
+				"orch.degraded.chat": "转录服务不可用（{message}），编排拓扑暂无法提取。",
+				"orch.degraded.sessions": "会话列表服务不可用，实时状态暂缺（拓扑按转录记录渲染）。",
+				"orch.error.extract": "拓扑提取异常：{message}",
+				"orch.error.render": "编排视图渲染异常：{message}",
+				"orch.open.copied": "无法跳转（{message}），已复制会话 ID：{id}",
+				"orch.open.copyFailed": "无法跳转（{message}），且复制失败——会话 ID：{id}",
+				"orch.legend.spawn": "派发",
+				"orch.legend.send": "指令",
+				"orch.legend.report": "汇报",
+				"orch.legend.recent": "2 分钟内有活动"
 			},
 			en: {
 				"header.action": "Copy Session ID",
@@ -171,7 +241,41 @@ window.__ModuleLoader__.load({
 				"degraded.read": "Settings read failed: {message}",
 				"degraded.render": "This page failed to render: {message}",
 				"save.rejected": "Save did not take effect: the host rejected the write (verified by read-back). Retry; if it keeps failing, check the host log.",
-				"action.retry": "Retry"
+				"action.retry": "Retry",
+				// 0.20.0 orchestration view (conversation.view slot, id 'orchestration')
+				"view.tab": "Orchestration",
+				"orch.empty.title": "No tasks dispatched from this session",
+				"orch.empty.hint": "Dispatch sub-tasks with task_spawn / task_spawn_batch and this tab renders the live topology with this session as the supervisor.",
+				"orch.empty.suffix": "Opening this tab inside a child session or a plain session shows the same empty state — the view always anchors on the current session.",
+				"orch.coordinator": "Supervisor",
+				"orch.ungrouped": "Ungrouped",
+				"orch.status.running": "Running",
+				"orch.status.idle": "Idle",
+				"orch.status.completed": "Completed",
+				"orch.status.unknown": "Offline",
+				"orch.todos": "Todos {done}/{total}",
+				"orch.goal": "Phase {phase}",
+				"orch.refresh": "Refresh",
+				"orch.retry": "Retry",
+				"orch.children": "{n} child sessions",
+				"orch.notes.wait": "waits ×{n}",
+				"orch.notes.cancel": "cancels ×{n}",
+				"orch.time.now": "just now",
+				"orch.time.sec": "{n}s ago",
+				"orch.time.min": "{n}m ago",
+				"orch.time.hour": "{n}h ago",
+				"orch.time.day": "{n}d ago",
+				"orch.time.unknown": "last activity unknown",
+				"orch.degraded.chat": "The transcript service is unavailable ({message}); the orchestration topology cannot be extracted.",
+				"orch.degraded.sessions": "The session list is unavailable; live states are missing (the topology renders from transcript records).",
+				"orch.error.extract": "Topology extraction failed: {message}",
+				"orch.error.render": "The orchestration view failed to render: {message}",
+				"orch.open.copied": "Cannot open the session ({message}); copied the session id: {id}",
+				"orch.open.copyFailed": "Cannot open the session ({message}); the clipboard copy failed too — session id: {id}",
+				"orch.legend.spawn": "spawn",
+				"orch.legend.send": "message",
+				"orch.legend.report": "report",
+				"orch.legend.recent": "active within 2 min"
 			}
 		};
 		/** Live LocaleRuntime (register/translate/getSnapshot/subscribe) when present. */
@@ -684,6 +788,573 @@ window.__ModuleLoader__.load({
 			}
 		}
 
+		// --- orchestration view (0.20.0) ---------------------------------------
+		/** Style element id for the orchestration view (deduped per document). */
+		const STYLE_ID_ORCH = "dsh-plugin-task-coordinator/orchestration-view";
+		const ORCH_CSS = [
+			".orchViewRoot{display:flex;flex-direction:column;gap:10px;padding:16px;min-height:100%;box-sizing:border-box;font-family:var(--dsw-font-family,inherit)}",
+			".orchViewToolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}",
+			".orchViewTitle{margin:0;font-size:16px;font-weight:600;color:var(--dsw-alias-label-primary,#0f1115)}",
+			".orchViewMeta{font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary,#5b616e)}",
+			".orchViewFlash{margin:0;font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary,#5b616e)}",
+			".orchViewFlash[data-kind='error']{color:var(--dsw-alias-danger,#c0392b)}",
+			".orchViewBtn{height:28px;padding:0 12px;border-radius:14px;border:1px solid var(--dsw-alias-border-l2,#0000001f);background:transparent;color:var(--dsw-alias-label-secondary,#5b616e);cursor:pointer;font-size:12px;font-family:var(--dsh-font-family,inherit)}",
+			".orchViewBtn:hover{color:var(--dsw-alias-label-primary,#0f1115)}",
+			".orchViewCanvas{position:relative;overflow:auto;border:1px solid var(--dsw-alias-border-l2,#00000014);border-radius:12px;background:var(--dsw-alias-bg-module-platform,#fafbfc)}",
+			".orchViewLayer{position:relative}",
+			".orchViewSvg{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}",
+			".orchViewRowLabel{position:absolute;font-size:12px;line-height:22px;color:var(--dsw-alias-label-secondary,#5b616e);white-space:nowrap}",
+			".orchViewNode{position:absolute;box-sizing:border-box;width:240px;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2,#0000001f);border-radius:10px;background:var(--dsw-alias-bg-module-platform,#fff);color:var(--dsw-alias-label-primary,#0f1115);cursor:pointer;text-align:left;font-family:var(--dsw-font-family,inherit)}",
+			".orchViewNode:hover{border-color:var(--dsw-alias-label-secondary,#5b616e)}",
+			".orchViewNode[data-role='coordinator']{border-width:2px;cursor:default}",
+			".orchViewNodeTitle{font-size:13px;font-weight:600;line-height:18px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}",
+			".orchViewNodeMeta{display:flex;gap:8px;align-items:baseline;margin-top:2px;min-width:0}",
+			".orchViewId{font-size:11px;color:var(--dsw-alias-label-secondary,#5b616e);font-family:ui-monospace,SFMono-Regular,Consolas,monospace}",
+			".orchViewModel{font-size:11px;color:var(--dsw-alias-label-secondary,#5b616e);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+			".orchViewChips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}",
+			".orchViewChip{font-size:11px;line-height:18px;padding:0 8px;border-radius:9px;background:var(--dsw-alias-bg-module-embed,#f0f1f3);color:var(--dsw-alias-label-secondary,#5b616e);white-space:nowrap}",
+			".orchViewChip[data-kind='team']{color:var(--dsw-alias-label-primary,#0f1115)}",
+			".orchViewChip[data-kind='status'][data-state='running']{color:var(--dsw-alias-accent,#2563eb);background:rgba(37,99,235,.12)}",
+			".orchViewChip[data-kind='status'][data-state='completed']{color:var(--dsw-alias-success,#16a34a);background:rgba(22,163,74,.12)}",
+			".orchViewChip[data-kind='status'][data-state='unknown']{opacity:.7}",
+			".orchViewNodeTime{margin-top:4px;font-size:11px;color:var(--dsw-alias-label-secondary,#5b616e)}",
+			".orchViewBreath{animation:orchViewBreathKf 2s ease-in-out infinite}",
+			"@keyframes orchViewBreathKf{0%,100%{box-shadow:0 0 0 0 rgba(37,99,235,.3)}50%{box-shadow:0 0 0 7px rgba(37,99,235,0)}}",
+			".orchViewEdge{fill:none;stroke-width:1.5}",
+			".orchViewEdgeSpawn{stroke:var(--dsw-alias-border-l2,#c9ced6)}",
+			".orchViewEdgeSend{stroke:var(--dsw-alias-accent,#2563eb)}",
+			".orchViewEdgeReport{stroke:var(--dsw-alias-label-secondary,#8a919e);stroke-dasharray:6 4}",
+			".orchViewFlow{stroke-dasharray:8 6;animation:orchViewFlowKf 1.1s linear infinite}",
+			"@keyframes orchViewFlowKf{to{stroke-dashoffset:-28}}",
+			".orchViewEdgeLabel{font-size:10px;fill:var(--dsw-alias-label-secondary,#5b616e)}",
+			".orchViewLegend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--dsw-alias-label-secondary,#5b616e);align-items:center}",
+			".orchViewLegendKey{display:inline-block;width:18px;height:0;border-top:2px solid var(--dsw-alias-border-l2,#c9ced6);vertical-align:middle;margin-right:4px}",
+			".orchViewLegendKey[data-kind='send']{border-top-color:var(--dsw-alias-accent,#2563eb)}",
+			".orchViewLegendKey[data-kind='report']{border-top-style:dashed;border-top-color:var(--dsw-alias-label-secondary,#8a919e)}",
+			".orchViewEmpty{display:flex;flex-direction:column;gap:8px;padding:32px 24px;border:1px dashed var(--dsw-alias-border-l2,#0000001f);border-radius:12px;max-width:560px;margin:24px auto 0;text-align:center}",
+			".orchViewEmptyTitle{margin:0;font-size:15px;font-weight:600;color:var(--dsw-alias-label-primary,#0f1115)}",
+			".orchViewEmptyText{margin:0;font-size:13px;line-height:21px;color:var(--dsw-alias-label-secondary,#5b616e)}",
+			"@media (prefers-reduced-motion: reduce){.orchViewBreath{animation:none}.orchViewFlow{animation:none}}"
+		].join("\n");
+		function installOrchStyles() {
+			if (document.querySelector(`style[data-plugin="${STYLE_ID_ORCH}"]`) !== null) return () => {};
+			const style = document.createElement("style");
+			style.dataset.plugin = STYLE_ID_ORCH;
+			style.textContent = ORCH_CSS;
+			document.head.append(style);
+			return () => { style.remove(); };
+		}
+		/** Edges with activity inside this window get the dash-flow shimmer. */
+		const RECENT_MS = 120000;
+		/** Sentinel node id for the supervisor (the CURRENT session anchors the view). */
+		const ORCH_COORD = "coordinator";
+		/** Deterministic layered-layout metrics (px). */
+		const ORCH_LAYOUT = { nodeW: 240, nodeH: 108, gapX: 24, rowGap: 56, labelH: 22, padX: 16, padTop: 16, padBottom: 16 };
+
+		/** Best-effort JSON object parse: malformed / streaming-incomplete text → null. */
+		function orchParseJson(text) {
+			if (typeof text !== "string" || text.length === 0) return null;
+			try {
+				const value = JSON.parse(text);
+				return value !== null && typeof value === "object" ? value : null;
+			} catch { return null; }
+		}
+		/** First text block of a tool-result content list (the plugin's JSON payload channel). */
+		function orchResultPayload(block) {
+			if (!Array.isArray(block.content)) return null;
+			for (const item of block.content) {
+				if (item && typeof item === "object" && item.type === "text" && typeof item.text === "string") {
+					return orchParseJson(item.text);
+				}
+			}
+			return null;
+		}
+		/**
+		 * Normalize one tool-call node's data.root into { name, args, time, result }.
+		 * Returns null for RUNNING calls (no result content yet — nothing durable
+		 * to extract; the node updates once the call settles) and for result
+		 * nodes whose call was truncated away by the transcript window
+		 * (call === null: no tool name survives, the node is unidentifiable).
+		 * Never throws.
+		 */
+		function orchToolFacts(block) {
+			if (!block || typeof block !== "object") return null;
+			if (typeof block.kind === "string" && block.kind === "tool-result") {
+				const call = block.call && typeof block.call === "object" ? block.call : null;
+				if (!call || typeof call.name !== "string") return null;
+				return {
+					name: call.name,
+					args: orchParseJson(call.argsRaw),
+					time: typeof block.time === "number" ? block.time : undefined,
+					result: orchResultPayload(block)
+				};
+			}
+			return null; // RunningToolCall: wait for the settled result node
+		}
+		/**
+		 * Fold one identified tool call into the extraction sinks. Pure, never
+		 * throws; every missing field just skips its contribution.
+		 */
+		function orchExtractTool(facts, sink) {
+			const { name, args, result, time } = facts;
+			const record = result || {};
+			if (name === "task_spawn") {
+				if (record.ok === false) {
+					sink.note({ kind: "spawn-failed", time, title: typeof args?.title === "string" ? args.title : undefined });
+					return;
+				}
+				if (typeof record.sessionId !== "string" || record.sessionId.length === 0) return;
+				sink.addChild({
+					sessionId: record.sessionId,
+					title: typeof record.title === "string" && record.title.length > 0 ? record.title
+						: typeof args?.title === "string" && args.title.length > 0 ? args.title : undefined,
+					team: typeof record.team === "string" && record.team.length > 0 ? record.team
+						: typeof args?.team === "string" && args.team.length > 0 ? args.team : undefined,
+					correlationId: typeof record.correlationId === "string" ? record.correlationId : undefined,
+					shortId: typeof record.shortId === "string" ? record.shortId : undefined,
+					depth: typeof record.depth === "number" ? record.depth : undefined,
+					model: record.model && typeof record.model === "object" ? record.model : undefined,
+					time
+				});
+				sink.addEdge({ kind: "spawn", from: ORCH_COORD, to: record.sessionId, time });
+				return;
+			}
+			if (name === "task_spawn_batch") {
+				const team = typeof record.team === "string" && record.team.length > 0 ? record.team
+					: typeof args?.team === "string" && args.team.length > 0 ? args.team : undefined;
+				if (Array.isArray(record.results)) {
+					for (const item of record.results) {
+						if (!item || typeof item !== "object") continue;
+						if (typeof item.sessionId !== "string" || item.sessionId.length === 0) continue; // failed item: no session was born
+						sink.addChild({
+							sessionId: item.sessionId,
+							title: typeof item.title === "string" && item.title.length > 0 ? item.title : undefined,
+							team,
+							correlationId: typeof item.correlationId === "string" ? item.correlationId : undefined,
+							shortId: typeof item.shortId === "string" ? item.shortId : undefined,
+							depth: typeof item.depth === "number" ? item.depth : undefined,
+							model: undefined,
+							time
+						});
+						sink.addEdge({ kind: "spawn", from: ORCH_COORD, to: item.sessionId, time });
+					}
+				}
+				return;
+			}
+			if (name === "task_send") {
+				const target = typeof args?.sessionId === "string" && args.sessionId.length > 0 ? args.sessionId
+					: typeof record.targetId === "string" && record.targetId.length > 0 ? record.targetId : undefined;
+				if (!target) return;
+				const mode = typeof args?.mode === "string" && args.mode.length > 0 ? args.mode
+					: typeof record.mode === "string" && record.mode.length > 0 ? record.mode : "queue";
+				sink.addEdge({
+					kind: "send", from: ORCH_COORD, to: target, time, mode,
+					messageId: typeof record.messageId === "string" ? record.messageId : undefined,
+					reference: typeof args?.reference === "string" ? args.reference : undefined,
+					delivered: result ? record.delivered !== false : undefined
+				});
+				return;
+			}
+			if (name === "task_wait" || name === "task_cancel") {
+				sink.note({
+					kind: name === "task_wait" ? "wait" : "cancel", time,
+					detail: result ? { settled: record.settled, reason: record.reason, count: record.count } : undefined
+				});
+			}
+		}
+		/**
+		 * PURE extraction: scan a chat snapshot ({ order, nodes.get }) for the
+		 * orchestration record of the CURRENT session (the view's supervisor):
+		 * task_spawn / task_spawn_batch children, task_send edges, inbound relay
+		 * reports (context nodes with source.kind='coordinator' + form='relay'),
+		 * task_wait / task_cancel notes. Every malformed shape is skipped —
+		 * this function NEVER throws (the view wraps it once more, and the
+		 * verify harness asserts the tolerance directly).
+		 * @returns {{ children: object[], edges: object[], notes: object[], scanned: number }}
+		 */
+		function extractOrchestration(snapshot) {
+			const out = { children: [], edges: [], notes: [], scanned: 0 };
+			if (!snapshot || typeof snapshot !== "object") return out;
+			const order = Array.isArray(snapshot.order) ? snapshot.order : [];
+			const store = snapshot.nodes;
+			const get = store && typeof store.get === "function" ? (key) => store.get(key) : () => null;
+			const childById = new Map();
+			const edgeKeys = new Set();
+			const addChild = (entry) => {
+				if (typeof entry.sessionId !== "string" || entry.sessionId.length === 0) return;
+				const previous = childById.get(entry.sessionId);
+				// A session id can reappear on window overlap (seq0 replay): keep the freshest record.
+				if (!previous || (entry.time ?? 0) >= (previous.time ?? 0)) childById.set(entry.sessionId, entry);
+			};
+			const addEdge = (edge) => {
+				if (typeof edge.to !== "string" || edge.to.length === 0) return;
+				const key = `${edge.kind}|${edge.from}|${edge.to}|${edge.time ?? ""}|${edge.messageId ?? ""}`;
+				if (edgeKeys.has(key)) return;
+				edgeKeys.add(key);
+				out.edges.push(edge);
+			};
+			for (const key of order) {
+				let node = null;
+				try { node = get(key); } catch { node = null; }
+				if (!node || typeof node !== "object") continue;
+				out.scanned += 1;
+				const data = node.data;
+				if (!data || typeof data !== "object") continue;
+				if (node.kind === "tool-call") {
+					const facts = orchToolFacts(data.root);
+					if (facts) orchExtractTool(facts, { addChild, addEdge, note: (note) => out.notes.push(note) });
+				} else if (node.kind === "context") {
+					// Inbound report-back: the classifier renders source.kind !== 'user'
+					// messages as context nodes; ours carry form='relay' + senderSessionId.
+					const source = data.source;
+					if (source && typeof source === "object" && source.kind === "coordinator" && source.form === "relay"
+						&& typeof source.senderSessionId === "string" && source.senderSessionId.length > 0) {
+						addEdge({ kind: "report", from: source.senderSessionId, to: ORCH_COORD, time: typeof data.time === "number" ? data.time : undefined });
+					}
+				}
+			}
+			out.children = [...childById.values()].sort((left, right) => ((left.time ?? 0) - (right.time ?? 0)) || (left.sessionId < right.sessionId ? -1 : 1));
+			return out;
+		}
+		/**
+		 * PURE deterministic layered layout (no physics, no randomness): the
+		 * supervisor node centered on top; one row per team below (teams in
+		 * code-point order, the ungrouped row LAST); children inside a row in
+		 * extraction order (spawn time, then session id). Same input → same
+		 * output on every call and every machine.
+		 * @returns {{ nodes: Record<string, {x:number,y:number}>, rows: {team:string,y:number,ids:string[]}[], size: {width:number,height:number} }}
+		 */
+		function layoutTopology(extraction) {
+			const L = ORCH_LAYOUT;
+			const children = extraction && Array.isArray(extraction.children) ? extraction.children : [];
+			const groups = new Map();
+			for (const child of children) {
+				if (!child || typeof child.sessionId !== "string") continue;
+				const team = typeof child.team === "string" && child.team.length > 0 ? child.team : "";
+				const bucket = groups.get(team);
+				if (bucket) bucket.push(child);
+				else groups.set(team, [child]);
+			}
+			const grouped = [...groups.keys()].filter((team) => team !== "").sort((left, right) => (left < right ? -1 : 1));
+			const ordered = groups.has("") ? [...grouped, ""] : grouped;
+			const rows = ordered.map((team, index) => {
+				// In-row order is the extraction's (spawn time, then session id) —
+				// re-sorted here so the pure layout stays deterministic even when
+				// fed unsorted children directly.
+				const bucket = groups.get(team).slice()
+					.sort((left, right) => ((left.time ?? 0) - (right.time ?? 0)) || (left.sessionId < right.sessionId ? -1 : 1));
+				return {
+					team,
+					y: L.padTop + L.nodeH + L.rowGap + L.labelH + index * (L.labelH + L.nodeH + L.rowGap),
+					ids: bucket.map((child) => child.sessionId),
+					width: bucket.length * L.nodeW + (bucket.length - 1) * L.gapX
+				};
+			});
+			const contentWidth = Math.max(L.nodeW, ...rows.map((row) => row.width));
+			const nodes = {};
+			nodes[ORCH_COORD] = { x: (contentWidth - L.nodeW) / 2, y: L.padTop };
+			for (const row of rows) {
+				row.ids.forEach((id, column) => {
+					nodes[id] = { x: (contentWidth - row.width) / 2 + column * (L.nodeW + L.gapX), y: row.y + L.labelH };
+				});
+			}
+			const lastRow = rows.length > 0 ? rows[rows.length - 1] : null;
+			return {
+				nodes,
+				rows,
+				size: {
+					width: contentWidth + L.padX * 2,
+					height: lastRow ? lastRow.y + L.labelH + L.nodeH + L.padBottom : L.padTop + L.nodeH + L.padBottom
+				}
+			};
+		}
+		/** Live SessionSummary projection for one session id (pure; missing → null). */
+		function orchSessionInfo(byId, sessionId) {
+			if (!byId || typeof sessionId !== "string" || sessionId.length === 0) return null;
+			let row;
+			try { row = byId[sessionId]; } catch { return null; }
+			if (!row || typeof row !== "object") return null;
+			const projections = row.projectionValues && typeof row.projectionValues === "object" ? row.projectionValues : {};
+			let todos = null;
+			if (Array.isArray(projections.todos)) {
+				let done = 0;
+				for (const todo of projections.todos) if (todo && todo.status === "completed") done += 1;
+				todos = { done, total: projections.todos.length };
+			}
+			const goal = projections.goal && typeof projections.goal === "object" ? projections.goal.goal : undefined;
+			return {
+				running: row.running === true,
+				completed: row.completed === true,
+				updatedAt: typeof row.updatedAt === "number" ? row.updatedAt : undefined,
+				title: typeof row.displayTitle === "string" && row.displayTitle.length > 0 ? row.displayTitle
+					: typeof row.title === "string" && row.title.length > 0 ? row.title : undefined,
+				todos,
+				goalPhase: goal && typeof goal === "object" && typeof goal.phase === "string" ? goal.phase : undefined
+			};
+		}
+		/** Relative-time text for a millisecond timestamp (pure, locale-formatted via t). */
+		function orchAgoText(ms, now, t) {
+			if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return t("orch.time.unknown");
+			const delta = Math.max(0, now - ms);
+			if (delta < 10000) return t("orch.time.now");
+			const seconds = Math.floor(delta / 1000);
+			if (seconds < 60) return t("orch.time.sec", { n: seconds });
+			const minutes = Math.floor(seconds / 60);
+			if (minutes < 60) return t("orch.time.min", { n: minutes });
+			const hours = Math.floor(minutes / 60);
+			if (hours < 24) return t("orch.time.hour", { n: hours });
+			return t("orch.time.day", { n: Math.floor(hours / 24) });
+		}
+		/** SVG curve between a source node's bottom edge and a target node's top edge. */
+		function orchEdgePath(x1, y1, x2, y2) {
+			const bend = Math.max(24, Math.abs(y2 - y1) * 0.45);
+			return `M ${x1} ${y1} C ${x1} ${y1 + bend} ${x2} ${y2 - bend} ${x2} ${y2}`;
+		}
+		/** Guarded extraction wrapper: never throws, reports the failure instead. */
+		function safeExtractOrchestration(snapshot) {
+			try {
+				return { ok: true, ...extractOrchestration(snapshot) };
+			} catch (error) {
+				return { ok: false, error: String((error && error.message) || error), children: [], edges: [], notes: [] };
+			}
+		}
+		/**
+		 * The "编排" conversation view: live orchestration topology with the
+		 * CURRENT session as the supervisor. Pure client-side READ-ONLY view
+		 * (zero host changes, zero writes). Seats come from the standard
+		 * session-scoped set: useChat (transcript), useSessions (live rows),
+		 * sessionId; `t` arrives through the registration's locale namespace.
+		 * Crash discipline: every optional seat read and effect body is
+		 * guarded, and the derived+tree block sits in a try/catch that renders
+		 * the failure itself — the host's SlotErrorBoundary must never
+		 * abdicate this entry.
+		 */
+		function OrchestrationView(props) {
+			ensureLocale();
+			const t = (key, params) => {
+				// Same dual-path interpolation as the settings tab (0.18.3): the
+				// host-runtime hit and the bundled-dictionary fallback BOTH interpolate.
+				let value;
+				if (typeof props.t === "function") {
+					try { value = props.t(key); } catch { value = undefined; }
+					if (typeof value !== "string" || value.length === 0 || value === key || value === `${NS}.${key}`) value = undefined;
+				}
+				if (value === undefined) value = translateNow(key);
+				return params ? value.replace(/\{(\w+)\}/g, (whole, name) => (params[name] !== undefined ? String(params[name]) : whole)) : value;
+			};
+			const [refreshNonce, setRefreshNonce] = react.useState(0);
+			const [nowTick, setNowTick] = react.useState(() => Date.now());
+			const [flash, setFlash] = react.useState(null);
+			const localeSnapshot = useStore ? useStore(subscribeLocale, getLocaleSnapshot) : NO_LOCALE_SNAPSHOT;
+			// Keep relative times and the RECENT_MS flow window fresh (every 30s).
+			react.useEffect(() => {
+				try {
+					const timer = setInterval(() => { try { setNowTick(Date.now()); } catch { /* keep the last tick */ } }, 30000);
+					return () => { try { clearInterval(timer); } catch { /* noop */ } };
+				} catch { return undefined; }
+			}, []);
+			// Optional seat reads: an absent OR throwing seat degrades to a
+			// diagnostics line — never a render throw (SlotErrorBoundary abdicates).
+			let chat = null;
+			let chatError = null;
+			try {
+				if (typeof props.useChat === "function") chat = props.useChat((snapshot) => snapshot);
+			} catch (error) { chatError = String((error && error.message) || error); }
+			let sessionsList = null;
+			let sessionsError = null;
+			try {
+				if (typeof props.useSessions === "function") sessionsList = props.useSessions((snapshot) => snapshot);
+			} catch (error) { sessionsError = String((error && error.message) || error); }
+			try {
+			const coordinatorId = typeof props.sessionId === "string" && props.sessionId.length > 0 ? props.sessionId : "";
+			const extraction = chat !== null ? safeExtractOrchestration(chat) : { ok: true, children: [], edges: [], notes: [] };
+			const children = extraction.children;
+			const layout = layoutTopology(extraction);
+			const byId = sessionsList && sessionsList.byId && typeof sessionsList.byId === "object" ? sessionsList.byId : null;
+			const coordinatorLive = orchSessionInfo(byId, coordinatorId);
+			const now = nowTick;
+			const notesMeta = [];
+			const waitCount = extraction.notes.filter((note) => note.kind === "wait").length;
+			const cancelCount = extraction.notes.filter((note) => note.kind === "cancel").length;
+			if (waitCount > 0) notesMeta.push(t("orch.notes.wait", { n: waitCount }));
+			if (cancelCount > 0) notesMeta.push(t("orch.notes.cancel", { n: cancelCount }));
+			const openChild = (child) => {
+				const id = child.sessionId;
+				let failure = null;
+				try {
+					// Lazy sighting through ctx.get() — the sanctioned bypass the
+					// runner's inject gate (see the ensureLocale note); a direct
+					// property read of the sessions service would throw under our
+					// "slots"-only declaration, and open() itself fails loud on
+					// unknown ids.
+					const svc = hostCtx && typeof hostCtx.get === "function" ? hostCtx.get("sessions") : undefined;
+					if (svc && typeof svc.open === "function") {
+						svc.open(id);
+						return;
+					}
+					failure = "sessions service unavailable";
+				} catch (error) {
+					failure = String((error && error.message) || error);
+				}
+				// Degraded path: copy the session id so the user can act anyway.
+				void copyText(id).then((ok) => {
+					setFlash(ok
+						? { kind: "info", text: t("orch.open.copied", { message: failure, id }) }
+						: { kind: "error", text: t("orch.open.copyFailed", { message: failure, id }) });
+					try { setTimeout(() => setFlash(null), 6000); } catch { /* flash simply stays */ }
+				});
+			};
+			const h = react.createElement;
+			const L = ORCH_LAYOUT;
+			const statusChip = (state) => h("span", { className: "orchViewChip", "data-kind": "status", "data-state": state },
+				t(state === "running" ? "orch.status.running" : state === "completed" ? "orch.status.completed" : state === "idle" ? "orch.status.idle" : "orch.status.unknown"));
+			const liveState = (live) => (live ? (live.running ? "running" : live.completed ? "completed" : "idle") : "unknown");
+			const chipsFor = (live) => [
+				live && live.todos ? h("span", { key: "todos", className: "orchViewChip", "data-kind": "todos" }, t("orch.todos", { done: live.todos.done, total: live.todos.total })) : null,
+				live && live.goalPhase ? h("span", { key: "goal", className: "orchViewChip", "data-kind": "goal" }, t("orch.goal", { phase: live.goalPhase })) : null
+			];
+			// NOTE (phase B placeholder): a child that itself spawned grandchildren
+			// should render a nested-supervisor badge here (its own task_spawn
+			// records live in ITS transcript — a second-window lookup, deferred).
+			const childCard = (child) => {
+				const pos = layout.nodes[child.sessionId];
+				if (!pos) return null;
+				const live = orchSessionInfo(byId, child.sessionId);
+				const state = liveState(live);
+				return h("button", {
+					type: "button",
+					key: child.sessionId,
+					className: `orchViewNode${state === "running" ? " orchViewBreath" : ""}`,
+					"data-role": "child",
+					"data-state": state,
+					style: { left: `${pos.x}px`, top: `${pos.y}px`, width: `${L.nodeW}px` },
+					onClick: () => openChild(child),
+					title: child.sessionId
+				},
+					h("div", { className: "orchViewNodeTitle" }, (live && live.title) || child.title || child.sessionId),
+					h("div", { className: "orchViewNodeMeta" },
+						h("span", { className: "orchViewId" }, child.shortId || child.sessionId.slice(-8)),
+						child.model && typeof child.model.model === "string" && child.model.model.length > 0
+							? h("span", { className: "orchViewModel" }, child.model.model) : null
+					),
+					h("div", { className: "orchViewChips" },
+						child.team ? h("span", { className: "orchViewChip", "data-kind": "team" }, child.team) : null,
+						statusChip(state),
+						...chipsFor(live)
+					),
+					h("div", { className: "orchViewNodeTime" }, orchAgoText(live && live.updatedAt ? live.updatedAt : child.time, now, t))
+				);
+			};
+			const coordPos = layout.nodes[ORCH_COORD] || { x: 0, y: L.padTop };
+			const coordinatorState = liveState(coordinatorLive);
+			const coordinatorCard = h("div", {
+				className: `orchViewNode${coordinatorState === "running" ? " orchViewBreath" : ""}`,
+				"data-role": "coordinator",
+				"data-state": coordinatorState,
+				style: { left: `${coordPos.x}px`, top: `${coordPos.y}px`, width: `${L.nodeW}px` }
+			},
+				h("div", { className: "orchViewNodeTitle" }, (coordinatorLive && coordinatorLive.title) || coordinatorId || t("orch.coordinator")),
+				h("div", { className: "orchViewChips" },
+					h("span", { className: "orchViewChip", "data-kind": "team" }, t("orch.coordinator")),
+					statusChip(coordinatorState),
+					...chipsFor(coordinatorLive)
+				),
+				h("div", { className: "orchViewNodeTime" }, orchAgoText(coordinatorLive && coordinatorLive.updatedAt, now, t))
+			);
+			// Edges: spawn (solid, downward), send (accent, downward, mode label),
+			// report (dashed, upward from the child to the supervisor). Edges with
+			// activity inside RECENT_MS get the dash-flow shimmer.
+			const edgeElements = [];
+			for (const edge of extraction.edges) {
+				if (edge.kind !== "spawn" && edge.kind !== "send" && edge.kind !== "report") continue;
+				const from = layout.nodes[edge.from];
+				const to = layout.nodes[edge.to];
+				if (!from || !to) continue; // e.g. a send aimed at a session this window never saw spawning
+				const recent = typeof edge.time === "number" && edge.time > 0 && now - edge.time < RECENT_MS;
+				const downward = edge.kind !== "report";
+				const x1 = from.x + L.nodeW / 2;
+				const y1 = downward ? from.y + L.nodeH : from.y;
+				const x2 = to.x + L.nodeW / 2;
+				const y2 = downward ? to.y : to.y + L.nodeH;
+				const className = `orchViewEdge orchViewEdge${edge.kind === "spawn" ? "Spawn" : edge.kind === "send" ? "Send" : "Report"}${recent ? " orchViewFlow" : ""}`;
+				const marker = edge.kind === "send" ? "url(#orchViewArrowSend)" : "url(#orchViewArrow)";
+				edgeElements.push(h("path", { key: `edge:${edge.kind}:${edge.to}:${edge.time ?? ""}:${edge.messageId ?? ""}:${edgeElements.length}`, d: orchEdgePath(x1, y1, x2, y2), className, markerEnd: marker }));
+				if (edge.kind === "send" && typeof edge.mode === "string") {
+					edgeElements.push(h("text", { key: `label:${edgeElements.length}`, className: "orchViewEdgeLabel", x: (x1 + x2) / 2, y: (y1 + y2) / 2 - 4, textAnchor: "middle" }, edge.mode));
+				}
+			}
+			const svg = h("svg", {
+				className: "orchViewSvg",
+				width: layout.size.width,
+				height: layout.size.height,
+				viewBox: `0 0 ${layout.size.width} ${layout.size.height}`
+			},
+				h("defs", null,
+					h("marker", { id: "orchViewArrow", markerWidth: 7, markerHeight: 7, refX: 6, refY: 3.5, orient: "auto", markerUnits: "userSpaceOnUse" },
+						h("path", { d: "M0,0 L7,3.5 L0,7 Z", fill: "var(--dsw-alias-border-l2,#c9ced6)" })),
+					h("marker", { id: "orchViewArrowSend", markerWidth: 7, markerHeight: 7, refX: 6, refY: 3.5, orient: "auto", markerUnits: "userSpaceOnUse" },
+						h("path", { d: "M0,0 L7,3.5 L0,7 Z", fill: "var(--dsw-alias-accent,#2563eb)" }))
+				),
+				...edgeElements
+			);
+			const rowLabels = layout.rows.map((row) => h("div", {
+				key: `row:${row.team}`,
+				className: "orchViewRowLabel",
+				style: { left: `${L.padX}px`, top: `${row.y}px` }
+			}, `${row.team === "" ? t("orch.ungrouped") : row.team} · ${row.ids.length}`));
+			const diagnostics = [];
+			if (chatError !== null) diagnostics.push(h("p", { key: "chat-err", className: "orchViewFlash", "data-kind": "error" }, t("orch.degraded.chat", { message: chatError })));
+			else if (chat === null) diagnostics.push(h("p", { key: "chat-missing", className: "orchViewFlash", "data-kind": "error" }, t("orch.degraded.chat", { message: "useChat seat unavailable" })));
+			if (sessionsError !== null) diagnostics.push(h("p", { key: "sess-err", className: "orchViewFlash", "data-kind": "error" }, t("orch.degraded.sessions", { message: sessionsError })));
+			else if (sessionsList === null) diagnostics.push(h("p", { key: "sess-missing", className: "orchViewFlash" }, t("orch.degraded.sessions")));
+			if (extraction.ok === false) {
+				diagnostics.push(h("p", { key: "extract-err", className: "orchViewFlash", "data-kind": "error" },
+					t("orch.error.extract", { message: extraction.error }),
+					" ",
+					h("button", { type: "button", className: "orchViewBtn", onClick: () => { try { setRefreshNonce((nonce) => nonce + 1); } catch { /* noop */ } } }, t("orch.retry"))));
+			}
+			const tree = h("div", { className: "orchViewRoot", key: `${refreshNonce}:${localeSnapshot && localeSnapshot.revision}` },
+				h("div", { className: "orchViewToolbar" },
+					h("h2", { className: "orchViewTitle" }, t("view.tab")),
+					h("span", { className: "orchViewMeta" }, t("orch.children", { n: children.length })),
+					notesMeta.length > 0 ? h("span", { className: "orchViewMeta" }, notesMeta.join(" · ")) : null,
+					h("button", { type: "button", className: "orchViewBtn", onClick: () => { try { setRefreshNonce((nonce) => nonce + 1); setNowTick(Date.now()); } catch { /* noop */ } } }, t("orch.refresh")),
+					h("span", { className: "orchViewLegend" },
+						h("span", null, h("i", { className: "orchViewLegendKey", "data-kind": "spawn" }), t("orch.legend.spawn")),
+						h("span", null, h("i", { className: "orchViewLegendKey", "data-kind": "send" }), t("orch.legend.send")),
+						h("span", null, h("i", { className: "orchViewLegendKey", "data-kind": "report" }), t("orch.legend.report")),
+						h("span", null, t("orch.legend.recent"))
+					)
+				),
+				flash ? h("p", { className: "orchViewFlash", "data-kind": flash.kind }, flash.text) : null,
+				...diagnostics,
+				children.length === 0
+					? h("div", { className: "orchViewEmpty" },
+						h("p", { className: "orchViewEmptyTitle" }, t("orch.empty.title")),
+						h("p", { className: "orchViewEmptyText" }, t("orch.empty.hint")),
+						h("p", { className: "orchViewEmptyText" }, t("orch.empty.suffix")))
+					: h("div", { className: "orchViewCanvas" },
+						h("div", { className: "orchViewLayer", style: { width: `${layout.size.width}px`, height: `${layout.size.height}px` } },
+							svg,
+							...rowLabels,
+							coordinatorCard,
+							...children.map(childCard)
+						))
+			);
+			return tree;
+			} catch (error) {
+				// Last-resort net (0.18.2 discipline): render the failure ourselves —
+				// the host's SlotErrorBoundary would otherwise abdicate the entry and
+				// leave a blank tab with the reason only in the console.
+				const hh = react.createElement;
+				return hh("div", { className: "orchViewRoot" },
+					hh("h2", { className: "orchViewTitle" }, t("view.tab")),
+					hh("p", { className: "orchViewFlash", "data-kind": "error" }, t("orch.error.render", { message: String((error && error.message) || error) })),
+					hh("button", { type: "button", className: "orchViewBtn", onClick: () => { try { setRefreshNonce((nonce) => nonce + 1); } catch { /* noop */ } } }, t("orch.retry"))
+				);
+			}
+		}
+
 		const inject = ["slots"];
 
 		/**
@@ -724,9 +1395,40 @@ window.__ModuleLoader__.load({
 					label: () => translateNow("tab.title")
 				}, TaskCoordinatorSettingsTab);
 			});
+			// Orchestration view (0.20.0): the third conversation tab (after the
+			// native chat=0 / trajectory=10 tabs) — a live, read-only topology of
+			// everything this session supervises. Session-scoped slot: it remounts
+			// per session identity, which the empty state covers for child/plain
+			// sessions. All data comes from the standard seats (useChat /
+			// useSessions / sessionId); navigation sights the sessions service
+			// lazily through ctx.get() inside the component.
+			ctx.slots.inject("conversation.view", () => {
+				installOrchStyles();
+				return ctx.slots.register({
+					name: "conversation.view",
+					id: "orchestration",
+					order: 20,
+					locale: NS,
+					label: () => translateNow("view.tab")
+				}, OrchestrationView);
+			});
 		}
 		exports.apply = apply;
 		exports.inject = inject;
+		// Pure-function test surface for the orchestration view (verify harness
+		// drives synthetic fixtures through these; never used by the UI itself).
+		exports.__orchestration = {
+			extractOrchestration,
+			layoutTopology,
+			orchToolFacts,
+			orchParseJson,
+			orchSessionInfo,
+			orchAgoText,
+			orchEdgePath,
+			RECENT_MS,
+			ORCH_COORD,
+			ORCH_LAYOUT
+		};
 		return module.exports;
 	}
 });

@@ -118,7 +118,18 @@ pwsh install.ps1 -Source .
 
 ### 复制会话 ID —— 会话头部一键完成
 
-插件随包一个 **Web 客户端模块**（`client.js`，由 `package.json` 的 `dsh.client` 声明），占用两个官方槽位。①`conversation.session.header.utilities`——与自带的 `session-log-export` 同一条接缝：每个会话头部右侧出现「复制会话Id」按钮（面性胶囊，几何参数与「Session 日志」一致：亮色黑底白字、暗色白底黑字），一键复制当前会话的完整 `sessionId`，直接粘给总控侧的 `task_send`、`task_progress` 或 `/tasks <id>`。（侧栏会话行右键菜单为宿主硬编码，实测不可扩展，故选择有官方先例的头部槽位。）②`settings.section`（0.18.1）：设置左侧一级入口「任务编排」页（与 通用/模型/插件/Agent 预设 同级，order 25），可视化配置派发默认模型（见上一节）。
+插件随包一个 **Web 客户端模块**（`client.js`，由 `package.json` 的 `dsh.client` 声明），占用三个官方槽位。①`conversation.session.header.utilities`——与自带的 `session-log-export` 同一条接缝：每个会话头部右侧出现「复制会话Id」按钮（面性胶囊，几何参数与「Session 日志」一致：亮色黑底白字、暗色白底黑字），一键复制当前会话的完整 `sessionId`，直接粘给总控侧的 `task_send`、`task_progress` 或 `/tasks <id>`。（侧栏会话行右键菜单为宿主硬编码，实测不可扩展，故选择有官方先例的头部槽位。）②`settings.section`（0.18.1）：设置左侧一级入口「任务编排」页（与 通用/模型/插件/Agent 预设 同级，order 25），可视化配置派发默认模型（见上一节）。③`conversation.view`（0.20.0）：会话页签「编排」——以当前会话为总控的活体拓扑总览（见下节）。
+
+### 编排视图 —— 以当前会话为总控的活体拓扑（0.20.0）
+
+会话头部的第三个页签「**编排**」（排在原生 聊天/轨迹 之后，order 20）：把当前会话作为总控，实时渲染它派发的全部子任务——总控节点置顶居中，子会话按 team 分组成行排在下方（无 team 归「未编组」行）；派发（实线下行）、指令（steer/queue 强调色下行、带模式标签）、汇报（虚线上行）三类连线一目了然；**2 分钟内有活动的连线加流光动画，运行中的节点呼吸脉冲**。
+
+- **节点卡**：标题、短 ID、模型、team 芯片、状态芯片（运行中/空闲/已完成）、todos n/m、goal 阶段、最近活动相对时间——实时状态与 `task_list` 同一条投影线（`useSessions` 活体联查），总控自身状态同源；
+- **点击子节点直接跳转**该子会话（侧栏同款导航原语 `sessions.open`）；跳转服务不可用或目标不在列表时，降级为复制会话 ID + 状态行提示；
+- **只读零写**：数据全部来自转录（`task_spawn` / `task_spawn_batch` / `task_send` 工具记录与子会话汇报消息）和会话列表投影，零宿主改动；窗口截断（`call: null`）、流式未完 JSON 等畸形记录一律静默跳过，绝不抛错；
+- **空态即指引**：本会话没派发过子任务时显示引导卡；在子会话或普通会话里打开本页签同样显示空态（视图随会话重挂，始终以当前会话为总控）。
+
+嵌套总控徽章（子会话的子树）规划在 B 阶段。
 
 ### 工作区归属：五级兜底链与全链可观测（0.19.0）
 
@@ -308,7 +319,7 @@ dsh-plugin-task-coordinator/
 ├── ops.mjs             会话操作 · DI 工厂
 ├── tools.mjs           十一个 task_* 工具注册
 ├── commands.mjs        /tasks 斜杠命令（直接执行，不进模型）
-├── client.js           Web 客户端模块：复制会话 ID 头部按钮 + 任务编排设置页签（dsh.client）
+├── client.js           Web 客户端模块：复制会话 ID 头部按钮 + 任务编排设置页 + 编排视图页签（dsh.client）
 ├── skills.mjs          隔离技能挂载（动态 import，fire-and-forget）
 ├── skills/task-coordination/   supervisor 操作手册（随包分发）
 ├── cordis.patch.yml    隔离插件组挂载描述
