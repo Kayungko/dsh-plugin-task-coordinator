@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.22.1)
+ * dsh-plugin-task-coordinator — client module (0.22.2)
  *
  * 0.22.0: the card topology is BACK as the orchestration view's form (user
  * verdict after living with the 0.21.x lane timeline: cards + directional
@@ -812,7 +812,7 @@ window.__ModuleLoader__.load({
 		/** Style element id for the orchestration view (deduped per document). */
 		const STYLE_ID_ORCH = "dsh-plugin-task-coordinator/orchestration-view";
 		const ORCH_CSS = [
-			".orchViewRoot{max-width:1400px;margin:0 auto;padding:24px 32px 48px;box-sizing:border-box;display:flex;flex-direction:column;gap:12px;min-height:100%;font-family:var(--dsw-font-family,inherit)}",
+			".orchViewRoot{width:100%;box-sizing:border-box;padding:24px 32px 48px;display:flex;flex-direction:column;gap:12px;min-height:100%;font-family:var(--dsw-font-family,inherit)}",
 			".orchViewToolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}",
 			".orchViewTitle{margin:0;font-size:16px;font-weight:600;color:var(--dsw-alias-label-primary,#0f1115)}",
 			".orchViewMeta{font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary,#5b616e)}",
@@ -821,7 +821,7 @@ window.__ModuleLoader__.load({
 			".orchViewBtn{height:28px;padding:0 12px;border-radius:14px;border:1px solid var(--dsw-alias-border-l2,#0000001f);background:transparent;color:var(--dsw-alias-label-secondary,#5b616e);cursor:pointer;font-size:12px;font-family:var(--dsh-font-family,inherit)}",
 			".orchViewBtn:hover{color:var(--dsw-alias-label-primary,#0f1115)}",
 			".orchViewCanvas{position:relative;overflow:auto;border:1px solid var(--dsw-alias-border-l2,#00000014);border-radius:12px;background:var(--dsw-alias-bg-module-platform,#fafbfc)}",
-			".orchViewLayer{position:relative}",
+			".orchViewLayer{position:relative;margin:0 auto}",
 			".orchViewSvg{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}",
 			".orchViewRowLabel{position:absolute;font-size:12px;line-height:22px;color:var(--dsw-alias-label-secondary,#5b616e);white-space:nowrap}",
 			".orchViewNode{position:absolute;box-sizing:border-box;width:240px;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2,#0000001f);border-radius:10px;background:var(--dsw-alias-bg-module-platform,#fff);color:var(--dsw-alias-label-primary,#0f1115);cursor:pointer;text-align:left;font-family:var(--dsw-font-family,inherit)}",
