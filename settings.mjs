@@ -68,12 +68,23 @@ export function normalizeSpawnRoute(value) {
 }
 
 /**
- * Strict validation for the settings service's validate hook: accepts the
- * empty section (no default) and any well-formed route; rejects half pairs
- * and non-string shapes at the write boundary so a bad stored layer can
- * never silently break spawns.
+ * Validation for the settings service's validate hook: accepts the empty
+ * section (no default), any well-formed route, AND half pairs — the pair
+ * rule is deliberately NOT enforced at the write boundary.
+ *
+ * 0.18.5 lesson (field-verified against ~/.dsh/settings.yaml): rejecting
+ * half pairs here silently broke GUI saves. The settings scope's write
+ * channel resolves normally even when the host rejects a mutation (it folds
+ * back the latest good state via a recovery read), so an over-strict
+ * validate hook rolled back the provider/model writes without any visible
+ * error — only the last field survived into the document, and the section
+ * came back "unset" after a host restart. The pair rule lives where it can
+ * be enforced honestly: the settings UI blocks Save on a half pair, and
+ * consumption degrades safely (normalizeSpawnRoute throws on a half pair;
+ * readSpawnDefaults catches and treats it as unset → host default).
+ *
  * @param {unknown} value - candidate section value.
- * @returns {void} nothing; throws on malformed values.
+ * @returns {void} nothing; throws only on malformed shapes.
  */
 export function validateSpawnModelsSection(value) {
   if (value === undefined || value === null) return;
@@ -85,5 +96,4 @@ export function validateSpawnModelsSection(value) {
       throw new Error(`spawn-model default field "${key}" must be a string`);
     }
   }
-  normalizeSpawnRoute(value); // throws on half pairs
 }

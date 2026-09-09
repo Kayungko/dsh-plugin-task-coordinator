@@ -704,6 +704,8 @@ assert.match(clientSrc, /hostCtx\.get\("settingsScope"\)/, 'getBoundScope must r
 assert.match(clientSrc, /hostCtx\.get\("remote"\)/, 'getCatalogFace must read remote through ctx.get()');
 assert.match(clientSrc, /"value" in response/, 'the catalog effect must unwrap the client result envelope (0.18.4)');
 assert.match(clientSrc, /hostCtx\.get\("remote\.session"\)/, 'the catalog face must try the dotted remote.session service first (0.18.3)');
+assert.match(clientSrc, /scope\.mutate\(/, 'save must write the section as ONE atomic mutate (0.18.5 — per-field writes composed half-pair states the host rejected)');
+assert.match(clientSrc, /sameRoute\(landed, draft\)/, 'save must verify the landed snapshot before reporting success (0.18.5 honest-save check)');
 
 const wrote = [];
 const navDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
@@ -781,6 +783,7 @@ else delete globalThis.navigator;
         getSnapshot: () => gatedScopeSnap,
         subscribe: () => () => {},
         set: async () => {},
+        mutate: async () => {},
       }),
     },
     // 0.18.4: the CLIENT wire answers a result envelope ({ok, value}), not the

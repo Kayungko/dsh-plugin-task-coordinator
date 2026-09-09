@@ -993,17 +993,23 @@ test('settings: normalizeSpawnRoute rules (0.18.0)', async () => {
   assert.throws(() => normalizeSpawnRoute({ provider: '', model: 'model-x' }), /provider and model together/);
 });
 
-test('settings: validateSpawnModelsSection boundary (0.18.0)', async () => {
+test('settings: validateSpawnModelsSection boundary (0.18.0, relaxed 0.18.5)', async () => {
   const { validateSpawnModelsSection } = await import('../settings.mjs');
   // absent + empty + well-formed pass
   validateSpawnModelsSection(undefined);
   validateSpawnModelsSection(null);
   validateSpawnModelsSection({ provider: '', model: '', reasoningEffort: '' });
   validateSpawnModelsSection({ provider: 'prov-a', model: 'model-x' });
-  // malformed shapes rejected at the write boundary
+  // 0.18.5: half pairs PASS the write boundary — rejecting them there broke
+  // GUI saves (the scope's write channel silently recovers on a rejected
+  // mutation, so provider/model never landed while the UI reported saved).
+  // The pair rule is enforced by the UI (Save disabled) and by consumption
+  // (normalizeSpawnRoute throws → readSpawnDefaults degrades to unset).
+  validateSpawnModelsSection({ provider: 'prov-a', model: '' });
+  validateSpawnModelsSection({ provider: '', model: 'model-x' });
+  // malformed shapes still rejected at the write boundary
   assert.throws(() => validateSpawnModelsSection('prov-a'), /must be an object/);
   assert.throws(() => validateSpawnModelsSection({ provider: 1, model: 'model-x' }), /"provider" must be a string/);
-  assert.throws(() => validateSpawnModelsSection({ provider: 'prov-a', model: '' }), /provider and model together/);
 });
 
 test('ops.spawnTask: plugin-default fallback chain (0.18.0)', async () => {

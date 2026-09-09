@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+## [0.18.5] - 2026-09-09
+
+### Fixed
+
+- **真机回归：设置保存后宿主重启即丢（用户报告"无法持久化"）**。取证：`~/.dsh/settings.yaml` 的 `task-coordinator:` 节只存活了 `reasoningEffort: ""`——provider/model 两次写入被自己的 validate 钩子拒掉。完整因果链（三环缺一不可）：①保存走三次**逐字段** `scope.set`，前两次合成出"半对"中间态（只有 provider 或只有 model）；②`validateSpawnModelsSection` 当时把半对判为非法直接抛错，宿主拒绝该次变更；③宿主设置 scope 的写通道**被拒时不 reject**——`recover()` 静默回读折叠最新好值、promise 正常 resolve（dsh-client-ui-settings `mutate`：`if (!response.ok) { await this.recover(generation); return; }`）——界面照常弹「已保存 ✓」，用户无从察觉。重启后 base+user 合成只剩 reasoningEffort → 显示未设置。
+- 修复双管齐下：**①原子写**——保存改为单次 `scope.mutate([provider, model, reasoningEffort])`（公开 API，"one atomic namespace mutation"，单次 wire 调用、终态只校验一次，不再经过半对中间态；无 mutate 的老 scope 回退逐字段）；**②写边界校验放宽为纯类型检查**——半对不再在 validate 钩子拒绝（成对规则的诚实执法点：UI 的 Save 禁用 + 消费端 `normalizeSpawnRoute` 抛错→`readSpawnDefaults` 降级为未设置），任何写入路径（含未来逐字段写者）不再踩静默回滚陷阱。
+- **诚实保存核对**：因写通道吞拒绝，保存后**回读快照与草稿比对**（`sameRoute(landed, draft)`）——一致才报「已保存 ✓」，否则显示「保存未生效：宿主拒绝了本次写入（已回读核对）」新文案（zh/en）。假成功从机制上不可能再发生。
+
+### Tests
+
+- 单测：validate 边界测试改写（半对通过写边界 + 注释记录因果链；畸形形状仍拒）；95 全绿。
+- verify-installed：门控假 scope 增 `mutate`；新增两条源码静态断言（save 必须走 `scope.mutate` 原子写、必须含 `sameRoute(landed, draft)` 回读核对）。
+
 ## [0.18.4] - 2026-09-09
 
 ### Fixed

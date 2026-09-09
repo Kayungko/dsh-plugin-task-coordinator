@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.18.4)
+ * dsh-plugin-task-coordinator — client module (0.18.5)
  *
  * Two surfaces:
  *  1. `conversation.session.header.utilities` slot — the "Copy session id"
@@ -139,6 +139,7 @@ window.__ModuleLoader__.load({
 				"degraded.namespace": "设置区未在宿主设置文档中注册（插件可能未随宿主装载），本页暂不可编辑。",
 				"degraded.read": "设置读取失败：{message}",
 				"degraded.render": "页面渲染异常：{message}",
+				"save.rejected": "保存未生效：宿主拒绝了本次写入（已回读核对）。请重试；若持续失败请检查宿主日志。",
 				"action.retry": "重试"
 			},
 			en: {
@@ -169,6 +170,7 @@ window.__ModuleLoader__.load({
 				"degraded.namespace": "The settings section is not registered in the host settings document (the plugin may not be loaded with the host); this page is read-only for now.",
 				"degraded.read": "Settings read failed: {message}",
 				"degraded.render": "This page failed to render: {message}",
+				"save.rejected": "Save did not take effect: the host rejected the write (verified by read-back). Retry; if it keeps failing, check the host log.",
 				"action.retry": "Retry"
 			}
 		};
@@ -513,10 +515,40 @@ window.__ModuleLoader__.load({
 				setBusy(true);
 				setMessage(null);
 				try {
-					await scope.set("provider", draft.provider);
-					await scope.set("model", draft.model);
-					await scope.set("reasoningEffort", draft.reasoningEffort);
-					setMessage({ kind: "ok", text: t("status.saved") });
+					// 0.18.5: ONE atomic namespace mutation instead of three
+					// per-field writes — the per-field path composed half-pair
+					// intermediate states that the host validate hook rejected,
+					// and the scope's write channel RESOLVES NORMALLY on a
+					// rejected mutation (silent recovery read), so the old code
+					// reported "saved" while provider/model never landed.
+					const ops = [
+						{ op: "set", path: ["provider"], value: draft.provider },
+						{ op: "set", path: ["model"], value: draft.model },
+						{ op: "set", path: ["reasoningEffort"], value: draft.reasoningEffort }
+					];
+					if (typeof scope.mutate === "function") {
+						await scope.mutate(ops);
+					} else {
+						// Legacy fallback (scopes without mutate): sequential
+						// per-field writes; the post-check below still tells
+						// the truth about what landed.
+						await scope.set("provider", draft.provider);
+						await scope.set("model", draft.model);
+						await scope.set("reasoningEffort", draft.reasoningEffort);
+					}
+					// Honest-save verification: the write channel swallows host
+					// rejections, so read back the landed snapshot and compare
+					// before claiming success.
+					let landed = null;
+					try {
+						const snap = scope.getSnapshot();
+						landed = snap && snap.value && typeof snap.value === "object" ? snap.value : null;
+					} catch { landed = null; }
+					if (landed && sameRoute(landed, draft)) {
+						setMessage({ kind: "ok", text: t("status.saved") });
+					} else {
+						setMessage({ kind: "error", text: t("save.rejected") });
+					}
 				} catch (error) {
 					setMessage({ kind: "error", text: String((error && error.message) || error) });
 				} finally {
