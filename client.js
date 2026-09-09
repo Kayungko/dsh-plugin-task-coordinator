@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.18.2)
+ * dsh-plugin-task-coordinator — client module (0.18.3)
  *
  * Two surfaces:
  *  1. `conversation.session.header.utilities` slot — the "Copy session id"
@@ -49,6 +49,15 @@
  * the panel stays blank for the rest of the registration's life. Self-
  * rendering the error keeps the page alive and makes the cause visible
  * without console access.
+ * 0.18.3: two field-reported fixes — ① the `{message}` interpolation ran
+ * only on the bundled-dictionary fallback path, so a host-runtime hit
+ * returned raw placeholders (invisible until the ctx.get() fix made the
+ * host path engage); interpolation now covers both paths. ② the model
+ * catalog is sighted through the DOTTED service name "remote.session"
+ * first (the shape the native settings cards inject; the runner resolves
+ * dotted names via ctx.get), with the facade walk as fallback — a
+ * synchronous throw on the facade's `.session` reach is the prime suspect
+ * for the 0.18.1 blank panel.
  *
  * Contract notes (field-tested against DSH Desktop 2.0.5 / core 0.1.2-rc.1):
  * - The client-modules registry reads this file's path from the plugin's
@@ -346,9 +355,32 @@ window.__ModuleLoader__.load({
 			} catch { /* retry on the next sight */ }
 			return boundScope;
 		};
-		/** Live remote face (model catalog) — defensive per-use read. */
-		const getRemote = () => {
-			try { return hostCtx && (typeof hostCtx.get === "function" ? hostCtx.get("remote") : hostCtx.remote); } catch { return undefined; }
+		/**
+		 * Live model-catalog face (0.18.3). The native settings cards inject
+		 * the DOTTED service name "remote.session" — the runner resolves
+		 * dotted names through ctx.get (its fiber waitingFor check calls
+		 * ctx.get(name) with the dotted key), so try that shape first; the
+		 * facade walk (ctx.get("remote").session) is the fallback. Both reads
+		 * are guarded: a synchronous throw here is exactly what blanked the
+		 * 0.18.1 panel (the slot error boundary abdicates on effect throws).
+		 * Cached on first success; null keeps retrying per render.
+		 */
+		let catalogFace = null;
+		const getCatalogFace = () => {
+			if (catalogFace) return catalogFace;
+			try {
+				if (hostCtx && typeof hostCtx.get === "function") {
+					const dotted = hostCtx.get("remote.session");
+					if (dotted && typeof dotted.modelCatalog === "function") { catalogFace = dotted; return catalogFace; }
+					const facade = hostCtx.get("remote");
+					const session = facade && facade.session;
+					if (session && typeof session.modelCatalog === "function") { catalogFace = session; return catalogFace; }
+				} else if (hostCtx) {
+					const session = hostCtx.remote && hostCtx.remote.session;
+					if (session && typeof session.modelCatalog === "function") catalogFace = session;
+				}
+			} catch { /* retry on the next render */ }
+			return catalogFace;
 		};
 		/** Project the host modelCatalog() payload onto select-friendly rows. */
 		function projectCatalog(catalog) {
@@ -384,13 +416,17 @@ window.__ModuleLoader__.load({
 		function TaskCoordinatorSettingsTab(props) {
 			ensureLocale();
 			const t = (key, params) => {
+				// 0.18.3: interpolation applies to BOTH resolution paths — the
+				// host-runtime hit used to return the raw dictionary string,
+				// rendering "{message}" placeholders verbatim (invisible until
+				// the ctx.get() fix made the host path actually engage).
+				let value;
 				if (typeof props.t === "function") {
-					let value;
 					try { value = props.t(key); } catch { value = undefined; }
-					if (typeof value === "string" && value.length > 0 && value !== key && value !== `${NS}.${key}`) return value;
+					if (typeof value !== "string" || value.length === 0 || value === key || value === `${NS}.${key}`) value = undefined;
 				}
-				const fallback = translateNow(key);
-				return params ? fallback.replace(/\{(\w+)\}/g, (whole, name) => (params[name] !== undefined ? String(params[name]) : whole)) : fallback;
+				if (value === undefined) value = translateNow(key);
+				return params ? value.replace(/\{(\w+)\}/g, (whole, name) => (params[name] !== undefined ? String(params[name]) : whole)) : value;
 			};
 			const [scopeSnap, setScopeSnap] = react.useState(null);
 			const [catalog, setCatalog] = react.useState({ status: "idle" });
@@ -408,7 +444,7 @@ window.__ModuleLoader__.load({
 			// boundary, which abdicates the entry and blanks the panel for the
 			// rest of the registration's life.
 			const scope = getBoundScope();
-			const remote = getRemote();
+			const face = getCatalogFace();
 			// Follow the scope snapshot.
 			react.useEffect(() => {
 				if (!scope) return undefined;
@@ -422,28 +458,21 @@ window.__ModuleLoader__.load({
 					return undefined;
 				}
 			}, [scope, retryNonce]);
-			// Load the live model catalog (and on every explicit refresh); the
-			// synchronous `.session` reach is guarded like everything else.
+			// Load the live model catalog (and on every explicit refresh). The
+			// face was already validated method-wise during render sighting, so
+			// only the async call remains — with its own catch.
 			react.useEffect(() => {
-				if (!remote) return undefined;
-				let catalogFn = null;
-				try {
-					catalogFn = typeof remote.session?.modelCatalog === "function" ? () => remote.session.modelCatalog() : null;
-				} catch (error) {
-					setCatalog({ status: "error", error: String((error && error.message) || error) });
-					return undefined;
-				}
-				if (!catalogFn) {
-					setCatalog({ status: "error", error: "sessionController.modelCatalog is unavailable on this host" });
+				if (!face) {
+					setCatalog({ status: "error", error: "remote.session.modelCatalog is unavailable on this host" });
 					return undefined;
 				}
 				let cancelled = false;
 				setCatalog({ status: "loading" });
-				Promise.resolve().then(catalogFn)
+				Promise.resolve().then(() => face.modelCatalog())
 					.then((payload) => { if (!cancelled) setCatalog({ status: "ready", ...projectCatalog(payload) }); })
 					.catch((error) => { if (!cancelled) setCatalog({ status: "error", error: String((error && error.message) || error) }); });
 				return () => { cancelled = true; };
-			}, [remote, catalogNonce, retryNonce]);
+			}, [face, catalogNonce, retryNonce]);
 			// Sync the staged draft from the stored value until the user edits.
 			const stored = scopeSnap && scopeSnap.value && typeof scopeSnap.value === "object" ? scopeSnap.value : undefined;
 			react.useEffect(() => {
@@ -587,7 +616,7 @@ window.__ModuleLoader__.load({
 						h("button", {
 							type: "button",
 							className: "tcSettingsBtn tcSettingsBtnGhost",
-							disabled: !remote || busy,
+							disabled: busy,
 							onClick: () => { setCatalogNonce((nonce) => nonce + 1); }
 						}, t("action.refresh"))
 					),

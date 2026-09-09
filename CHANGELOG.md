@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [0.18.3] - 2026-09-09
+
+### Fixed
+
+- **`{message}` 占位符原样上屏（0.18.2 用户报告「模型目录不可用：{message}」）**：`t()` 的参数插值只作用于内置字典回退路径——宿主 locale 运行时命中时直接返回原始字典串。该盲区自 0.15.0 存在，但 0.18.1 修好 `ctx.get()` 寻视后宿主路径才**首次真正生效**，随即暴露。修复：两条解析路径统一走插值。
+- **模型目录寻视改走点号服务名**：原生设置卡片注入的是 `remote.session` 点号服务（runner 的 fiber waitingFor 以 `ctx.get(name)` 解析点号名，证明该形状是官方寻视路径）；0.18.2 经 `ctx.get("remote").session` 走 facade 属性链，同步段抛错（facade `.session` 读取被拒/惰性 getter 抛错）正是 0.18.1 空白面板的头号嫌疑——当时未守卫的 effect 同步访问触发 SlotErrorBoundary abdicate。现在 `getCatalogFace()` 先试点号服务、再试 facade 链、全程守卫、成功即缓存；目录不可达时显示带真实原因的错误行 + 重试按钮（面板保持可用，设置读写不依赖目录）。
+
+### Tests
+
+- 95 单测保持全绿；verify-installed 门控渲染探针兼容两种寻视形状（点号服务缺席时走 facade 链命中）。
+
 ## [0.18.2] - 2026-09-09
 
 ### Fixed

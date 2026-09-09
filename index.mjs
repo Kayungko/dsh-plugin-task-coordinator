@@ -41,7 +41,7 @@ export function defaultRegistryFile() {
 
 export function apply(ctx, input = {}) {
   const config = resolveConfig(input);
-  ctx.provide('taskCoordinator', { config, version: '0.18.2' });
+  ctx.provide('taskCoordinator', { config, version: '0.18.3' });
   if (!config.enabled) {
     ctx.logger?.info('task-coordinator: disabled by config; no tools registered');
     return;
