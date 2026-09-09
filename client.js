@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.22.2)
+ * dsh-plugin-task-coordinator — client module (0.22.3)
  *
  * 0.22.0: the card topology is BACK as the orchestration view's form (user
  * verdict after living with the 0.21.x lane timeline: cards + directional
@@ -812,7 +812,7 @@ window.__ModuleLoader__.load({
 		/** Style element id for the orchestration view (deduped per document). */
 		const STYLE_ID_ORCH = "dsh-plugin-task-coordinator/orchestration-view";
 		const ORCH_CSS = [
-			".orchViewRoot{width:100%;box-sizing:border-box;padding:24px 32px 48px;display:flex;flex-direction:column;gap:12px;min-height:100%;font-family:var(--dsw-font-family,inherit)}",
+			".orchViewRoot{max-width:calc(var(--dsh-chat-content-width,920px) + 32px);width:100%;margin:0 auto;padding:24px 16px 48px;box-sizing:border-box;display:flex;flex-direction:column;gap:12px;min-height:100%;font-family:var(--dsw-font-family,inherit)}",
 			".orchViewToolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}",
 			".orchViewTitle{margin:0;font-size:16px;font-weight:600;color:var(--dsw-alias-label-primary,#0f1115)}",
 			".orchViewMeta{font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary,#5b616e)}",
