@@ -4,6 +4,31 @@
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-09-09
+
+### Added
+
+- **task_spawn 工作区归属兜底链 + 全链可观测性**（设计蓝图：`research/workspace-placement-fallback.md`，18 场景 harness 实证驱动；其推荐兜底链已定案实施）。spawn 的 cwd 归属从"仅精确匹配"升级为五级链，逐级降级：
+  1. **词法精确匹配**：`normalizeWorkspacePath` 微修——新增剥 `.` 路径段（`D:\repo\.` == `D:\repo`，三平台分支各自处理、UNC 前缀与盘根保留），治愈词法/物理 canon 分叉（调研 EDGE S21：宿主 realpath 能解析而插件归一不能）；大小写/分隔符/尾分隔符折叠照旧；
+  2. **调用方继承**（现状逻辑原样保留）：调用方工作区成员归属（含 spawn 祖先链 ≤8 跳）→ `caller.cwd` 精确匹配；
+  3. **子目录最近祖先升级**（`workspacePolicy: 'ancestor'`，新默认档）：将要发送的 cwd 是某注册工作区路径的**真子目录** → 挂最近祖先工作区（最长归一前缀，嵌套工作区取最近）。宿主以工作区根派生会话 cwd——子目录隔离让位于分组（monorepo 子模块任务的治理成本权衡，蓝图 §4②）；**回执与 kickoff 双明示**：回执带 `placement: 'ancestor-normalized'` + `normalizedFrom` + note；kickoff 在 reportBack 后缀之前追加一句 i18n 机械提示（`i18n.mjs` 新键 `workspaceNormalizedSuffix`，zh/en，走宿主语言偏好），告知"工作目录已归一到工作区根 <path>、任务目标目录在哪、文件/git 操作用显式路径"；
+  4. **git worktree 识别（只识别分类，绝不升级挂载）**：未命中链路的 cwd 经**注入的 fs 探针**（`index.mjs` 的 `probeWorktree`：`statSync(<cwd>/.git)` 为**文件**即 linked-worktree 标记；探针异常/缺失一律按"非 worktree"降级；**禁止子进程 git 调用**，gitdir 反查属未验证机制、留给保留档）判定为 worktree → 保隔离落未分组，回执给强警告（说明为何故意不挂：宿主 attach 校验 cwd 全等，挂主仓必毁隔离；补救代价 = migrate 克隆+归档）；回执 `placement: 'ungrouped-worktree'`；
+  5. **未分组终点必附回执警告**：`workspace: null` + `placement: 'ungrouped'` + 警告 + 补救提示（`task_workspace` attach/migrate、`task_list({ ungrouped: true })` 审计、`team` 编组仍可逻辑分组）。
+- **spawn/batch 回执可观测性（无条件全量）**：每次 spawn 成功载荷新增 `workspace`（`{id,title}` 或 `null`）与 `placement` 枚举（`exact-match` | `caller-inherited` | `ancestor-normalized` | `ungrouped-worktree` | `ungrouped`，`ops.mjs` 导出 `WORKSPACE_PLACEMENTS` 单一真源）；未分组附 `warning`（含补救 hint，`hint` 字段同步变化）；`task_spawn_batch` 逐项 results 同样携带 `workspace`/`placement`/`warning`——批量总控一次调用看到全部落位。
+- **`task_list` 未分组过滤（新参数 `ungrouped: true`）**：只列不属于任何工作区的会话（GUI 未分组桶的补救视图）。判定与 spawn 链共用**单一真源纯函数** `matchWorkspacePaths`（`ops.mjs`）：会话 cwd 对注册工作区路径做词法**精确**匹配（与宿主 `sessionIds` getter 同口径）——子目录 cwd **算**未分组（正是待补救对象）、无 cwd 行保留；与 `filter`/`team`/`limit` 可组合。
+- **注册表期望归属（`expectedWorkspace`）**：spawn 注册表白名单新增可选字段，spawn 时记录调用方期望归属路径（显式 cwd，缺省时调用方 cwd），供事后批量补救定位"期望挂 X 实际未挂"的会话；持久化落盘、损坏值加载时白名单过滤。
+- 新配置项 **`workspacePolicy: 'exact' | 'ancestor'`**（默认 `'ancestor'`，`config.mjs` 导出 `WORKSPACE_POLICIES`）：`exact` 档保留 0.18 及以前的仅精确匹配行为（保守回退档）；**`grouping` 档明确不实现**——为保留档（未来"强制分组含 worktree 挂主仓 + git -C 提示改写"），当前传入按无效值拒绝（TypeError，沿用既有配置校验模式）。
+
+### Changed
+
+- **默认档位行为变化（迁移提示）**：默认 `ancestor` 下，显式 `cwd` 为某工作区**子目录**的 spawn（含继承的 `caller.cwd` 子目录）不再落"未分组"，而是挂最近祖先工作区、会话 cwd 归一为工作区根——需要 0.18 及以前的"保子目录 cwd 落未分组"行为时，在 cordis.yml 配 `workspacePolicy: 'exact'`；无工作区/无关路径/未分组终点的行为不变（只是多了警告与回执字段）。
+- `task_spawn`/`task_spawn_batch`/`task_workspace`/`task_list` 工具描述同步兜底链、`cwd` 参数语义、回执新字段与未分组过滤。
+
+### Tests
+
+- 单元测试 95 → 105：新增 config 枚举（默认 ancestor、grouping 拒绝、非法值 TypeError）、`normalizeWorkspacePath` 剥 `.` 段三平台分支（含 UNC/盘根/裸点）、`matchWorkspacePaths` 纯函数（精确≠祖先、最近祖先、盘根祖先、兄弟前缀不误判、异常容忍）、**调研 §2 的 18 场景矩阵整表回归**（S01–S18+S21，逐场景断言 create 形状/workspaceId XOR cwd/placement/workspace 投影/警告/kickoff 后缀/expectedWorkspace；夹具去环境化，POSIX CI 可跑）、exact 档不升级、worktree 探针降级（抛错/缺失/目录 `.git` 均非 worktree）、归一后缀随 uiLocale（en 变体 + reportBack 关闭仍保留归一提示）、batch 逐项回执、`task_list` 未分组过滤（含空注册表/抛错降级/组合过滤）、`expectedWorkspace` 记录-持久化-白名单。
+- `verify-installed.mjs`：mock `create` 对齐宿主 cwd 派生语义（`cwd = workspace?.path ?? request.cwd`）；新增 0.19.0 端到端断言——回执 placement/workspace 字段、祖先归一全链（workspaceId 请求 + 根 cwd 回执 + i18n kickoff 提示 + 注册表 expectedWorkspace）、未分组终点（警告 + 补救 hint + `task_list({ ungrouped })` 只捞回该会话）。repo 无 peer 依赖暂不可跑，待总控部署后于安装位置复跑。
+
 ## [0.18.5] - 2026-09-09
 
 ### Fixed
@@ -323,7 +348,8 @@
 
 - **`task_spawn` kickoff 缺陷**（端到端实测发现）：prompt 门面需要 AbortSignal——修复后重启复验，创建 + 命名 + 开场提示词准入 + 列表实时可见全链路通过（`SPAWN_FIXED_OK`）。
 
-[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.18.5...v0.19.0
 [0.17.0]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.16.2...v0.17.0
 [0.16.2]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.16.1...v0.16.2
 [0.16.1]: https://github.com/Kayungko/dsh-plugin-task-coordinator/compare/v0.16.0...v0.16.1

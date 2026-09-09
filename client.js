@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.18.5)
+ * dsh-plugin-task-coordinator — client module (0.19.0)
  *
  * Two surfaces:
  *  1. `conversation.session.header.utilities` slot — the "Copy session id"

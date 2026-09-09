@@ -9,7 +9,7 @@
 
 [![DSH 0.1.2-rc.1 verified](https://img.shields.io/badge/DSH-0.1.2--rc.1%20verified-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![89 unit tests](https://img.shields.io/badge/tests-89%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![105 unit tests](https://img.shields.io/badge/tests-105%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
 [What is this](#what-is-this) · [Screenshots](#screenshots) · [Quick start](#quick-start) · [Tools](#the-eleven-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Changelog](CHANGELOG.md) · [Chinese](README.zh-CN.md)
@@ -101,10 +101,10 @@ Loose wordings ("/task plugin", "coordinate things") are recognized too — the 
 
 | Tool | Purpose |
 |---|---|
-| `task_list` | List coordination-visible tasks with stable session ids, status, titles, todo/goal progress; filterable by `team` |
+| `task_list` | List coordination-visible tasks with stable session ids, status, titles, todo/goal progress; filterable by `team`; `ungrouped: true` (0.19.0) lists only sessions belonging to NO workspace — the remediation view for the ungrouped bucket, paired with `task_workspace` and the registry's `expectedWorkspace` |
 | `task_progress` | Read one task in depth: live/cold state, queued messages, conversation tail, todos, goal |
 | `task_send` | Deliver a visible follow-up prompt (`mode: queue` or `steer`; `reference` links an earlier instruction); returns a `messageId` plus a `queueDepth` receipt `{nextTurn, nextStep}` (post-send; one next-turn message is consumed per round, so depth N ≈ N rounds before it is read) |
-| `task_spawn` | Create + name + kick off a brand-new task (title follows the `MMDD｜type｜topic` rule; groupable via `team`); returns a `correlationId`; appends the report-back convention by default; the child attaches to the caller's workspace, and an explicit `cwd` exactly matching a workspace path is upgraded to that workspace's attachment (0.12.0); optional `provider`+`model` (+`reasoningEffort`) select the child's LLM route, installed before the kickoff (0.13.0); omitted, the spawn falls back to the plugin's configured default route (Settings → 任务编排, 0.18.0), then the host default |
+| `task_spawn` | Create + name + kick off a brand-new task (title follows the `MMDD｜type｜topic` rule; groupable via `team`); returns a `correlationId`; appends the report-back convention by default; **workspace placement fallback chain** (0.19.0): exact-match attachment (0.12.0) → subdirectory attaches to the NEAREST ancestor workspace with the session cwd normalized to the workspace root (default `ancestor` policy, stated in both the receipt and the kickoff) → git worktrees deliberately stay ungrouped to preserve isolation (strong warning) → every ungrouped landing carries a warning + remediation hint; receipts always report `workspace` ({id,title} | null) and the `placement` enum; optional `provider`+`model` (+`reasoningEffort`) select the child's LLM route, installed before the kickoff (0.13.0); omitted, the spawn falls back to the plugin's configured default route (Settings → 任务编排, 0.18.0), then the host default |
 | `task_confirm` | Present a decomposition/dispatch plan as an **interactive approval card** and block until the user answers; approval mints a single-use `confirmationId` |
 | `task_confirm_select` | Present the proposed task list as a **multi-select card** (host's neutral question UI — no amber styling): the user checks which tasks to dispatch (partial dispatch) with an optional custom-feedback row; approval binds the `confirmationId` to the selected subset and `task_spawn_batch` enforces it (`confirmation-mismatch` otherwise) |
 | `task_spawn_batch` | Spawn a whole decomposition plan in one call (`tasks: [{title?, prompt}]` + one `team`); requires the `confirmationId` once the batch reaches the confirmation threshold; one failed item does not abort the rest |
@@ -121,9 +121,23 @@ Read-only lookups can bypass the model entirely: `/tasks` (all tasks), `/tasks t
 
 The plugin ships a small **web client module** (`client.js`, declared via `dsh.client` in `package.json`) that occupies two official slots. ① `conversation.session.header.utilities` — the same seam the shipped `session-log-export` package uses: every session header gets a **Copy Session ID** button (filled pill matching the Session-log button geometry: black-on-white in light mode, white-on-black in dark mode) that copies the session's full `sessionId` to the clipboard, ready to paste into `task_send`, `task_progress` or `/tasks <id>` on the supervisor side. (The sidebar's per-session context menu is hard-coded in the host and cannot be extended — field-verified — so the header slot is the sanctioned place.) ② `settings.section` (0.18.1): a first-level **Task Orchestration** page in the settings left nav (beside General/Models/Plugins/Agent presets, order 25) that edits the default spawn model (see the section above).
 
-### Workspace placement & migration (0.12.0)
+### Workspace placement: the five-tier fallback chain, fully observable (0.19.0)
 
-Spawned children attach to the caller's workspace by default; an explicit `cwd` that exactly matches a workspace path (case- and separator-insensitive) is **upgraded to a workspace attachment** automatically, so cross-directory dispatch no longer drops sessions into the ungrouped bucket. Sessions that landed ungrouped earlier migrate via `task_workspace`: `list` the host workspaces, then `attach` / `detach` by id or exact path. It calls the live workspace entity — the same `attachSession` API the host's `session.create` uses internally — so the session's stored cwd is validated against the workspace path and its conversation is never touched. (The GUI offers no such entry: sidebar dragging calls `insertSessionBefore`, which only reorders sessions already inside a workspace — field-verified.)
+Spawned children attach to the caller's workspace by default; the cwd they carry (explicit or inherited) resolves through a five-tier chain, configured by `workspacePolicy` (default `ancestor`):
+
+1. **Lexical exact match** — the cwd equals a workspace path after normalization (case/separators/trailing separators/`.` segments, so `D:\repo\.` == `D:\repo`) → attach to it (the 0.12.0 upgrade plus the `.`-segment fix);
+2. **Caller inheritance** — the caller's workspace membership (including the spawn ancestor chain), then an exact `caller.cwd` match (unchanged);
+3. **Nearest-ancestor upgrade** (default tier) — a cwd that is a TRUE subdirectory of a registered workspace attaches to the NEAREST ancestor workspace (nested workspaces pick the closest). The host then derives the session cwd from the workspace ROOT, trading subdirectory isolation for grouping: the receipt carries `placement: 'ancestor-normalized'` + `normalizedFrom`, and the kickoff prompt gains one mechanical sentence (zh/en, following the host language) telling the task its cwd was normalized, where its target directory is, and to use explicit paths for file/git operations;
+4. **Git-worktree recognition** — a cwd whose `.git` is a FILE (the linked-worktree marker) that missed the tiers above stays ungrouped ON PURPOSE to preserve worktree isolation (the host attaches a session only when its stored cwd equals the workspace path, so joining the main repo's workspace would rewrite the cwd) — with a strong receipt warning and the remediation cost spelled out (`task_workspace migrate`, which loses the isolation too);
+5. **Ungrouped terminal** — every other miss: the receipt carries `workspace: null` + `placement: 'ungrouped'` + a warning + remediation hints (`task_workspace` attach/migrate, the `task_list({ ungrouped: true })` audit, and `team` grouping which still works logically).
+
+**Observability is unconditional**: every spawn receipt reports `workspace` (`{id,title}` | `null`) and the `placement` enum (`exact-match` / `caller-inherited` / `ancestor-normalized` / `ungrouped-worktree` / `ungrouped`); `task_spawn_batch` items carry the same fields per result; the registry records `expectedWorkspace` (the directory the caller intended) for later remediation; and `task_list({ ungrouped: true })` lists only sessions that belong to no workspace (same single-source resolver as the spawn chain — a subdirectory cwd counts as ungrouped, exactly the remediation candidate this filter exists to surface).
+
+> Migration note: pre-0.19 behavior ("an explicit subdirectory cwd stays ungrouped") is now "attach to the nearest ancestor workspace" under the default policy; set `workspacePolicy: 'exact'` in cordis.yml to restore the exact-only conservative tier. `grouping` is a reserved future tier and is rejected as an invalid value today.
+
+### Fixing & migrating existing sessions (0.12.0 / 0.16.0)
+
+Sessions that landed ungrouped earlier migrate via `task_workspace`: `list` the host workspaces, then `attach` / `detach` by id or exact path. It calls the live workspace entity — the same `attachSession` API the host's `session.create` uses internally — so the session's stored cwd is validated against the workspace path and its conversation is never touched. (The GUI offers no such entry: sidebar dragging calls `insertSessionBefore`, which only reorders sessions already inside a workspace — field-verified.)
 
 True cross-workspace moves (0.16.0): `attach` can never move a session whose stored cwd differs from the workspace path — the host validates and refuses, and no host API rewrites an existing session's cwd. `action: migrate` does the real move: it reads the complete replay-validated log (`sessionQuery.readSession`, without making the source live), seeds a NEW session born with the target workspace path as its cwd (`sessions.create` + `flush` — the same primitive the host's own `fork()` uses internally; `fork()` itself deliberately preserves the source cwd/workspace and cannot retarget), attaches the clone, archives the original at the workspace level (`workspaceRegistry.archiveSession` — a display-layer fold: the old session stays readable and resumable), and carries the plugin registry record (team/depth/parent/title) over to the new id — team filtering and recursion governance survive the move. The task continues under the returned `sessionId`; message that id, never the old one — the archive does not seal the original, and messaging the archived id would fork the work into two diverging copies. Running sources are refused (`migrate-busy` — the clone seeds from the persisted log, so settle the turn with `task_wait` first); a source whose cwd already matches the target is refused with an `attach` hint; every partial failure reports whether an orphan clone exists and whether the original was NOT archived.
 
@@ -252,6 +266,7 @@ Mounting follows the shipped `@openviking/dsh-memory-plugin` precedent — an **
     titleTimeZone: 'Asia/Shanghai'
     registryFile: ''              # empty = <DSH_HOME or ~/.dsh>/task-coordinator/registry.json
     registryMaxEntries: 500
+    workspacePolicy: 'ancestor'   # spawn workspace placement: exact = exact-match only (pre-0.19 behavior) | ancestor = subdirectories attach to the nearest ancestor workspace (default); 'grouping' is reserved and rejected
     maxBatchSpawn: 6              # per-call cap for task_spawn_batch
     maxSpawnDepth: 2              # spawn generations allowed below the root session
     confirmBeforeBatch: true      # dispatch confirmation gate
@@ -276,7 +291,7 @@ Module layering, DI boundaries and the degradation strategy live in **[docs/ARCH
 
 ```powershell
 node --check *.mjs                      # syntax check
-node --test test/smoke.test.mjs         # 89 unit tests (mocked host)
+node --test test/smoke.test.mjs         # 105 unit tests (mocked host)
 # after installing into a profile (see Quick start):
 node verify-installed.mjs               # installed-location integration check: real host packages + mock ctx
 ```
@@ -300,7 +315,7 @@ dsh-plugin-task-coordinator/
 ├── cordis.patch.yml    isolated plugin-group mount descriptor
 ├── install.ps1         deploy script (copy-based install + automatic backups)
 ├── verify-installed.mjs installed-location integration check
-├── test/smoke.test.mjs 89 unit tests
+├── test/smoke.test.mjs 105 unit tests
 └── docs/               ARCHITECTURE.md · PROTOCOL.md
 ```
 

@@ -40,6 +40,7 @@ export function registerTools(ctx, ops, deps, config) {
     parameters: {
       filter: { type: 'string', description: 'Optional case-insensitive substring matched against session id, title, and cwd.' },
       team: { type: 'string', description: 'Only list tasks spawned under this team (workstream). Requires the task to be recorded in the spawn registry.' },
+      ungrouped: { type: 'boolean', description: 'Only list sessions that belong to NO workspace (the GUI ungrouped bucket): each session cwd is matched lexically against the registered workspace paths by the same resolver the spawn placement chain uses. The remediation view — pair it with task_workspace attach/migrate, and check the spawn registry expectedWorkspace for what the caller intended.' },
       includeSubagents: { type: 'boolean', description: 'Also list subagent-origin sessions. Defaults to false.' },
       limit: { type: 'integer', description: 'Max rows to return, newest first. Defaults to 50.' },
     },
@@ -116,6 +117,8 @@ export function registerTools(ctx, ops, deps, config) {
       + 'or "task-coordinator" references), use this tool family instead of doing everything in-session, and load the '
       + 'task-coordination skill for the orchestration playbook. '
       + 'The new task appears in the session list immediately. Returns the new session id for follow-up coordination. '
+      + 'Workspace placement (0.19.0): every receipt reports workspace ({id,title} | null) and placement — exact-match | caller-inherited | ancestor-normalized | ungrouped-worktree | ungrouped; '
+      + 'an ungrouped placement carries a warning + remediation hint (task_workspace attach/migrate, task_list ungrouped filter). '
       + 'With reportBack (default on) the child is told to send its result summary back and end its turn right after, so your reply auto-opens a new round on the idle child. '
       + 'Optional provider+model select the child\'s LLM route (installed before the kickoff, so its first turn uses it; '
       + 'omit both to use the plugin\'s configured default route — Settings → 任务编排 — and then the host default model; '
@@ -130,7 +133,7 @@ export function registerTools(ctx, ops, deps, config) {
           + `The MMDD｜ date prefix is added automatically; do not write the date yourself. `
           + 'Keep the topic short and concrete. If unsure of the type, pass only the topic.',
       },
-      cwd: { type: 'string', description: 'Working directory for the new task. Defaults to the caller\'s working directory.' },
+      cwd: { type: 'string', description: 'Working directory for the new task. Defaults to the caller\'s working directory. Placement (0.19.0, workspacePolicy default \'ancestor\'): an exact match (case/separator/trailing-separator/\'dot\'-segment normalized) attaches the task to that workspace; a cwd INSIDE a registered workspace\'s directory tree is normalized up to the NEAREST ancestor workspace (the session then works at the workspace root — the receipt and the kickoff prompt both say so); anything else lands ungrouped with a warning (git worktrees are recognized via their .git file marker and deliberately kept ungrouped to preserve isolation). Set workspacePolicy \'exact\' in the plugin config to keep the pre-0.19 exact-only behavior.' },
       team: { type: 'string', description: 'Optional team (workstream) name grouping related spawned tasks; recorded durably and usable as a task_list filter, so the group survives a host restart.' },
       reportBack: { type: 'boolean', description: 'Default true: append an instruction telling the new task to push its result summary back to your session via task_send when it finishes. Set false for fire-and-forget tasks you will only read with task_progress.' },
       sessionId: { type: 'string', description: 'Optional explicit session id; creation is idempotent for the same id and cwd.' },
@@ -214,7 +217,8 @@ export function registerTools(ctx, ops, deps, config) {
     description: 'Execute a decomposition plan: create several task sessions in one call, all optionally under one team. '
       + 'The batch counterpart of task_spawn for parallel fan-out as a supervisor. '
       + 'Use after analyzing the work into independent pieces (no shared files, no producer/consumer dependency between them). '
-      + 'Every item\'s prompt must be fully self-contained. One failed item does not abort the rest; the response lists per-item results. '
+      + 'Every item\'s prompt must be fully self-contained. One failed item does not abort the rest; the response lists per-item results '
+      + '(each carrying the 0.19.0 workspace/placement observability fields, warning on ungrouped items). '
       + spawnTitleRule,
     parameters: {
       tasks: {
@@ -295,7 +299,7 @@ export function registerTools(ctx, ops, deps, config) {
       + 'Use it to fix sessions that landed in the ungrouped bucket — e.g. spawned with an explicit cwd before 0.12.0. '
       + 'Attach goes through the host workspace entity (the same API session.create uses): the session\'s stored cwd must match the workspace path, and the session\'s conversation is never touched. '
       + 'Migrate crosses workspaces whose path differs from the session\'s cwd — the one thing attach can never do: it clones the full history into a NEW session born with the target cwd, attaches the clone and archives the original (workspace-level: the old id stays readable and resumable — never message it again or the work forks into two diverging copies), then returns the new session id (message that id from now on). It refuses running sessions (settle them with task_wait first). '
-      + 'New spawns rarely need attach — task_spawn upgrades an exact cwd match to a workspace attachment automatically; spawn with the target workspace\'s cwd when the task belongs elsewhere.',
+      + 'New spawns rarely need attach — task_spawn upgrades an exact cwd match to a workspace attachment automatically, and under the default workspacePolicy \'ancestor\' (0.19.0) also a cwd inside a workspace\'s directory tree (normalized to the workspace root); spawn with the target workspace\'s cwd when the task belongs elsewhere, and find what landed ungrouped with task_list({ ungrouped: true }).',
     parameters: {
       action: { type: 'string', description: 'list | attach | detach | migrate. Defaults to list.' },
       sessionId: { type: 'string', description: 'Session to attach/detach/migrate (required for those actions). For migrate this is the SOURCE session; the result reports the new id.' },

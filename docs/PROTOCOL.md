@@ -97,6 +97,7 @@
 | 单次批量上限 | 6 | `maxBatchSpawn` | `task_spawn_batch` 拒绝（`bad-request`），拆小批 [0.5.0 新增] |
 | 派生代数上限 | 2 | `maxSpawnDepth` | 超限的派生拒绝（`spawn-depth-exceeded`）[0.5.0 新增] |
 | 派发确认闸门 | 开 / 阈值 2 | `confirmBeforeBatch` / `confirmBatchThreshold` | 达阈值的批量缺凭证拒绝（`confirmation-required`）[0.6.0 新增] |
+| 工作区归属策略 | `ancestor` | `workspacePolicy`（`exact` \| `ancestor`） | spawn cwd 只精确匹配（`exact`）或加最近祖先升级（`ancestor`，默认）；`grouping` 为保留档、传入即 TypeError [0.19.0 新增] |
 
 配置解析拒绝错误类型而不是猜测（`config.mjs` 逐项类型校验，非法直接 `TypeError`）；数值下限统一收敛为 1。
 
@@ -147,9 +148,9 @@
 `registry.mjs` 记录协调者 spawn 过的会话——哪个团队、何时、什么意图、派生自谁：
 
 - **文件**：默认 `<DSH_HOME 或 ~/.dsh>/task-coordinator/registry.json`（`registryFile` 可覆盖）；格式版本化（当前 `1`）；
-- **记录字段**：`team` / `title` / `promptExcerpt`（**用户原始 prompt** 的摘录）/ `depth` / `parentSessionId`（后两者 0.5.0 起）；
-- **消费面**：`task_list({ team })` 的成员判定、列表行与 `task_progress` 结果里的 `team` 富化；深度推导（§9）；
-- **容错契约**：读取**永不抛错**——缺失或损坏降级为空注册表；损坏文件保留为 `*.corrupt-<时间戳>` 供检查，不静默丢弃；
+- **记录字段**：`team` / `title` / `promptExcerpt`（**用户原始 prompt** 的摘录）/ `depth` / `parentSessionId`（后两者 0.5.0 起）/ `expectedWorkspace`（0.19.0 起：spawn 时调用方期望归属路径——显式 `cwd`，缺省时调用方 cwd；未分组/worktree/归一落位的**事后批量补救**线索）；
+- **消费面**：`task_list({ team })` 的成员判定、列表行与 `task_progress` 结果里的 `team` 富化、深度推导（§9）；`expectedWorkspace` 供 `task_list({ ungrouped: true })` 之后的补救决策；
+- **容错契约**：读取**永不抛错**——缺失或损坏降级为空注册表；损坏文件保留为 `*.corrupt-<时间戳>` 供检查，不静默丢弃；字段级白名单（非法类型值加载时丢弃）；
 - **写入**：近似原子（临时文件 + 重命名）；
 - **容量**：`registryMaxEntries`（默认 500）上限，最旧先裁剪。
 
@@ -169,6 +170,7 @@
 - **超限指引**：`spawn-depth-exceeded` 的 `error` 文案明确要求改用 subagent——subagent 是宿主原生面，不占本插件深度预算；
 - **工作区归属 [0.8.1]**：宿主 `create` 接受 `workspaceId` 或 `cwd`（互斥，见 `dsh-api-session-controller.create`）；`spawnTask` 解析调用方的工作区成员归属（含注册表祖先链回溯）并传 `workspaceId`——宿主以工作区路径为 cwd 并 `attachSession`，子任务与总控同工作区可见；显式 `cwd` 优先、无工作区降级为 cwd 语义。
 - **cwd→工作区升级 [0.12.0]**：将发送的 cwd（显式参数或降级路径）与 `workspaceRegistry.list()` 快照的工作区 path **精确匹配**时改发 `workspaceId`——宿主派生同一 cwd 并挂载；未命中保持旧语义。归一按平台分支 [0.12.1]：win32 分隔符归一 + 大小写折叠 + 盘符根保留；darwin 仅大小写折叠；POSIX 保留大小写（反斜杠是普通文件名字符）。归一只是预筛——宿主实体 attach 的 realpath 全等校验才是权威。
+- **工作区归属兜底链 [0.19.0]**（设计蓝图 `research/workspace-placement-fallback.md` 定案实施，18 场景 harness 实证驱动）：spawn 的 cwd 归属判定升级为五级链——① **词法精确匹配**：新单一真源纯函数 `matchWorkspacePaths`（`ops.mjs`，spawn 链与 `task_list` 未分组过滤共用）；`normalizeWorkspacePath` 新增剥 `.` 路径段（三平台分支各自处理，UNC 前缀/盘根保留），治愈"宿主 realpath 能解析而词法归一不能"的 canon 分叉；② **调用方继承**（成员归属/祖先链/`caller.cwd` 精确，0.8.1–0.12.0 逻辑原样保留）；③ **最近祖先升级**（`workspacePolicy: 'ancestor'`，默认档）：将要发送的 cwd 是某注册工作区路径的**真子目录** → 挂**最长归一前缀**的祖先工作区（嵌套工作区取最近）；宿主以工作区根派生会话 cwd，回执带 `placement: 'ancestor-normalized'` + `normalizedFrom`，kickoff 在 reportBack 后缀之前追加 i18n 机械提示（`i18n.mjs` 新键 `workspaceNormalizedSuffix`，zh/en，随宿主语言偏好）：告知 cwd 已归一到工作区根、任务目标目录在哪、文件/git 操作用显式路径；④ **git worktree 识别（只分类、绝不升级挂载）**：经 `index.mjs` 注入的 `probeWorktree` 探针（`statSync(<cwd>/.git)` 为**文件**即 linked-worktree 标记；探针异常/缺失一律按"非 worktree"降级；**无子进程 git 调用**，gitdir 反查属未验证机制、留给保留档）判定为 worktree 的未命中 cwd → 保隔离落未分组 + 回执强警告（宿主 attach 校验 cwd 全等，挂主仓必毁隔离；补救 migrate 同样丢隔离）；⑤ **未分组终点必附回执警告**。可观测性无条件全量：spawn 成功载荷新增 `workspace`（`{id,title}` | `null`）与 `placement` 枚举（`exact-match` | `caller-inherited` | `ancestor-normalized` | `ungrouped-worktree` | `ungrouped`，`WORKSPACE_PLACEMENTS` 导出为单一真源），未分组附 `warning` + 补救提示（`task_workspace` attach/migrate、`task_list({ ungrouped: true })` 审计、`team` 编组仍可逻辑分组）；`task_spawn_batch` 逐项 results 同构携带。`task_list({ ungrouped: true })`（新参数）：只列不属于任何工作区的会话——用同一 `matchWorkspacePaths` 的**精确档**镜像宿主 `sessionIds` 桶的口径（会话 cwd 词法精确等于工作区路径才算归属；子目录 cwd **算**未分组，正是待补救对象；无 cwd 行保留）。注册表新增 `expectedWorkspace` 字段（§7）。宿主约束（0.1.2-rc.1 实测）不变且封死组合面：create 互斥（workspaceId XOR cwd）、cwd 派生优先级 `workspace?.path ?? request.cwd ?? defaultCwd`、attach realpath 全等校验——不存在"既挂工作区又保 worktree/子目录 cwd"的组合，唯一出路是③让宿主把 cwd 派生成工作区路径（隔离代价已在回执与 kickoff 双明示）。`workspacePolicy: 'exact'` 档关闭③，保留 0.18 及以前的仅精确匹配行为；`grouping` 档**保留未实现**，配置传入按无效值拒绝。
 - **既有会话迁移 [0.12.0]**：`task_workspace` 直连 `workspaceRegistry.get(id)` 返回的**活实体**：`attachSession` 自带宿主校验（读会话头 cwd → realpath → 必须与工作区 path 全等，`dsh-workspace` 实体 87-105 行），幂等；`detachSession` 为逆操作。均不向会话注入消息。GUI 无等价入口：拖拽走 `workspace.insertSessionBefore`，仅接受已在区内会话（否则 `WorkspaceMoveInvalidError`），`workspace/move-invalid` 由此而来；工作区控制器 API 面（create/rename/delete/insertBefore/insertSessionBefore/archiveSession）不含跨区 attach。
 - **跨工作区真迁移 [0.16.0]**：宿主从不改写既有会话的存储 cwd（attach 以它为准校验），跨路径移动 = 克隆 + 归档五步：① `sessionQuery.readSession`（`dsh-session-query` 955 行：返回克隆 header + 完整经重放校验的事件日志，**不激活**源会话）；② `sessions.create(undefined, {seed, meta})`（`dsh-session` 1579 行：`meta.cwd` 必须绝对路径——目标工作区路径；保留原 `createdAt`/`agentPreset`；store 铸新 id）；③ `sessions.flush(session)`（1750 行）持久化；④ 目标实体 `attachSession(新id)`（新会话头 cwd = 目标路径，校验天然通过）；⑤ `workspaceRegistry.archiveSession(旧id)`（`dsh-workspace` 422 行：持久、幂等、未知会话抛错；语义经 206-215/408 行与真机验收澄清——归档只把旧 id 记入工作区 `archivedSessionIds`（GUI 据此折叠），`sessionIds` 槽位保留、会话本体仍在 store 且可读可续跑，migrate 回执 note 因此带分叉警告）。宿主自家 `fork()`（`dsh-api-session-controller` 655 行）内部同款种子创建原语，但它刻意保留源 cwd 与工作区（696 行），不能改道——社区 `dsh-session-mover` 实证了这条唯一干净通道。防护：运行中拒迁 `migrate-busy`（克隆只带得走已持久化日志）；源 cwd 已等目标路径 → bad-request 提示 attach；服务缺失 → `migrate-unavailable`；②③④⑤ 任一步失败 → `migrate-failed`，消息明确孤儿克隆 id 与原会话未归档状态；⑤ 失败但④成功 → `ok:true` + `archived:false` + warning。注册表记录（team/depth/parentSessionId/title/createdAt）平移到新 id，旧条目留作归档历史。
 - **子会话模型指定 [0.13.0]**：`task_spawn`/`task_spawn_batch` 条目接受可选 `provider`+`model`（+`reasoningEffort`，成对约束）。两级校验：① 创建前经 `llm.resolveCallConfig` 目录预校验——无效路线 `model-unavailable`，**不创建会话**（目录服务缺失时优雅跳过，交②兜底）；② 创建后、开场前经 `sessionController.selectModel` 安装（`dsh-api-session-controller` 600-628 行）——选择经 `model/selection` 会话事件持久化（重启存活），安装失败报 `model-select-failed` 附孤儿 sessionId 且**不开场**。宿主语义：`selectModel` 同时 `agentDefaultModel.saveSelection` 更新应用级默认模型（settings `agent-default-model` 命名空间，GUI 选择器同行为）；它是唯一公开入口（会话本地的 `selectForNextRequest` 为控制器内部方法、非服务 API），插件如实披露而非绕过。
@@ -223,7 +225,8 @@
 ## 13. 已知边界
 
 - **无删除工具**：作废一个任务 = `task_cancel` + 不再发消息；会话本身保留；
-- **cwd 继承**：子任务默认继承发起方工作目录，跨项目需在 `task_spawn` 的 `cwd` 参数显式指定；
+- **cwd 归属策略 [0.19.0 变更]**：默认档 `ancestor` 下，显式/继承 cwd 命中某工作区**子树**时子会话 cwd 会被宿主归一到最近祖先工作区**根**（回执与 kickoff 双明示）——需要"保子目录 cwd、落未分组"的 0.18 及以前行为时配 `workspacePolicy: 'exact'`；跨项目派发仍应传与目标工作区路径精确匹配的显式 `cwd`；
+- **worktree 不升级 [0.19.0]**：linked worktree 的 cwd 刻意保持未分组（隔离优先，见 §9 兜底链④）；若以分组为重，`task_workspace migrate` 是唯一补救，但克隆以工作区根出生、worktree 隔离同样丢失——与挂主仓同价，仅多保留历史；
 - **进度报告裁剪**：`task_progress` 的对话尾部按 `progressTailMessages`（默认 6 条）×`excerptChars`（默认 400 字）裁剪，防止上下文爆炸；
 - **技能依赖可缺**：`dsh-skill-filesystem` 不可用时技能不挂载（仅 warning），八工具不受影响；
 - **注册表只记 spawn** [0.3.0 新增]：`team` 过滤依赖注册表记录——注册表启用前创建或外部创建的会话无法按团队检索；
@@ -234,7 +237,7 @@
 
 ## 14. 验证记录
 
-- **单元**：95 个测试（`test/smoke.test.mjs`，mock 宿主，`node --test`）全绿——覆盖 0.3.0 注册表/编组/引用/多目标等待、0.4.0 命令语法/渲染/注册降级、0.5.0 批量（部分失败/超上限/深度链）、0.6.0 确认（批准/拒绝/取消/无信道/子代理拒答/闸门五态）、0.7.0 回报（默认开/关/批量逐项）、0.8.1 工作区归属（继承/显式 cwd 覆盖/祖先链/降级/批量逐项）、0.9.0 确认卡标题规范（无标题/二级标题拒绝）、0.10.0 多选确认（子集批准/夹带拒绝/无标题拒绝/空选反馈/关窗/无信道/子代理拒答/子集凭证消耗）、0.11.0 复用凭证（跨批存活/跨会话拒借/子集强制持续）、0.12.0 工作区迁移（路径归一/精确匹配升级/list-attach-detach 实体链/五类失败模式/平台分支 win32-darwin-linux）、0.13.0 模型指定（成对校验/目录预校验零孤儿/安装时序 create→selectModel→prompt/安装失败孤儿不开场/目录缺失降级/批量逐项转发）、0.14.0 路线发现（目录投影/老宿主与坏目录降级/提示纯函数失败容忍/model-unavailable 错误附路线提示）、0.15.0 界面本地化（偏好解析回退纪律/字典插值/en 确认卡标签批准闭环/拒绝回退标签/多选 en 问题与空选反馈/开场后缀随语言/命令元数据）、0.16.0 跨工作区真迁移（五步时序 read→create→attach→archive→注册表平移、克隆元数据全携带[目标 cwd/原 createdAt/agentPreset/完整 seed]、运行中拒迁、同 cwd 拒绝提示 attach、服务缺失降级、克隆失败零副作用、挂载失败孤儿报告、归档失败仍算移动成功、日志不可读、未知 action 消息含 migrate）、0.17.0 投递回执（queueDepth 分列/动态 hint 三分支/冷会话 note/回报让位协议句/超时 hint）、0.18.0 派发默认模型（normalizeSpawnRoute 纯规则/validate 写边界/fallback 链+modelSource/畸形存储降级不破坏 spawn/默认路线同过预校验/孤独 effort 搭乘/批量继承/pluginDefault 投影与降级）；
+- **单元**：95 个测试（`test/smoke.test.mjs`，mock 宿主，`node --test`）全绿——覆盖 0.3.0 注册表/编组/引用/多目标等待、0.4.0 命令语法/渲染/注册降级、0.5.0 批量（部分失败/超上限/深度链）、0.6.0 确认（批准/拒绝/取消/无信道/子代理拒答/闸门五态）、0.7.0 回报（默认开/关/批量逐项）、0.8.1 工作区归属（继承/显式 cwd 覆盖/祖先链/降级/批量逐项）、0.9.0 确认卡标题规范（无标题/二级标题拒绝）、0.10.0 多选确认（子集批准/夹带拒绝/无标题拒绝/空选反馈/关窗/无信道/子代理拒答/子集凭证消耗）、0.11.0 复用凭证（跨批存活/跨会话拒借/子集强制持续）、0.12.0 工作区迁移（路径归一/精确匹配升级/list-attach-detach 实体链/五类失败模式/平台分支 win32-darwin-linux）、0.13.0 模型指定（成对校验/目录预校验零孤儿/安装时序 create→selectModel→prompt/安装失败孤儿不开场/目录缺失降级/批量逐项转发）、0.14.0 路线发现（目录投影/老宿主与坏目录降级/提示纯函数失败容忍/model-unavailable 错误附路线提示）、0.15.0 界面本地化（偏好解析回退纪律/字典插值/en 确认卡标签批准闭环/拒绝回退标签/多选 en 问题与空选反馈/开场后缀随语言/命令元数据）、0.16.0 跨工作区真迁移（五步时序 read→create→attach→archive→注册表平移、克隆元数据全携带[目标 cwd/原 createdAt/agentPreset/完整 seed]、运行中拒迁、同 cwd 拒绝提示 attach、服务缺失降级、克隆失败零副作用、挂载失败孤儿报告、归档失败仍算移动成功、日志不可读、未知 action 消息含 migrate）、0.17.0 投递回执（queueDepth 分列/动态 hint 三分支/冷会话 note/回报让位协议句/超时 hint）、0.18.0 派发默认模型（normalizeSpawnRoute 纯规则/validate 写边界/fallback 链+modelSource/畸形存储降级不破坏 spawn/默认路线同过预校验/孤独 effort 搭乘/批量继承/pluginDefault 投影与降级）、0.19.0 工作区归属兜底链（config 枚举默认 ancestor+grouping 拒绝、normalizeWorkspacePath 剥 `.` 段三平台分支、matchWorkspacePaths 精确/最近祖先/盘根/兄弟前缀/异常容忍、**调研 §2 的 18 场景矩阵整表回归**、exact 档不升级、worktree 探针三级降级、归一 kickoff 后缀随 uiLocale、batch 逐项回执、task_list 未分组过滤、expectedWorkspace 记录-持久化-白名单）；
 - **集成**：`verify-installed.mjs` 在**安装位置**用真实 `@deepseek-ai/dsh-tools` / `dsh-llm` / `dsh-skill-filesystem` 包 + mock ctx 跑 `apply()` 全链路（schema 编译、消息构造、9 工具、`/tasks` 五路径、确认闸门全链、多选确认子集强制、安全守卫、卸载清理、0.8.0 客户端模块全链）；宿主升级 2.0.5（core **0.1.2-rc.1**）后重跑全绿；
 - **端到端**（重启后真实宿主）：0.2.0 六项能力实测通过（运行中 `steer` 纠偏、取消后恢复、自环守卫；`task_spawn` kickoff 曾发现 prompt 门面缺 AbortSignal 的缺陷，修复后复验 `SPAWN_FIXED_OK`）；命名规则实测 `0904｜修复｜回归套件`；0.6.0 确认卡经官方 `userQuestions` 接缝同构路径构造（`exit_plan_mode` 先例 + 接缝错误码逐项核对）。
 
@@ -255,4 +258,4 @@
 
 - **安装入口**：`install.ps1`（仓库根为工作区便捷包装，`plugin/install.ps1` 为仓内等价版）——复制包文件、保证 profile `package.json` 的 `dependencies` + `dsh.profile.bundles` 登记，然后**必须重启宿主**才装载新 bundle。
 - **技能目录拷内容不拷目录**：`Copy-Item` 的源是目录且目标目录已存在时会拷**进去**（嵌套 `skills/skills/`），正式路径技能文件从此不再更新——0.4.0–0.8.3 的实际事故。现行脚本复制 `skills\*` 内容并清理历史嵌套残留；技能走 `patchReload: live`，内容更新**无需重启**即刻热刷新。
-- **安装态自检**：任何宿主/插件变更后，把 `verify-installed.mjs` 复制进安装目录运行（跑完删除），全绿才放行；它断言服务版本、11 工具、`/tasks`、确认闸门、多选确认子集强制、复用凭证跨批、task_workspace 实体链与 migrate 克隆五步链（目标 cwd 出生/元数据携带/同 cwd 拒绝零副作用）、spawn cwd 升级、子会话模型指定（预校验拒绝/安装时序/成对约束/错误路线提示）、task_models 目录投影、客户端 i18n 回归（0.16.1：裸键 `t()` 回退内置词典、迟注册 locale 服务首见即注册、zh/en 实时解析）、工作区归属与客户端模块全链、0.17.0 投递回执（task_send queueDepth 分列断言、回报后缀让位协议句断言）。
+- **安装态自检**：任何宿主/插件变更后，把 `verify-installed.mjs` 复制进安装目录运行（跑完删除），全绿才放行；它断言服务版本、11 工具、`/tasks`、确认闸门、多选确认子集强制、复用凭证跨批、task_workspace 实体链与 migrate 克隆五步链（目标 cwd 出生/元数据携带/同 cwd 拒绝零副作用）、spawn cwd 升级、**0.19.0 工作区落位（回执 placement/workspace 字段、祖先归一全链 workspaceId+根 cwd+i18n kickoff 提示+注册表 expectedWorkspace、未分组警告+task_list ungrouped 过滤）**、子会话模型指定（预校验拒绝/安装时序/成对约束/错误路线提示）、task_models 目录投影、客户端 i18n 回归（0.16.1：裸键 `t()` 回退内置词典、迟注册 locale 服务首见即注册、zh/en 实时解析）、工作区归属与客户端模块全链、0.17.0 投递回执（task_send queueDepth 分列断言、回报后缀让位协议句断言）。

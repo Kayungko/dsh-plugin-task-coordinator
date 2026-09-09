@@ -5,6 +5,14 @@
 
 import { DEFAULT_TITLE_TYPES } from './title.mjs';
 
+/**
+ * Accepted `workspacePolicy` values (0.19.0). 'grouping' is a RESERVED
+ * future tier (forced-grouping incl. worktree→main-repo attachment with a
+ * git -C kickoff rewrite) and is rejected as invalid until it ships — see
+ * research/workspace-placement-fallback.md §4③.
+ */
+export const WORKSPACE_POLICIES = Object.freeze(['exact', 'ancestor']);
+
 export const DEFAULTS = Object.freeze({
   /** Master switch. When false the plugin mounts no tools at all. */
   enabled: true,
@@ -64,6 +72,18 @@ export const DEFAULTS = Object.freeze({
   excerptChars: 400,
   /** Max messages included in progress reports. */
   progressTailMessages: 6,
+  /**
+   * Workspace placement policy for spawned tasks (0.19.0).
+   *  - 'exact'    (conservative tier): only an exact cwd→workspace-path match
+   *    attaches; everything else stays cwd/ungrouped (pre-0.19 semantics).
+   *  - 'ancestor' (default): additionally, a cwd that is a true subdirectory
+   *    of a registered workspace is normalized up to the NEAREST ancestor
+   *    workspace (the host derives the session cwd from the workspace path);
+   *    git worktrees are identified via the .git-file probe and deliberately
+   *    left ungrouped (isolation preserved) with a strong receipt warning.
+   *  - 'grouping' is RESERVED for a future release and rejected as invalid.
+   */
+  workspacePolicy: 'ancestor',
 });
 
 /**
@@ -116,6 +136,16 @@ export function resolveConfig(input = {}) {
       throw new TypeError('task-coordinator config "titleTypes" must be a non-empty array of non-empty strings');
     }
     config.titleTypes = source.titleTypes.map((value) => value.trim());
+  }
+  if (source.workspacePolicy !== undefined) {
+    const policy = source.workspacePolicy;
+    if (typeof policy !== 'string' || !WORKSPACE_POLICIES.includes(policy)) {
+      throw new TypeError(
+        `task-coordinator config "workspacePolicy" must be one of ${WORKSPACE_POLICIES.map((value) => `'${value}'`).join(' | ')}`
+        + ` ('grouping' is reserved for a future release and is not accepted yet)`,
+      );
+    }
+    config.workspacePolicy = policy;
   }
   if (config.maxQueuePerTask < 1) config.maxQueuePerTask = 1;
   if (config.titleMaxTopicChars < 1) config.titleMaxTopicChars = 1;

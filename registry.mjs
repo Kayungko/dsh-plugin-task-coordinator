@@ -31,7 +31,7 @@ export class SpawnRegistry {
       ? Math.floor(options.maxEntries)
       : 500;
     this.now = typeof options.now === 'function' ? options.now : () => Date.now();
-    /** @type {Map<string, { team?: string; createdAt: number; title?: string; promptExcerpt?: string }>} */
+    /** @type {Map<string, { team?: string; createdAt: number; title?: string; promptExcerpt?: string; expectedWorkspace?: string }>} */
     this.entries = new Map();
     this.loaded = false;
   }
@@ -54,6 +54,7 @@ export class SpawnRegistry {
               ...(typeof entry.promptExcerpt === 'string' && entry.promptExcerpt.length > 0 ? { promptExcerpt: entry.promptExcerpt } : {}),
               ...(typeof entry.depth === 'number' && Number.isFinite(entry.depth) && entry.depth >= 1 ? { depth: entry.depth } : {}),
               ...(typeof entry.parentSessionId === 'string' && entry.parentSessionId.length > 0 ? { parentSessionId: entry.parentSessionId } : {}),
+              ...(typeof entry.expectedWorkspace === 'string' && entry.expectedWorkspace.length > 0 ? { expectedWorkspace: entry.expectedWorkspace } : {}),
             });
           }
         }
@@ -68,7 +69,7 @@ export class SpawnRegistry {
   /**
    * Record one spawned session. Existing entries are merged (never lost).
    * @param {string} sessionId
-   * @param {{ team?: string; title?: string; promptExcerpt?: string; createdAt?: number; depth?: number; parentSessionId?: string }} entry
+   * @param {{ team?: string; title?: string; promptExcerpt?: string; createdAt?: number; depth?: number; parentSessionId?: string; expectedWorkspace?: string }} entry
    */
   record(sessionId, entry = {}) {
     this.ensureLoaded();
@@ -90,18 +91,22 @@ export class SpawnRegistry {
       ...(entry.parentSessionId !== undefined || existing?.parentSessionId !== undefined
         ? { parentSessionId: typeof entry.parentSessionId === 'string' && entry.parentSessionId.length > 0 ? entry.parentSessionId : existing?.parentSessionId }
         : {}),
+      ...(entry.expectedWorkspace !== undefined || existing?.expectedWorkspace !== undefined
+        ? { expectedWorkspace: typeof entry.expectedWorkspace === 'string' && entry.expectedWorkspace.length > 0 ? entry.expectedWorkspace : existing?.expectedWorkspace }
+        : {}),
     };
     if (merged.team === undefined) delete merged.team;
     if (merged.title === undefined) delete merged.title;
     if (merged.promptExcerpt === undefined) delete merged.promptExcerpt;
     if (merged.depth === undefined) delete merged.depth;
     if (merged.parentSessionId === undefined) delete merged.parentSessionId;
+    if (merged.expectedWorkspace === undefined) delete merged.expectedWorkspace;
     this.entries.set(sessionId, merged);
     this.prune();
     this.save();
   }
 
-  /** @returns {{ team?: string; createdAt: number; title?: string; promptExcerpt?: string } | undefined} */
+  /** @returns {{ team?: string; createdAt: number; title?: string; promptExcerpt?: string; expectedWorkspace?: string } | undefined} */
   get(sessionId) {
     this.ensureLoaded();
     return this.entries.get(sessionId);

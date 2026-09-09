@@ -75,7 +75,7 @@ flowchart LR
 分层约束（与 [unity-pipe](https://github.com/Kayungko/unity-pipe) 的移植边界思路一致，这里用 DI 达成）：
 
 - **纯模块**（`config.mjs` / `safety.mjs` / `title.mjs`）：零宿主 import，全部单测覆盖——59 个单元测试的主体；
-- **`registry.mjs`**：持久 spawn 注册表（团队工作流的跨重启记忆）。读写永不抛错：损坏/缺失降级为空注册表，损坏文件保留为 `*.corrupt-<ts>`；写入近似原子（临时文件 + 重命名）；容量上限裁剪（`registryMaxEntries`）；0.5.0 起每条记录还带 `depth` 与 `parentSessionId`（递归治理的依据）；
+- **`registry.mjs`**：持久 spawn 注册表（团队工作流的跨重启记忆）。读写永不抛错：损坏/缺失降级为空注册表，损坏文件保留为 `*.corrupt-<ts>`；写入近似原子（临时文件 + 重命名）；容量上限裁剪（`registryMaxEntries`）；0.5.0 起每条记录还带 `depth` 与 `parentSessionId`（递归治理的依据），0.19.0 起可选带 `expectedWorkspace`（调用方期望归属路径，未分组落位的事后补救线索；字段级白名单加载）；
 - **`i18n.mjs`**：界面文案字典（zh/en）与语言解析（0.15.0，纯模块零宿主 import）。`resolveUiLocale` 只认精确 `en`，其余一律落 zh（绝不猜测未内置的语言）；`uiStrings(locale)` 返回冻结字典——确认卡标签/标题/问题、多选卡文案、汇报约定后缀、`/tasks` 元数据。宿主侧每次调用实时读 settings `locale.preference`，切语言无需重启；
 - **`ops.mjs`**：工厂函数 `createOps(deps)`，宿主对象（sessionController / agents / createUserMessage / limiter / registry / uuid / askUser）**全部经依赖注入**，离开宿主进程可完整测试；
 - **`tools.mjs`**：连 `defineTool` 都经注入——模型面注册与宿主包解耦；
@@ -84,7 +84,7 @@ flowchart LR
 - **`settings.mjs`**：派发默认模型的 durable 设置区（0.18.0，纯模块零宿主依赖）——`normalizeSpawnRoute`（空对=null/修剪/半对抛错，spawn 路径与写边界共用的单一真源）、`validateSpawnModelsSection`（installSection 的 validate 钩子：写入边界拒绝畸形）、`buildSpawnModelsSchema`（schemastery 形状）。`index.mjs` 经 `ctx.inject(['settings'])` 装配（宿主侧 installSection + 每次派发活读 `settings.get(ns)`）；`ops.mjs` 的 `spawnTask` 在调用未带 provider+model 时回退该路线（解析链：显式 > 插件默认 > 宿主默认；回退路线同走预校验+selectModel 两级链；读取异常防御性降级为未设置）；
 - **`index.mjs`**：唯一直接 import 宿主包（`dsh-tools` / `dsh-llm` / `schemastery`）的装配层；`skills.mjs` 对 `dsh-skill-filesystem` 用**动态 import**；`ctx.get('userQuestions')` 在 `task_confirm` 调用时**惰性解析**（不硬注入，宿主缺该接缝时其余工具不受影响）；`ctx.inject(['settings'])` 装载设置区（0.18.0，缺服务降级）。
 
-## 机制设计（0.4.0–0.16.0 新增）
+## 机制设计（0.4.0–0.19.0 新增）
 
 ### 派发确认链（0.6.0）
 
@@ -112,6 +112,8 @@ flowchart LR
 宿主 `create` 对 `workspaceId` 与 `cwd` 是**互斥**语义，且只有 `workspaceId` 触发 `workspace.attachSession`。`spawnTask` 因此先解析调用方的工作区成员归属（调用方自身 + `parentSessionId` 祖先链 ≤8 跳，与工作区 `sessionIds` 求交），命中传 `workspaceId`（宿主以工作区路径为 cwd 并挂入），显式 `cwd` 优先、无归属降级为旧语义——子任务与总控在同一工作区侧栏可见。
 
 cwd→工作区升级与既有会话迁移（0.12.0）：将发送的 cwd 与工作区 path **精确匹配**（`normalizeWorkspacePath` 按平台分支 [0.12.1]：win32 分隔符归一+大小写折叠、darwin 仅折叠、POSIX 保留大小写；非 realpath，宿主实体校验才是权威）时改发 `workspaceId`，跨目录派发与未分组总控的子任务不再落入「未分组」；`task_workspace` 工具直连 `workspaceRegistry.get(id)` 活实体的 `attachSession`/`detachSession`（宿主 create 内部同一 API，自带会话头 cwd 与工作区 path 全等校验、幂等），迁移历史未分组会话且**不注入任何消息**。GUI 无此入口（拖拽 = `insertSessionBefore`，仅区内重排序）——插件面是唯一干净通道。
+
+工作区归属兜底链（0.19.0，蓝图 `research/workspace-placement-fallback.md` 定案）：spawn 的 cwd 归属判定升级为五级链——词法精确（新剥 `.` 段）→ 调用方继承（原样）→ 最近祖先升级（`workspacePolicy: 'ancestor'` 默认档，cwd 为工作区真子目录时挂最近祖先，宿主以工作区根派生会话 cwd；回执 `placement:'ancestor-normalized'`+`normalizedFrom`，kickoff 在 reportBack 前追加 i18n 归一提示 `workspaceNormalizedSuffix`）→ git worktree 识别（**只分类不升级**：`index.mjs` 注入的 `probeWorktree` 探针读 `<cwd>/.git` 是否为**文件**，异常一律按非 worktree 降级；无子进程 git）→ 未分组终点（警告 + 补救提示）。判定逻辑收敛在单一真源纯函数 `matchWorkspacePaths`（精确/最近祖先两档，`normalizeWorkspacePath` 基础上），spawn 链与 `task_list({ ungrouped: true })` 过滤共用；spawn/batch 回执无条件携带 `workspace`（{id,title}|null）+ `placement` 枚举（`WORKSPACE_PLACEMENTS`），未分组附 warning；注册表记 `expectedWorkspace` 供事后补救。`exact` 档关闭祖先升级（0.18 行为回退档）；`grouping` 档保留未实现、配置拒绝。
 
 跨工作区真迁移（0.16.0）：attach/detach 只解决「cwd 已一致」的归置；cwd 不一致的会话宿主没有任何 API 能改写其存储 cwd，真搬家 = **克隆 + 归档**。`index.mjs` 新增三个降级容错闭包——`readSessionSnapshot`（`sessionQuery.readSession`：克隆 header + 完整重放校验日志，不激活源）、`createSeededSession`（`sessions.create(undefined,{seed,meta})` + `flush`：新会话以目标工作区路径为出生 cwd，保留原 createdAt/agentPreset——宿主 `fork()` 内部同款原语，但 fork 刻意保留源 cwd/工作区不能改道）、`archiveSession`（`workspaceRegistry.archiveSession`：持久、幂等；宿主语义为工作区展示层——旧 id 进 `archivedSessionIds` 但会话本体仍可读可写，回执 note 带分叉警告）；ops 编排 read→create→attach→archive→注册表平移五步时序并逐步防护：运行中拒迁（克隆只带得走已持久化日志）、同 cwd 拒绝提示 attach、服务缺失 `migrate-unavailable`、部分失败逐一报告孤儿克隆与原会话归档状态。注册表记录随新 id 平移（team/depth/父链/标题），编组过滤与递归治理存活迁移；旧条目留作归档历史。
 
@@ -144,7 +146,8 @@ cwd→工作区升级与既有会话迁移（0.12.0）：将发送的 cwd 与工
 1. `dsh-skill-filesystem` 动态 import 失败 → 降级为一条 warning，十一个工具照常注册；
 2. `ctx.plugin(...)` 挂载失败 → 同样只打 warning；
 3. 宿主无 `ctx.commands`（旧版本）→ `/tasks` 注册降级为 warning，工具面不受影响；
-4. 宿主无 `userQuestions` 接缝或无 UI 连接 → `task_confirm` 返回 `no-question-channel`，其余七个工具不受影响。
+4. 宿主无 `userQuestions` 接缝或无 UI 连接 → `task_confirm` 返回 `no-question-channel`，其余七个工具不受影响；
+5. `probeWorktree` 探针缺失或抛错（0.19.0）→ 该 cwd 按「非 worktree」降级，落位链走到普通未分组终点——spawn 永不因探针失败而失败（`index.mjs` 闭包与 ops 层各兜一层）。
 
 工具注册先行、命令与技能挂载在后（`index.mjs` 的装配顺序即优先级）。
 

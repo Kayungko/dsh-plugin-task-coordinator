@@ -9,7 +9,7 @@
 
 [![DSH 0.1.2-rc.1 实测](https://img.shields.io/badge/DSH-0.1.2--rc.1%20实测-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![89 个单元测试](https://img.shields.io/badge/tests-89%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![105 个单元测试](https://img.shields.io/badge/tests-105%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
 [这是什么](#这是什么) · [界面一览](#界面一览) · [快速开始](#快速开始) · [十一个工具](#十一个工具) · [架构设计](docs/ARCHITECTURE.md) · [主机契约](docs/PROTOCOL.md) · [更新日志](CHANGELOG.md) · [English](README.md)
@@ -100,10 +100,10 @@ pwsh install.ps1 -Source .
 
 | 工具 | 用途 |
 |---|---|
-| `task_list` | 列出协调可见的任务（含稳定 sessionId、状态、标题、todo/goal 进度；可按 `team` 过滤） |
+| `task_list` | 列出协调可见的任务（含稳定 sessionId、状态、标题、todo/goal 进度）；可按 `team` 过滤；`ungrouped: true`（0.19.0）只列不属于任何工作区的会话——未分组桶的补救视图，配合 `task_workspace` 与注册表 `expectedWorkspace` 归置 |
 | `task_progress` | 深入读取单个任务：实时/冷状态、排队消息、对话尾部、todos、goal |
 | `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`；`reference` 关联先前指令），返回 `messageId` + `queueDepth` 回执 `{nextTurn, nextStep}`（投递后口径；next-turn 每轮恰消费 1 条，深度 N ≈ N 轮后才被读） |
-| `task_spawn` | 创建 + 命名 + 启动新任务（标题遵循 `MMDD｜类型｜主题`；可用 `team` 编组），返回 `correlationId`；默认附带回报约定；新任务默认挂进调用方所在工作区；显式 `cwd` 与某工作区路径精确匹配时自动升级挂载该工作区（0.12.0）；可选 `provider`+`model`（+`reasoningEffort`）指定子会话模型路线，开场前安装（0.13.0）；省略时回退插件默认路线（设置 → 任务编排，0.18.0），再回退宿主默认 |
+| `task_spawn` | 创建 + 命名 + 启动新任务（标题遵循 `MMDD｜类型｜主题`；可用 `team` 编组），返回 `correlationId`；默认附带回报约定；**工作区落位兜底链**（0.19.0）：精确匹配挂载（0.12.0）→ 子目录挂最近祖先工作区并归一到工作区根（默认 `ancestor` 档，回执+kickoff 双明示）→ git worktree 刻意保隔离落未分组（强警告）→ 未分组必附警告与补救提示；回执必带 `workspace`（{id,title} 或 null）与 `placement` 枚举；可选 `provider`+`model`（+`reasoningEffort`）指定子会话模型路线，开场前安装（0.13.0）；省略时回退插件默认路线（设置 → 任务编排，0.18.0），再回退宿主默认 |
 | `task_confirm` | 把拆分/派发方案做成**交互式审批卡**弹给用户，阻塞直到回答；批准返回单次 `confirmationId` |
 | `task_confirm_select` | 把任务清单做成**多选卡**（宿主中性提问 UI，非琥珀审批卡）：用户勾选要派发哪些（部分派发），可在自定义输入行写调整意见；批准把 `confirmationId` 绑定到选中子集，`task_spawn_batch` 强制校验（夹带未勾选标题报 `confirmation-mismatch`） |
 | `task_spawn_batch` | 一次批量创建整个拆分方案（`tasks: [{title?, prompt}]` + 统一 `team`）；达到确认阈值时必须携带 `confirmationId`；单条失败不中止整批 |
@@ -120,9 +120,23 @@ pwsh install.ps1 -Source .
 
 插件随包一个 **Web 客户端模块**（`client.js`，由 `package.json` 的 `dsh.client` 声明），占用两个官方槽位。①`conversation.session.header.utilities`——与自带的 `session-log-export` 同一条接缝：每个会话头部右侧出现「复制会话Id」按钮（面性胶囊，几何参数与「Session 日志」一致：亮色黑底白字、暗色白底黑字），一键复制当前会话的完整 `sessionId`，直接粘给总控侧的 `task_send`、`task_progress` 或 `/tasks <id>`。（侧栏会话行右键菜单为宿主硬编码，实测不可扩展，故选择有官方先例的头部槽位。）②`settings.section`（0.18.1）：设置左侧一级入口「任务编排」页（与 通用/模型/插件/Agent 预设 同级，order 25），可视化配置派发默认模型（见上一节）。
 
-### 工作区归置与迁移（0.12.0）
+### 工作区归属：五级兜底链与全链可观测（0.19.0）
 
-派生的子任务默认挂进调用方所在工作区；显式 `cwd` 与某工作区路径**精确匹配**（大小写/分隔符不敏感）时自动升级为工作区挂载——跨目录派发不再把会话丢进「未分组」。历史上已落入未分组的会话用 `task_workspace` 迁移：`list` 列出宿主工作区，再按 id 或精确路径 `attach` / `detach`。它直连宿主 workspace 实体——与 `session.create` 内部同一套 `attachSession` API——会话存储的 cwd 会对照工作区路径校验，且**绝不向会话注入消息**。（GUI 没有这个入口：侧栏拖拽走 `insertSessionBefore`，只接受已在工作区内的会话重排序——实测验证。）
+派生的子任务默认挂进调用方所在工作区；显式/继承的 `cwd` 归属按五级链逐级判定（配置项 `workspacePolicy`，默认 `ancestor`）：
+
+1. **词法精确匹配**——cwd 与某工作区路径精确一致（大小写/分隔符/尾分隔符/`.` 段归一，如 `D:\repo\.` 等价 `D:\repo`）→ 挂该工作区（0.12.0 行为 + `.` 段修复）；
+2. **调用方继承**——调用方的工作区成员归属（含 spawn 祖先链）、`caller.cwd` 精确匹配（既有行为不变）；
+3. **最近祖先升级**（默认档新增）——cwd 是某注册工作区路径的**真子目录** → 挂**最近祖先**工作区（嵌套工作区取最近）。宿主以工作区**根**派生会话 cwd，子目录隔离让位于分组：回执带 `placement: 'ancestor-normalized'` + `normalizedFrom`，kickoff 提示词自动追加一句（zh/en 跟随宿主语言）：工作目录已归一到工作区根、任务目标目录在哪、文件/git 操作用显式路径；
+4. **git worktree 识别**——cwd 的 `.git` 是**文件**（linked-worktree 标记）且未命中前两级 → **刻意保持未分组**以保隔离（宿主挂载要求 cwd 与工作区路径全等，挂主仓必毁隔离），回执给强警告与补救路径（`task_workspace migrate`，代价同样是丢隔离）；
+5. **未分组终点**——其余未命中：回执必带 `workspace: null` + `placement: 'ungrouped'` + 警告 + 补救提示（`task_workspace` attach/migrate、`task_list({ ungrouped: true })` 审计、`team` 编组仍可逻辑分组）。
+
+**可观测性无条件全量**：每次 spawn 回执带 `workspace`（`{id,title}` 或 `null`）与 `placement` 枚举（`exact-match` / `caller-inherited` / `ancestor-normalized` / `ungrouped-worktree` / `ungrouped`）；`task_spawn_batch` 逐项 results 同样携带；注册表记录 `expectedWorkspace`（调用方期望归属路径）供事后补救；`task_list({ ungrouped: true })` 只列不属于任何工作区的会话（判定与 spawn 链共用同一真源函数，子目录 cwd 算未分组——正是待补救对象）。
+
+> 迁移提示：0.18 及以前"显式子目录 cwd 落未分组"的行为，在默认档下变为挂最近祖先工作区；需要旧行为时在 cordis.yml 配 `workspacePolicy: 'exact'`（仅精确匹配的保守回退档）。`grouping` 为保留档位，当前传入会被拒绝。
+
+### 既有会话归置与跨工作区迁移（0.12.0 / 0.16.0）
+
+历史上已落入未分组的会话用 `task_workspace` 迁移：`list` 列出宿主工作区，再按 id 或精确路径 `attach` / `detach`。它直连宿主 workspace 实体——与 `session.create` 内部同一套 `attachSession` API——会话存储的 cwd 会对照工作区路径校验，且**绝不向会话注入消息**。（GUI 没有这个入口：侧栏拖拽走 `insertSessionBefore`，只接受已在工作区内的会话重排序——实测验证。）
 
 跨工作区真迁移（0.16.0）：`attach` 永远挪不动存储 cwd 与工作区路径不一致的会话——宿主校验会拒绝，且没有任何宿主 API 会改写既有会话的 cwd。`action: migrate` 做真正的搬家：读取完整且经重放校验的会话日志（`sessionQuery.readSession`，不激活源会话），以目标工作区路径为 cwd 种子创建一个**新**会话（`sessions.create` + `flush`——宿主自家 `fork()` 内部同款原语；`fork()` 本身刻意保留源 cwd/工作区，不能改道），挂载克隆、工作区级归档原会话（`workspaceRegistry.archiveSession`——归档是展示层折叠：旧会话本体仍可读可续），并把插件注册表记录（team/深度/父链/标题）平移到新 id——编组过滤与递归治理存活迁移。任务在返回的 `sessionId` 下继续：对新 id 发消息，别再碰旧 id——归档不封存本体，对旧 id 发消息会把工作分叉成两条各自演化的副本。运行中的源会话拒迁（`migrate-busy`——克隆只带得走已持久化日志，先用 `task_wait` 收口）；源 cwd 已等于目标路径时拒绝并提示改用 `attach`；任何部分失败都会明确报告是否产生了孤儿克隆、原会话是否**未**被归档。
 
@@ -251,6 +265,7 @@ pwsh install.ps1 -Source .
     titleTimeZone: 'Asia/Shanghai'
     registryFile: ''              # 留空 = <DSH_HOME 或 ~/.dsh>/task-coordinator/registry.json
     registryMaxEntries: 500
+    workspacePolicy: 'ancestor'   # spawn 工作区归属：exact 仅精确匹配（0.18 行为）| ancestor 子目录挂最近祖先（默认）；grouping 保留档、传入即拒绝
     maxBatchSpawn: 6              # task_spawn_batch 单次上限
     maxSpawnDepth: 2              # 根会话以下允许的派生代数
     confirmBeforeBatch: true      # 派发确认闸门
@@ -275,7 +290,7 @@ pwsh install.ps1 -Source .
 
 ```powershell
 node --check *.mjs                      # 语法检查
-node --test test/smoke.test.mjs         # 89 个单元测试（mock 宿主）
+node --test test/smoke.test.mjs         # 105 个单元测试（mock 宿主）
 # 安装进 profile 后（见快速开始）：
 node verify-installed.mjs               # 安装态集成验证：真实宿主包 + mock ctx
 ```
@@ -299,7 +314,7 @@ dsh-plugin-task-coordinator/
 ├── cordis.patch.yml    隔离插件组挂载描述
 ├── install.ps1         部署脚本（复制式安装 + 自动备份）
 ├── verify-installed.mjs 安装态集成验证
-├── test/smoke.test.mjs 89 个单元测试
+├── test/smoke.test.mjs 105 个单元测试
 └── docs/               ARCHITECTURE.md · PROTOCOL.md
 ```
 

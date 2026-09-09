@@ -15,6 +15,9 @@
  *  - limiter: SendLimiter instance (safety.mjs)
  *  - registry: SpawnRegistry instance (registry.mjs), optional
  *  - uuid: () => string unique request/session id source
+ *  - probeWorktree: (cwd) => boolean fs probe (0.19.0, optional): true when
+ *    `<cwd>/.git` is a FILE (linked-worktree marker). Injected by index.mjs;
+ *    any absence or exception degrades to "not a worktree" inside ops.
  *
  * Failure shape is `{ ok: false, code, error }` with stable machine-readable
  * codes (absorbed from SCDP's typed-error idea), so callers can branch
@@ -115,8 +118,13 @@ export function workspacePathOf(workspaceId, listWorkspaces) {
  * (0.12.1): win32 unifies separators to backslash, strips trailing
  * separators (drive roots kept) and folds case (NTFS is case-insensitive);
  * darwin folds case only (default volumes are case-insensitive); POSIX keeps
- * case and treats backslash as a regular filename character. Not a general
- * realpath — the host entity does full validation on attach itself.
+ * case and treats backslash as a regular filename character. 0.19.0: pure
+ * `.` path segments are now stripped (`D:\repo\.` == `D:\repo`), closing the
+ * lexical/physical canon gap the placement research surfaced (S21) — the
+ * host's realpath resolves those, so the pre-filter must too. `..` segments
+ * are deliberately NOT resolved (that needs physical filesystem access; the
+ * host entity's realpath validation on attach stays the final authority).
+ * Not a general realpath.
  * @param {string} value - raw path
  * @param {string} [platform] - override for tests; defaults to process.platform
  * @returns {string} comparable form
@@ -125,11 +133,83 @@ export function normalizeWorkspacePath(value, platform = process.platform) {
   let path = String(value).trim();
   if (platform === 'win32') {
     path = path.replaceAll('/', '\\');
+    const unc = path.startsWith('\\\\');
+    if (unc) path = path.slice(2);
     while (path.length > 1 && path.endsWith('\\') && !/^[A-Za-z]:\\$/.test(path)) path = path.slice(0, -1);
-    return path.toLowerCase();
+    let joined = path.split('\\').filter((segment) => segment !== '.' && segment !== '').join('\\');
+    if (/^[A-Za-z]:$/.test(joined)) joined += '\\'; // bare drive letter == drive root
+    if (unc) joined = `\\\\${joined}`;
+    if (joined.length === 0) joined = '.';
+    return joined.toLowerCase();
   }
+  const rooted = path.startsWith('/');
   while (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
-  return platform === 'darwin' ? path.toLowerCase() : path;
+  let joined = path.split('/').filter((segment) => segment !== '.' && segment !== '').join('/');
+  if (rooted) joined = `/${joined}`;
+  if (joined.length === 0) joined = rooted ? '/' : '.';
+  return platform === 'darwin' ? joined.toLowerCase() : joined;
+}
+
+/** Placement enum reported on spawn/batch receipts (0.19.0). */
+export const WORKSPACE_PLACEMENTS = Object.freeze([
+  'exact-match',
+  'caller-inherited',
+  'ancestor-normalized',
+  'ungrouped-worktree',
+  'ungrouped',
+]);
+
+/**
+ * The single source of truth for lexical workspace matching (0.19.0),
+ * shared by the spawn placement chain and task_list's ungrouped filter.
+ * Resolves one directory against the registered workspace snapshot in two
+ * tiers — both PURE lexical judgments over normalizeWorkspacePath; the host
+ * entity's realpath validation on attach remains the final authority:
+ *  - exact: the workspace whose normalized path equals the normalized cwd;
+ *  - ancestor: the NEAREST (longest normalized-path prefix) workspace that
+ *    strictly CONTAINS the cwd as a subdirectory — a cwd equal to the
+ *    workspace path is exact, never ancestor.
+ * Failure-tolerant like the other registry helpers: any missing or throwing
+ * dependency yields `{ exact: undefined, ancestor: undefined }`.
+ * @param {string|undefined} cwd - directory to resolve
+ * @param {Function|undefined} listWorkspaces - lazy host registry snapshot
+ * @param {string} [platform] - normalization override for tests
+ * @returns {{ exact: object|undefined, ancestor: object|undefined }}
+ */
+export function matchWorkspacePaths(cwd, listWorkspaces, platform) {
+  const none = { exact: undefined, ancestor: undefined };
+  if (typeof cwd !== 'string' || cwd.trim().length === 0) return none;
+  if (typeof listWorkspaces !== 'function') return none;
+  let workspaces;
+  try {
+    workspaces = listWorkspaces();
+  } catch {
+    return none;
+  }
+  if (!Array.isArray(workspaces)) return none;
+  const target = normalizeWorkspacePath(cwd, platform);
+  const separator = (platform ?? process.platform) === 'win32' ? '\\' : '/';
+  let exact;
+  let ancestor;
+  let ancestorLength = -1;
+  for (const workspace of workspaces) {
+    if (typeof workspace?.path !== 'string' || workspace.path.length === 0) continue;
+    const normalized = normalizeWorkspacePath(workspace.path, platform);
+    if (normalized.length === 0) continue;
+    if (exact === undefined && normalized === target) {
+      exact = workspace;
+      continue;
+    }
+    // strict containment: target must start with the workspace path plus a
+    // separator (a workspace path already ending in one — drive roots — is
+    // used as-is) and be longer than it.
+    const prefix = normalized.endsWith(separator) ? normalized : `${normalized}${separator}`;
+    if (target.length > prefix.length && target.startsWith(prefix) && normalized.length > ancestorLength) {
+      ancestor = workspace;
+      ancestorLength = normalized.length;
+    }
+  }
+  return { exact, ancestor };
 }
 
 /**
@@ -197,7 +277,7 @@ export async function describeModelRoutes(provider, listProviders, listModels) {
  * @returns {TaskOps}
  */
 export function createOps(deps) {
-  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser, listWorkspaces, getWorkspace, resolveModelConfig, listModelProviders, listProviderModels, readUiLocale, readSpawnDefaults, readSessionSnapshot, createSeededSession, archiveSession } = deps;
+  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser, listWorkspaces, getWorkspace, resolveModelConfig, listModelProviders, listProviderModels, readUiLocale, readSpawnDefaults, readSessionSnapshot, createSeededSession, archiveSession, probeWorktree } = deps;
 
   const fail = (code, message) => ({ ok: false, code, error: message });
   const failDeny = (denial) => fail(denial.code, denial.message);
@@ -206,6 +286,17 @@ export function createOps(deps) {
   // switching the GUI language applies from the next card/kickoff onward, no
   // remount needed. Absent reader or preference keeps the historical zh set.
   const currentStrings = () => uiStrings(typeof readUiLocale === 'function' ? readUiLocale() : undefined);
+  // Failure-tolerant workspace snapshot (0.19.0): one guard for every
+  // listWorkspaces consumer inside the factory — a missing or throwing host
+  // registry degrades to an empty list, never breaks the operation.
+  const safeListWorkspaces = (list = listWorkspaces) => {
+    try {
+      const workspaces = typeof list === 'function' ? list() : [];
+      return Array.isArray(workspaces) ? workspaces : [];
+    } catch {
+      return [];
+    }
+  };
 
   /**
    * Approved-but-unused dispatch confirmations (confirmationId -> record).
@@ -314,7 +405,7 @@ export function createOps(deps) {
     pendingCount,
 
     /** Capability 1: discover tasks and their stable ids. */
-    async listTasks({ filter, team, includeSubagents = false, limit = 50 } = {}, caller, signal) {
+    async listTasks({ filter, team, includeSubagents = false, ungrouped = false, limit = 50 } = {}, caller, signal) {
       const callerDeny = checkCaller(caller, config);
       if (callerDeny) return failDeny(callerDeny);
       const rows = await sessionController.list({}, signal);
@@ -323,10 +414,22 @@ export function createOps(deps) {
       const needle = typeof filter === 'string' && filter.trim().length > 0 ? filter.trim().toLowerCase() : null;
       const wantedTeam = typeof team === 'string' && team.trim().length > 0 ? team.trim() : null;
       const teamMembers = wantedTeam && registry ? new Set(registry.listTeam(wantedTeam)) : null;
+      // ungrouped:true (0.19.0) keeps only sessions that belong to NO
+      // workspace — the remediation view for the ungrouped bucket. Judgment
+      // is lexical-exact against the registered workspace paths via the same
+      // single source of truth the spawn chain uses (matchWorkspacePaths.exact
+      // — the host's sessionIds getter buckets the same way); a subdirectory
+      // cwd does NOT count as belonging (that session IS ungrouped in the
+      // GUI and is exactly the remediation candidate this filter exists to
+      // surface). Rows without a cwd cannot prove membership either → kept.
+      const wantedUngrouped = ungrouped === true;
+      const workspaceSnapshot = wantedUngrouped ? safeListWorkspaces() : [];
+      const snapshotList = () => workspaceSnapshot;
       const tasks = [];
       for (const row of items) {
         if (row.origin === 'subagent' && !wantedSubagents) continue;
         if (teamMembers && !teamMembers.has(row.sessionId)) continue;
+        if (wantedUngrouped && matchWorkspacePaths(row.cwd ?? '', snapshotList).exact !== undefined) continue;
         if (needle) {
           const title = row.projections?.values?.title ?? '';
           const haystack = `${row.sessionId} ${title} ${row.cwd ?? ''}`.toLowerCase();
@@ -342,8 +445,11 @@ export function createOps(deps) {
         truncated,
         callerSessionId: caller.sessionId,
         ...(wantedTeam ? { team: wantedTeam } : {}),
+        ...(wantedUngrouped ? { ungrouped: true } : {}),
         tasks: tasks.slice(0, limit),
-        hint: 'use task_progress to read one task in depth; task_send to message it',
+        hint: wantedUngrouped
+          ? 'ungrouped view: these sessions belong to no workspace — remediate with task_workspace (attach when the stored cwd equals a workspace path, migrate otherwise); check the spawn registry expectedWorkspace for what the caller intended'
+          : 'use task_progress to read one task in depth; task_send to message it',
       };
     },
 
@@ -551,44 +657,108 @@ export function createOps(deps) {
       const request = {};
       if (typeof sessionId === 'string' && sessionId.length > 0) request.sessionId = sessionId;
       if (typeof agentPreset === 'string' && agentPreset.length > 0) request.agentPreset = agentPreset;
-      // Workspace inheritance: an explicit cwd overrides caller-workspace
-      // membership (legacy semantics); otherwise the child attaches to the
-      // caller's workspace so spawned tasks stay visible beside their
-      // supervisor instead of landing in the ungrouped bucket. The host
-      // derives cwd from the workspace path and rejects requests carrying
-      // both fields.
-      // cwd→workspace upgrade (0.12.0): whenever the cwd we would send is
-      // exactly a workspace's path, send workspaceId instead — the host
-      // attaches the child to that workspace and derives the same cwd, so
-      // explicit-cwd spawns (and supervisors that are themselves ungrouped)
-      // no longer drop children into the ungrouped bucket.
-      const explicitCwd = typeof cwd === 'string' && cwd.length > 0 ? cwd : undefined;
+      // Workspace placement chain (0.19.0 — research/workspace-placement-
+      // fallback.md approved tiering). The host takes workspaceId XOR cwd on
+      // create, derives the session cwd from the workspace path and attaches
+      // the session to that workspace, so every tier that CAN group must send
+      // workspaceId; the chain degrades level by level:
+      //  ① lexical exact match (normalizeWorkspacePath strips trailing
+      //     separators AND '.' segments; case/separators fold per platform);
+      //  ② caller inheritance — caller workspace membership (incl. the spawn
+      //     ancestor chain), then caller.cwd exact match (unchanged legacy);
+      //  ③ ancestor upgrade (workspacePolicy 'ancestor', the default): the
+      //     cwd we would send is a TRUE subdirectory of a registered
+      //     workspace → attach to the NEAREST ancestor workspace; the host
+      //     then derives the session cwd from the workspace ROOT, so the
+      //     receipt and the kickoff prompt both say so (i18n suffix);
+      //  ④ git-worktree recognition (classification only, never an upgrade):
+      //     an unmatched cwd whose `.git` is a FILE (linked-worktree marker,
+      //     injected fs probe) stays ungrouped ON PURPOSE — worktree
+      //     isolation beats grouping, and the host's attach validation
+      //     (stored cwd must equal the workspace path) would destroy it —
+      //     but the receipt carries a strong warning;
+      //  ⑤ ungrouped terminal: request carries cwd; the receipt always
+      //     reports workspace:null + placement + warning + remediation hint,
+      //     and the registry records the caller's expected workspace path
+      //     (expectedWorkspace) for later batch remediation.
+      const explicitCwd = typeof cwd === 'string' && cwd.trim().length > 0 ? cwd : undefined;
+      const expectedWorkspace = explicitCwd
+        ?? (typeof caller.cwd === 'string' && caller.cwd.trim().length > 0 ? caller.cwd : undefined);
+      const isWorktree = (candidate) => {
+        if (typeof probeWorktree !== 'function') return false;
+        try {
+          return probeWorktree(candidate) === true;
+        } catch {
+          return false; // any probe problem degrades to "not a worktree"
+        }
+      };
+      /** Best-effort {id,title} receipt projection for a workspace snapshot. */
+      const workspaceOf = (workspace) => (workspace && typeof workspace.id === 'string' && workspace.id.length > 0
+        ? { id: workspace.id, title: typeof workspace.title === 'string' ? workspace.title : null }
+        : null);
       let effectiveCwd;
+      let placement;
+      let placementWorkspace = null;
+      let normalizedFrom; // ③: the subdirectory the caller actually asked for
+      let normalizedRoot;
       if (explicitCwd) {
-        const byPath = findWorkspaceByPath(explicitCwd, listWorkspaces);
-        if (byPath?.id) {
-          request.workspaceId = byPath.id;
-          effectiveCwd = byPath.path ?? explicitCwd;
+        const { exact, ancestor } = matchWorkspacePaths(explicitCwd, listWorkspaces);
+        if (exact?.id) {
+          request.workspaceId = exact.id;
+          effectiveCwd = exact.path ?? explicitCwd;
+          placement = 'exact-match';
+          placementWorkspace = workspaceOf(exact);
+        } else if (config.workspacePolicy === 'ancestor' && ancestor?.id) {
+          request.workspaceId = ancestor.id;
+          effectiveCwd = ancestor.path ?? explicitCwd;
+          placement = 'ancestor-normalized';
+          placementWorkspace = workspaceOf(ancestor);
+          normalizedFrom = explicitCwd;
+          normalizedRoot = ancestor.path ?? effectiveCwd;
         } else {
           request.cwd = explicitCwd;
           effectiveCwd = explicitCwd;
+          placement = isWorktree(explicitCwd) ? 'ungrouped-worktree' : 'ungrouped';
         }
       } else {
-        const workspaceId = resolveCallerWorkspaceId(caller.sessionId, registry, listWorkspaces);
-        if (workspaceId) {
-          request.workspaceId = workspaceId;
-          effectiveCwd = workspacePathOf(workspaceId, listWorkspaces) ?? caller.cwd;
+        const inheritedId = resolveCallerWorkspaceId(caller.sessionId, registry, listWorkspaces);
+        if (inheritedId) {
+          request.workspaceId = inheritedId;
+          effectiveCwd = workspacePathOf(inheritedId, listWorkspaces) ?? caller.cwd;
+          placement = 'caller-inherited';
+          placementWorkspace = workspaceOf(
+            safeListWorkspaces(listWorkspaces).find((workspace) => workspace?.id === inheritedId),
+          );
         } else if (caller.cwd) {
-          const byPath = findWorkspaceByPath(caller.cwd, listWorkspaces);
-          if (byPath?.id) {
-            request.workspaceId = byPath.id;
-            effectiveCwd = byPath.path ?? caller.cwd;
+          const { exact, ancestor } = matchWorkspacePaths(caller.cwd, listWorkspaces);
+          if (exact?.id) {
+            request.workspaceId = exact.id;
+            effectiveCwd = exact.path ?? caller.cwd;
+            placement = 'caller-inherited';
+            placementWorkspace = workspaceOf(exact);
+          } else if (config.workspacePolicy === 'ancestor' && ancestor?.id) {
+            request.workspaceId = ancestor.id;
+            effectiveCwd = ancestor.path ?? caller.cwd;
+            placement = 'ancestor-normalized';
+            placementWorkspace = workspaceOf(ancestor);
+            normalizedFrom = caller.cwd;
+            normalizedRoot = ancestor.path ?? effectiveCwd;
           } else {
             request.cwd = caller.cwd;
             effectiveCwd = caller.cwd;
+            placement = isWorktree(caller.cwd) ? 'ungrouped-worktree' : 'ungrouped';
           }
+        } else {
+          // no explicit cwd, no caller cwd: the host lands the session on its
+          // default cwd — nothing this plugin can attach to.
+          placement = 'ungrouped';
         }
       }
+      const workspaceWarning = placement === 'ungrouped-worktree'
+        ? `ungrouped placement (git worktree): cwd '${effectiveCwd}' looks like a linked git worktree ('.git' is a file, not a directory) and no workspace matched it — the session deliberately stays UNGROUPED to preserve worktree isolation (the host attaches a session only when its stored cwd equals the workspace path, so joining the main repo's workspace would rewrite the cwd and destroy the isolation). If grouping matters more than isolation: task_workspace action 'migrate' (clone + archive; the clone is born at the workspace root and the isolation is lost). The registry recorded this spawn's expectedWorkspace; audit such sessions with task_list({ ungrouped: true })`
+        : placement === 'ungrouped'
+          ? `ungrouped placement: no registered workspace matched cwd '${effectiveCwd ?? '(default)'}' — the session sits in the ungrouped bucket (visible in the session list, outside every workspace group). Remediation: task_workspace action 'migrate' (cross-path clone + archive) or 'attach' (only when the stored cwd already equals a workspace path); audit such sessions with task_list({ ungrouped: true }); logical grouping still works via spawn team= + task_list({ team })`
+          : undefined;
       let created;
       try {
         created = await sessionController.create(request);
@@ -611,13 +781,18 @@ export function createOps(deps) {
       }
       // Record the spawn durably (team + intent) so the supervisor can recover
       // "its" tasks after a host restart. Recorded before kickoff so even a
-      // created-but-not-started orphan remains traceable.
+      // created-but-not-started orphan remains traceable. expectedWorkspace
+      // (0.19.0) preserves the directory the CALLER expected the task to
+      // belong to (explicit cwd, else the caller's cwd) — for ungrouped and
+      // worktree placements this is the lead for later batch remediation
+      // (task_workspace attach/migrate).
       registry?.record(newId, {
         ...(cleanTeam !== undefined ? { team: cleanTeam } : {}),
         ...(appliedTitle ? { title: appliedTitle } : {}),
         promptExcerpt: excerpt(prompt.trim(), 120),
         depth: childDepth,
         parentSessionId: caller.sessionId,
+        ...(expectedWorkspace !== undefined ? { expectedWorkspace } : {}),
       });
       // Install the per-child model BEFORE the kickoff so the very first turn
       // runs on the requested route. A failure leaves a traceable orphan (the
@@ -639,14 +814,24 @@ export function createOps(deps) {
         }
       }
       const correlationId = uuid();
-      // Report-back convention (default on): the kickoff prompt tells the new
-      // task to push its result summary back to the spawning session via
-      // task_send when it finishes, so the supervisor gets push instead of
-      // only pull. The registry excerpt keeps the user's original prompt.
+      // Kickoff suffixes (both optional, appended in this order):
+      //  - ancestor normalization note (0.19.0): when placement ③ normalized
+      //    the session cwd up to the workspace root, the task is TOLD so —
+      //    its target directory and the explicit-path discipline — through
+      //    the same i18n surface as the report-back suffix (zh/en follows
+      //    the host locale preference);
+      //  - report-back convention (default on): the kickoff prompt tells the
+      //    new task to push its result summary back to the spawning session
+      //    via task_send, so the supervisor gets push instead of only pull.
+      //    The registry excerpt keeps the user's original prompt.
       const wantsReport = reportBack !== false;
-      const kickoffText = wantsReport
-        ? `${prompt.trim()}\n\n---\n${currentStrings().reportBackSuffix(caller.sessionId)}`
-        : prompt.trim();
+      const strings = currentStrings();
+      const kickoffParts = [prompt.trim()];
+      if (placement === 'ancestor-normalized' && normalizedFrom !== undefined) {
+        kickoffParts.push(strings.workspaceNormalizedSuffix(normalizedRoot ?? effectiveCwd ?? '', normalizedFrom));
+      }
+      if (wantsReport) kickoffParts.push(strings.reportBackSuffix(caller.sessionId));
+      const kickoffText = kickoffParts.join('\n\n---\n');
       let started = false;
       try {
         // The Remote facade's prompt(request, signal) dereferences the signal
@@ -677,11 +862,27 @@ export function createOps(deps) {
         title: appliedTitle,
         ...(cleanTeam !== undefined ? { team: cleanTeam } : {}),
         cwd: effectiveCwd ?? null,
+        // Workspace observability (0.19.0): every spawn receipt states which
+        // workspace the task attached to ({id,title} | null) and HOW it was
+        // placed (WORKSPACE_PLACEMENTS); ungrouped placements always carry a
+        // warning + remediation hint, ancestor-normalized ones state the
+        // requested directory that was normalized away.
+        workspace: placementWorkspace,
+        placement,
+        ...(placement === 'ancestor-normalized'
+          ? {
+              normalizedFrom,
+              note: `ancestor normalization: the requested cwd '${normalizedFrom}' is inside workspace '${placementWorkspace?.id}' ('${normalizedRoot}'); the host derives the session cwd from the workspace path, so the task works at the workspace ROOT — its kickoff prompt names the target directory and says to use explicit paths`,
+            }
+          : {}),
+        ...(workspaceWarning !== undefined ? { warning: workspaceWarning } : {}),
         ...(installedModel !== undefined ? { model: installedModel, modelSource } : {}),
         started,
         correlationId,
         depth: childDepth,
-        hint: 'the new task is now visible in the session list; track it with task_progress',
+        hint: workspaceWarning !== undefined
+          ? 'track it with task_progress; consider task_workspace (attach/migrate) to fix the placement, or keep it ungrouped deliberately'
+          : 'the new task is now visible in the session list; track it with task_progress',
       };
     },
 
@@ -1123,8 +1324,20 @@ export function createOps(deps) {
           reportBack,
         }, caller, signal);
         if (result.ok) startedCount += 1;
+        // Per-item receipts carry the workspace observability fields (0.19.0)
+        // — workspace/placement on every item, warning on ungrouped ones —
+        // so a batch supervisor sees placements without N task_list calls.
         results.push(result.ok
-          ? { ok: true, sessionId: result.sessionId, title: result.title, correlationId: result.correlationId, depth: result.depth }
+          ? {
+              ok: true,
+              sessionId: result.sessionId,
+              title: result.title,
+              correlationId: result.correlationId,
+              depth: result.depth,
+              workspace: result.workspace,
+              placement: result.placement,
+              ...(result.warning !== undefined ? { warning: result.warning } : {}),
+            }
           : { ok: false, code: result.code, error: result.error, ...(result.sessionId !== undefined ? { sessionId: result.sessionId } : {}) });
       }
       if (startedCount === 0) {

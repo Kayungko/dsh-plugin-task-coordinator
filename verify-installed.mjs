@@ -219,9 +219,14 @@ const ctx = {
       createRequests.push(request);
       createCount += 1;
       const id = request.sessionId ?? `session-spawned-${createCount}`;
-      // mirror workspace.attachSession on workspaceId-based creation
+      // mirror the host SessionCommandController.create semantics (commands.js
+      // L84-116): cwd = workspace?.path ?? request.cwd, then attachSession —
+      // so workspaceId-based creation lands the session ON the workspace path
+      // (what task_list's ungrouped filter and the sidebar bucket key on).
+      const knownWorkspace = [verifyWorkspace, ...migrateTargets].find((workspace) => workspace.id === request.workspaceId);
+      const derivedCwd = knownWorkspace ? knownWorkspace.path : request.cwd;
       if (request.workspaceId === verifyWorkspace.id) verifyWorkspace.sessionIds.push(id);
-      sessions.set(id, { sessionId: id, updatedAt: Date.now(), running: false, blank: true, cwd: request.cwd, projections: { asOfSeq: 0, values: {} } });
+      sessions.set(id, { sessionId: id, updatedAt: Date.now(), running: false, blank: true, cwd: derivedCwd, projections: { asOfSeq: 0, values: {} } });
       return { sessionId: id };
     },
     async rename(request) {
@@ -362,6 +367,10 @@ assert.equal(createRequests[0].workspaceId, 'ws-verify', 'spawn must attach the 
 assert.equal(createRequests[0].cwd, undefined, 'session.create takes workspaceId XOR cwd');
 assert.equal(spawnResult.cwd, '/proj', 'result cwd reflects the workspace path');
 assert.ok(verifyWorkspace.sessionIds.includes(spawnResult.sessionId), 'created session attached to the workspace');
+// 0.19.0 placement observability: every receipt states the workspace
+// attachment ({id,title} | null) and HOW the placement was decided.
+assert.equal(spawnResult.placement, 'caller-inherited');
+assert.deepEqual(spawnResult.workspace, { id: 'ws-verify', title: null });
 
 // dispatch confirmation gate: unapproved batch is refused...
 const unapprovedBatch = await byName.task_spawn_batch.execute({
@@ -532,7 +541,50 @@ assert.equal(wsGhost.code, 'workspace-not-found');
 const upgraded = await byName.task_spawn.execute({ prompt: '工作区升级验证', cwd: '/proj/' }, supervisorExec);
 assert.equal(upgraded.ok, true);
 assert.ok(verifyWorkspace.sessionIds.includes(upgraded.sessionId), 'explicit-cwd spawn upgraded to workspace attachment');
+assert.equal(upgraded.placement, 'exact-match');
+assert.deepEqual(upgraded.workspace, { id: 'ws-verify', title: null });
 console.log('task_workspace     : OK -> list/attach/detach + spawn cwd-upgrade verified');
+
+// 0.19.0 ancestor normalization end-to-end: a cwd INSIDE the workspace tree
+// attaches to the (nearest) ancestor workspace; the host then derives the
+// session cwd from the workspace ROOT, so the receipt says where the task
+// actually works and the kickoff tells it its real target directory.
+const ancestorSpawn = await byName.task_spawn.execute({ prompt: '祖先归一验证', cwd: '/proj/sub/feature' }, supervisorExec);
+assert.equal(ancestorSpawn.ok, true, `ancestor spawn failed: ${ancestorSpawn.error ?? ''}`);
+assert.equal(ancestorSpawn.placement, 'ancestor-normalized');
+assert.deepEqual(ancestorSpawn.workspace, { id: 'ws-verify', title: null });
+assert.equal(ancestorSpawn.cwd, '/proj', 'receipt cwd is the workspace root');
+assert.equal(ancestorSpawn.normalizedFrom, '/proj/sub/feature');
+assert.match(ancestorSpawn.note, /ancestor normalization/);
+const ancestorCreate = createRequests.at(-1);
+assert.equal(ancestorCreate.workspaceId, 'ws-verify', 'ancestor spawn sends workspaceId, not the subdirectory');
+assert.equal(ancestorCreate.cwd, undefined, 'workspaceId and cwd stay mutually exclusive');
+const ancestorKickoff = sessions.get(ancestorSpawn.sessionId).kickoffPrompt;
+assert.match(ancestorKickoff, /^祖先归一验证/);
+assert.match(ancestorKickoff, /工作目录提示（工作区归一）/);
+assert.match(ancestorKickoff, /\/proj\/sub\/feature/, 'kickoff names the task target directory');
+assert.ok(verifyWorkspace.sessionIds.includes(ancestorSpawn.sessionId), 'normalized spawn attached to the workspace');
+// the durable registry keeps the caller's intended directory for remediation
+const registryPayload = JSON.parse(readFileSync(registryFile, 'utf8'));
+assert.equal(registryPayload.entries[ancestorSpawn.sessionId].expectedWorkspace, '/proj/sub/feature');
+
+// 0.19.0 ungrouped terminal end-to-end: an unmatched cwd lands ungrouped with
+// the strong receipt warning + remediation hint, and task_list({ ungrouped })
+// surfaces it (the real index.mjs probeWorktree ran here: /nowhere/at-all/.git
+// does not exist, so it degrades to plain ungrouped, not ungrouped-worktree).
+const straySpawn = await byName.task_spawn.execute({ prompt: '未分组回执验证', cwd: '/nowhere/at-all', team: '未分组验证' }, supervisorExec);
+assert.equal(straySpawn.ok, true);
+assert.equal(straySpawn.placement, 'ungrouped');
+assert.equal(straySpawn.workspace, null);
+assert.match(straySpawn.warning, /ungrouped placement/);
+assert.match(straySpawn.warning, /task_workspace/);
+assert.match(straySpawn.hint, /task_progress/);
+assert.equal(JSON.parse(readFileSync(registryFile, 'utf8')).entries[straySpawn.sessionId].expectedWorkspace, '/nowhere/at-all');
+const ungroupedList = await byName.task_list.execute({ ungrouped: true }, supervisorExec);
+assert.equal(ungroupedList.ungrouped, true);
+assert.deepEqual(ungroupedList.tasks.map((task) => task.sessionId), [straySpawn.sessionId], 'ungrouped filter must surface exactly the stray session (workspace-attached rows are excluded)');
+assert.match(ungroupedList.hint, /task_workspace/);
+console.log('workspace placement : OK -> ancestor-normalized (workspaceId + root cwd + i18n kickoff note + registry expectedWorkspace) | ungrouped receipt warning + task_list ungrouped filter');
 
 // 0.16.0 task_workspace migrate: true cross-workspace move — the clone +
 // attach + archive route over the five host primitives (readSession →

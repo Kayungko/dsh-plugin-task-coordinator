@@ -14,6 +14,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
+import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import z from '@deepseek-ai/schemastery';
 import { defineTool } from '@deepseek-ai/dsh-tools';
@@ -41,7 +42,7 @@ export function defaultRegistryFile() {
 
 export function apply(ctx, input = {}) {
   const config = resolveConfig(input);
-  ctx.provide('taskCoordinator', { config, version: '0.18.5' });
+  ctx.provide('taskCoordinator', { config, version: '0.19.0' });
   if (!config.enabled) {
     ctx.logger?.info('task-coordinator: disabled by config; no tools registered');
     return;
@@ -219,6 +220,21 @@ export function apply(ctx, input = {}) {
     if (typeof service?.archiveSession !== 'function') throw new Error('workspaceRegistry.archiveSession unavailable');
     await service.archiveSession(sessionId);
   };
+  // Git-worktree probe (0.19.0): a linked worktree's `.git` is a FILE
+  // (pointing at `<main>/.git/worktrees/<name>`), while a plain checkout's
+  // `.git` is a directory. Pure fs marker read — NO git subprocess, no
+  // gitdir back-resolution (that unverified mechanism belongs to the
+  // reserved 'grouping' tier). Anything missing/throwing = not a worktree,
+  // so spawn placement degrades to the plain ungrouped terminal.
+  const probeWorktree = (candidate) => {
+    try {
+      if (typeof candidate !== 'string' || candidate.trim().length === 0) return false;
+      const stats = statSync(join(candidate, '.git'), { throwIfNoEntry: false });
+      return stats !== undefined && typeof stats.isFile === 'function' && stats.isFile();
+    } catch {
+      return false;
+    }
+  };
   const ops = createOps({
     sessionController,
     agents,
@@ -238,6 +254,7 @@ export function apply(ctx, input = {}) {
     readSessionSnapshot,
     createSeededSession,
     archiveSession,
+    probeWorktree,
   });
   const dispose = registerTools(ctx, ops, { defineTool }, config);
   const disposeCommands = registerCommands(ctx, ops, uiStrings(readUiLocale()));

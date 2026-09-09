@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveConfig, DEFAULTS } from '../config.mjs';
+import { resolveConfig, DEFAULTS, WORKSPACE_POLICIES } from '../config.mjs';
 import { checkCaller, checkTarget, SendLimiter, excerpt, blocksToText } from '../safety.mjs';
 import { createOps } from '../ops.mjs';
 import { registerTools } from '../tools.mjs';
@@ -69,6 +69,22 @@ test('config: wrong types throw', () => {
   assert.throws(() => resolveConfig({ confirmBeforeBatch: 'yes' }), TypeError);
   assert.throws(() => resolveConfig({ confirmBatchThreshold: -1 }), TypeError);
   assert.throws(() => resolveConfig({ maxSpawnDepth: null }), TypeError);
+});
+
+test('config: workspacePolicy enum — default ancestor, grouping reserved (0.19.0)', () => {
+  assert.equal(DEFAULTS.workspacePolicy, 'ancestor');
+  assert.deepEqual(WORKSPACE_POLICIES, ['exact', 'ancestor']);
+  assert.equal(resolveConfig().workspacePolicy, 'ancestor');
+  assert.equal(resolveConfig({ workspacePolicy: 'exact' }).workspacePolicy, 'exact');
+  assert.equal(resolveConfig({ workspacePolicy: 'ancestor' }).workspacePolicy, 'ancestor');
+  // the reserved future tier is rejected as an invalid value, like every other bad input
+  for (const bad of ['grouping', 'GROUPING', 'aggressive', '', 42, null, true]) {
+    assert.throws(() => resolveConfig({ workspacePolicy: bad }), TypeError, `workspacePolicy: ${JSON.stringify(bad)}`);
+  }
+  const error = (() => { try { resolveConfig({ workspacePolicy: 'grouping' }); } catch (e) { return e; } })();
+  assert.match(error.message, /workspacePolicy/);
+  assert.match(error.message, /'exact' \| 'ancestor'/);
+  assert.match(error.message, /grouping.*reserved/);
 });
 
 /* ------------------------------------------------------------------ */
@@ -403,6 +419,7 @@ function makeHarness(overrides = {}) {
     ...(overrides.readSessionSnapshot ? { readSessionSnapshot: overrides.readSessionSnapshot } : {}),
     ...(overrides.createSeededSession ? { createSeededSession: overrides.createSeededSession } : {}),
     ...(overrides.archiveSession ? { archiveSession: overrides.archiveSession } : {}),
+    ...(Object.hasOwn(overrides, 'probeWorktree') ? { probeWorktree: overrides.probeWorktree } : {}),
     uuid: () => 'req-test-1',
     askUser,
   });
@@ -691,6 +708,51 @@ test('normalizeWorkspacePath: platform branches (0.12.1)', async () => {
   assert.equal(findWorkspaceByPath('d:/GIT/proj/', () => [{ id: 'ws', path: 'D:\\git\\PROJ' }], 'win32')?.id, 'ws');
 });
 
+test('normalizeWorkspacePath: pure "." segments are stripped on every platform (0.19.0)', async () => {
+  const { normalizeWorkspacePath, findWorkspaceByPath } = await import('../ops.mjs');
+  // win32: trailing/inner '.' segments, bare drive root via 'D:\.', UNC prefix survives
+  assert.equal(normalizeWorkspacePath('D:\\git\\Proj\\.', 'win32'), 'd:\\git\\proj');
+  assert.equal(normalizeWorkspacePath('D:\\git\\.\\Proj\\.\\', 'win32'), 'd:\\git\\proj');
+  assert.equal(normalizeWorkspacePath('D:\\.', 'win32'), 'd:\\');
+  assert.equal(normalizeWorkspacePath('\\\\srv\\share\\dir\\.', 'win32'), '\\\\srv\\share\\dir');
+  assert.equal(normalizeWorkspacePath('.', 'win32'), '.');
+  // posix: rooted and relative forms
+  assert.equal(normalizeWorkspacePath('/git/./proj', 'linux'), '/git/proj');
+  assert.equal(normalizeWorkspacePath('/./', 'linux'), '/');
+  assert.equal(normalizeWorkspacePath('.', 'linux'), '.');
+  // darwin folds case on top of the stripping
+  assert.equal(normalizeWorkspacePath('/Git/./Proj/.', 'darwin'), '/git/proj');
+  // the lexical/physical canon gap (research S21): a cwd with a trailing '.'
+  // segment now exact-matches the workspace path, like the host's realpath would
+  const list = () => [{ id: 'ws', path: '/git/dhs-tool' }];
+  assert.equal(findWorkspaceByPath('/git/dhs-tool/.', list)?.id, 'ws');
+  assert.equal(findWorkspaceByPath('/git/dhs-tool/./web-search', list), undefined); // still not exact
+});
+
+test('matchWorkspacePaths: exact vs nearest strict ancestor (0.19.0)', async () => {
+  const { matchWorkspacePaths, WORKSPACE_PLACEMENTS } = await import('../ops.mjs');
+  assert.deepEqual([...WORKSPACE_PLACEMENTS], ['exact-match', 'caller-inherited', 'ancestor-normalized', 'ungrouped-worktree', 'ungrouped']);
+  // exact tier (normalized), never counted as its own ancestor
+  const single = () => [{ id: 'ws', path: '/a/b/' }];
+  assert.deepEqual(matchWorkspacePaths('/a/b', single), { exact: { id: 'ws', path: '/a/b/' }, ancestor: undefined });
+  assert.equal(matchWorkspacePaths('/a/b/c', single).ancestor?.id, 'ws'); // strict subdirectory
+  assert.equal(matchWorkspacePaths('/a/bc', single).ancestor, undefined); // sibling prefix without separator
+  // nearest ancestor wins between nested workspaces
+  const nested = () => [{ id: 'ws-a', path: '/a' }, { id: 'ws-ab', path: '/a/b' }, { id: 'ws-other', path: '/z' }];
+  assert.equal(matchWorkspacePaths('/a/b/c/d', nested).ancestor?.id, 'ws-ab');
+  assert.equal(matchWorkspacePaths('/a/x', nested).ancestor?.id, 'ws-a');
+  // win32 drive-root workspace is an ancestor of everything on the drive (prefix already ends in the separator)
+  const drive = () => [{ id: 'ws-d', path: 'D:\\' }, { id: 'ws-repo', path: 'D:\\repo' }];
+  assert.equal(matchWorkspacePaths('D:\\repo\\sub', drive, 'win32').ancestor?.id, 'ws-repo');
+  assert.equal(matchWorkspacePaths('D:\\other', drive, 'win32').ancestor?.id, 'ws-d');
+  // failure-tolerant contract: bad input, missing/throwing snapshot, non-array
+  assert.deepEqual(matchWorkspacePaths(undefined, single), { exact: undefined, ancestor: undefined });
+  assert.deepEqual(matchWorkspacePaths('  ', single), { exact: undefined, ancestor: undefined });
+  assert.deepEqual(matchWorkspacePaths('/a/b', undefined), { exact: undefined, ancestor: undefined });
+  assert.deepEqual(matchWorkspacePaths('/a/b', () => { throw new Error('boom'); }), { exact: undefined, ancestor: undefined });
+  assert.deepEqual(matchWorkspacePaths('/a/b', () => 'not-an-array'), { exact: undefined, ancestor: undefined });
+});
+
 test('ops.spawnTask: cwd→workspace upgrade — exact path match attaches (0.12.0)', async () => {
   const workspaces = [{ id: 'ws-proj', path: '/git/proj', sessionIds: [] }];
   const harness = makeHarness({ listWorkspaces: () => workspaces });
@@ -715,6 +777,281 @@ test('ops.spawnTask: ungrouped supervisor upgrades children by its own cwd (0.12
   assert.equal(spawned.ok, true);
   assert.equal(harness.calls.create[0].workspaceId, 'ws-home');
   assert.equal(harness.calls.create[0].cwd, undefined);
+});
+
+/* ------------------------------------------------------------------ */
+/* workspace placement chain + observability (0.19.0)                  */
+/*                                                                     */
+/* The block below ports the research matrix of                        */
+/* research/workspace-placement-fallback.md §2 (18 spawn scenarios)    */
+/* into regression assertions against the real createOps, using        */
+/* portable path fixtures (case folding is covered per-platform in the */
+/* pure-function tests, keeping the suite green on POSIX CI).          */
+/* ------------------------------------------------------------------ */
+
+test('ops.spawnTask: workspace placement matrix — 18 scenarios (0.19.0)', async () => {
+  const WS_DHS = { id: 'ws-dhs', path: '/git/dhs-tool', title: 'DHS', sessionIds: ['session-super'] };
+  const WS_UPIPE = { id: 'ws-upipe', path: '/unity-pipe', sessionIds: [] };
+  const WS_ROOT = { id: 'ws-root', path: '/git', sessionIds: ['caller-root'] };
+  const single = () => [{ ...WS_DHS }];
+  const double = () => [{ ...WS_DHS }, { ...WS_UPIPE }];
+  const nested = () => [{ ...WS_ROOT }, { ...WS_DHS, sessionIds: [] }];
+  const none = () => [];
+  const member = { sessionId: 'session-super', cwd: '/git/dhs-tool' };
+
+  // scenario runner: fresh harness + capturing registry per scenario
+  const scenarios = [
+    { id: 'S01', workspaces: single, caller: member, cwd: undefined,
+      expect: { placement: 'caller-inherited', workspace: { id: 'ws-dhs', title: 'DHS' }, workspaceId: 'ws-dhs', expectedWorkspace: '/git/dhs-tool' } },
+    { id: 'S02', workspaces: single, caller: member, cwd: '/git/dhs-tool',
+      expect: { placement: 'exact-match', workspace: { id: 'ws-dhs', title: 'DHS' }, workspaceId: 'ws-dhs', expectedWorkspace: '/git/dhs-tool' } },
+    { id: 'S03', workspaces: single, caller: member, cwd: '/git/dhs-tool/',
+      expect: { placement: 'exact-match', workspace: { id: 'ws-dhs', title: 'DHS' }, workspaceId: 'ws-dhs', expectedWorkspace: '/git/dhs-tool/' } },
+    { id: 'S04', workspaces: single, caller: member, cwd: '/git/dhs-tool/web-search',
+      expect: { placement: 'ancestor-normalized', workspace: { id: 'ws-dhs', title: 'DHS' }, workspaceId: 'ws-dhs', resultCwd: '/git/dhs-tool', normalizedFrom: '/git/dhs-tool/web-search', kickoffSuffix: true, expectedWorkspace: '/git/dhs-tool/web-search' } },
+    { id: 'S05', workspaces: single, caller: member, cwd: '/worktrees/feat-x/dhs-tool', probe: () => true,
+      expect: { placement: 'ungrouped-worktree', workspace: null, createCwd: '/worktrees/feat-x/dhs-tool', warning: /git worktree/, expectedWorkspace: '/worktrees/feat-x/dhs-tool' } },
+    { id: 'S06', workspaces: single, caller: member, cwd: '/unrelated/proj', probe: () => false,
+      expect: { placement: 'ungrouped', workspace: null, createCwd: '/unrelated/proj', warning: /ungrouped placement/, expectedWorkspace: '/unrelated/proj' } },
+    { id: 'S07', workspaces: single, caller: member, cwd: '',
+      expect: { placement: 'caller-inherited', workspace: { id: 'ws-dhs', title: 'DHS' }, workspaceId: 'ws-dhs', expectedWorkspace: '/git/dhs-tool' } },
+    { id: 'S08', workspaces: single, caller: { sessionId: 'session-ungrouped-sub', cwd: '/git/dhs-tool/web-search' }, cwd: undefined,
+      expect: { placement: 'ancestor-normalized', workspace: { id: 'ws-dhs', title: 'DHS' }, workspaceId: 'ws-dhs', resultCwd: '/git/dhs-tool', normalizedFrom: '/git/dhs-tool/web-search', kickoffSuffix: true, expectedWorkspace: '/git/dhs-tool/web-search' } },
+    { id: 'S09', workspaces: single, caller: { sessionId: 'session-ungrouped-root', cwd: '/git/dhs-tool' }, cwd: undefined,
+      expect: { placement: 'caller-inherited', workspace: { id: 'ws-dhs', title: 'DHS' }, workspaceId: 'ws-dhs', expectedWorkspace: '/git/dhs-tool' } },
+    { id: 'S10', workspaces: single, caller: { sessionId: 'session-far', cwd: '/elsewhere' }, cwd: undefined, probe: () => false,
+      expect: { placement: 'ungrouped', workspace: null, createCwd: '/elsewhere', warning: /ungrouped placement/, expectedWorkspace: '/elsewhere' } },
+    { id: 'S11', workspaces: single, caller: { sessionId: 'session-far', cwd: '/elsewhere' }, cwd: '/git/dhs-tool',
+      expect: { placement: 'exact-match', workspace: { id: 'ws-dhs', title: 'DHS' }, workspaceId: 'ws-dhs', expectedWorkspace: '/git/dhs-tool' } },
+    { id: 'S12', workspaces: single, caller: { sessionId: 'session-deep-child', cwd: '/git/dhs-tool' }, cwd: undefined,
+      registryGet: { 'session-deep-child': { parentSessionId: 'session-super', depth: 1 } },
+      expect: { placement: 'caller-inherited', workspace: { id: 'ws-dhs', title: 'DHS' }, workspaceId: 'ws-dhs', expectedWorkspace: '/git/dhs-tool' } },
+    { id: 'S13', workspaces: double, caller: member, cwd: '/unity-pipe',
+      expect: { placement: 'exact-match', workspace: { id: 'ws-upipe', title: null }, workspaceId: 'ws-upipe', expectedWorkspace: '/unity-pipe' } },
+    { id: 'S14', workspaces: double, caller: member, cwd: '/unity-pipe/',
+      expect: { placement: 'exact-match', workspace: { id: 'ws-upipe', title: null }, workspaceId: 'ws-upipe', expectedWorkspace: '/unity-pipe/' } },
+    { id: 'S15', workspaces: nested, caller: { sessionId: 'caller-root', cwd: '/git' }, cwd: '/git/dhs-tool/plugin',
+      expect: { placement: 'ancestor-normalized', workspace: { id: 'ws-dhs', title: 'DHS' }, workspaceId: 'ws-dhs', resultCwd: '/git/dhs-tool', normalizedFrom: '/git/dhs-tool/plugin', kickoffSuffix: true, expectedWorkspace: '/git/dhs-tool/plugin' } },
+    { id: 'S16', workspaces: double, caller: member, cwd: '/worktrees/feat-x/dhs-tool/', probe: () => true,
+      expect: { placement: 'ungrouped-worktree', workspace: null, createCwd: '/worktrees/feat-x/dhs-tool/', warning: /git worktree/, expectedWorkspace: '/worktrees/feat-x/dhs-tool/' } },
+    { id: 'S17', workspaces: none, caller: { sessionId: 'caller-x', cwd: '/git/dhs-tool' }, cwd: '/git/dhs-tool',
+      expect: { placement: 'ungrouped', workspace: null, createCwd: '/git/dhs-tool', warning: /ungrouped placement/, expectedWorkspace: '/git/dhs-tool' } },
+    { id: 'S18', workspaces: none, caller: { sessionId: 'caller-x', cwd: '/git/dhs-tool' }, cwd: undefined,
+      expect: { placement: 'ungrouped', workspace: null, createCwd: '/git/dhs-tool', warning: /ungrouped placement/, expectedWorkspace: '/git/dhs-tool' } },
+    { id: 'S21', workspaces: single, caller: member, cwd: '/git/dhs-tool/.',
+      expect: { placement: 'exact-match', workspace: { id: 'ws-dhs', title: 'DHS' }, workspaceId: 'ws-dhs', expectedWorkspace: '/git/dhs-tool/.' } },
+  ];
+
+  for (const scenario of scenarios) {
+    const recorded = new Map();
+    const registry = {
+      get: (id) => scenario.registryGet?.[id],
+      record: (id, entry) => { recorded.set(id, entry); },
+    };
+    const workspaces = scenario.workspaces();
+    const harness = makeHarness({
+      listWorkspaces: () => workspaces,
+      registry,
+      ...(scenario.probe !== undefined ? { probeWorktree: scenario.probe } : {}),
+    });
+    const result = await harness.ops.spawnTask(
+      { prompt: `placement ${scenario.id}`, title: `修复｜${scenario.id}`, cwd: scenario.cwd },
+      scenario.caller,
+    );
+    assert.equal(result.ok, true, `${scenario.id}: spawn failed: ${result.error}`);
+    const request = harness.calls.create.at(-1);
+    const e = scenario.expect;
+    // create shape: workspaceId XOR cwd (or none)
+    if (e.workspaceId !== undefined) {
+      assert.equal(request.workspaceId, e.workspaceId, `${scenario.id}: expected workspaceId`);
+      assert.equal(request.cwd, undefined, `${scenario.id}: workspaceId and cwd are mutually exclusive`);
+    } else if (e.createCwd !== undefined) {
+      assert.equal(request.cwd, e.createCwd, `${scenario.id}: expected plain cwd`);
+      assert.equal(request.workspaceId, undefined, `${scenario.id}: expected no workspaceId`);
+    } else {
+      assert.equal(request.workspaceId, undefined, `${scenario.id}`);
+      assert.equal(request.cwd, undefined, `${scenario.id}`);
+    }
+    // observability fields on every receipt
+    assert.equal(result.placement, e.placement, `${scenario.id}: placement`);
+    assert.deepEqual(result.workspace, e.workspace, `${scenario.id}: workspace projection`);
+    if (e.warning !== undefined) {
+      assert.match(result.warning, e.warning, `${scenario.id}: ungrouped warning`);
+      assert.match(result.warning, /task_workspace/, `${scenario.id}: remediation hint`);
+      assert.match(result.hint, /task_progress/, `${scenario.id}: hint`);
+    } else {
+      assert.equal(result.warning, undefined, `${scenario.id}: no warning expected`);
+    }
+    if (e.resultCwd !== undefined) assert.equal(result.cwd, e.resultCwd, `${scenario.id}: receipt cwd`);
+    if (e.normalizedFrom !== undefined) {
+      assert.equal(result.normalizedFrom, e.normalizedFrom, `${scenario.id}: normalizedFrom`);
+      assert.match(result.note, /ancestor normalization/, `${scenario.id}: receipt note`);
+    }
+    // kickoff: ancestor normalization appends the i18n suffix (zh default)
+    const kickoff = harness.calls.prompt.at(-1).content[0].text;
+    if (e.kickoffSuffix) {
+      assert.match(kickoff, /工作目录提示（工作区归一）/, `${scenario.id}: kickoff suffix present`);
+      assert.match(kickoff, new RegExp(e.normalizedFrom.replaceAll('/', '[/\\\\]')), `${scenario.id}: suffix names the target directory`);
+      assert.match(kickoff, /汇报约定/, `${scenario.id}: report-back suffix still present`);
+    } else {
+      assert.doesNotMatch(kickoff, /工作目录提示/, `${scenario.id}: no normalization suffix`);
+    }
+    // registry: expectedWorkspace records the caller's intended directory
+    assert.equal(recorded.get(result.sessionId)?.expectedWorkspace, e.expectedWorkspace, `${scenario.id}: expectedWorkspace`);
+  }
+});
+
+test('ops.spawnTask: workspacePolicy exact keeps the pre-0.19 exact-only behavior (0.19.0)', async () => {
+  const workspaces = [{ id: 'ws-dhs', path: '/git/dhs-tool', title: 'DHS', sessionIds: ['session-super'] }];
+  const harness = makeHarness({ listWorkspaces: () => workspaces, config: { workspacePolicy: 'exact' } });
+  const member = { sessionId: 'session-super', cwd: '/git/dhs-tool' };
+  // explicit subdirectory: no upgrade under 'exact' — plain cwd, ungrouped + warning
+  const sub = await harness.ops.spawnTask({ prompt: 'exact tier', cwd: '/git/dhs-tool/web-search' }, member);
+  assert.equal(sub.ok, true);
+  assert.equal(harness.calls.create[0].cwd, '/git/dhs-tool/web-search');
+  assert.equal(harness.calls.create[0].workspaceId, undefined);
+  assert.equal(sub.placement, 'ungrouped');
+  assert.match(sub.warning, /ungrouped placement/);
+  // exact matches still upgrade under 'exact'
+  const exact = await harness.ops.spawnTask({ prompt: 'exact tier hit', cwd: '/git/dhs-tool/' }, member);
+  assert.equal(exact.placement, 'exact-match');
+  assert.equal(harness.calls.create[1].workspaceId, 'ws-dhs');
+  // inherited caller cwd that is a subdirectory also stays plain under 'exact'
+  const inherited = await harness.ops.spawnTask(
+    { prompt: 'exact tier inherit' },
+    { sessionId: 'session-ungrouped-sub', cwd: '/git/dhs-tool/web-search' },
+  );
+  assert.equal(inherited.placement, 'ungrouped');
+  assert.equal(harness.calls.create[2].cwd, '/git/dhs-tool/web-search');
+  // and the caller-inherited exact fallback keeps working
+  const inheritedExact = await harness.ops.spawnTask(
+    { prompt: 'exact tier inherit hit' },
+    { sessionId: 'session-ungrouped-root', cwd: '/git/dhs-tool' },
+  );
+  assert.equal(inheritedExact.placement, 'caller-inherited');
+  assert.equal(harness.calls.create[3].workspaceId, 'ws-dhs');
+});
+
+test('ops.spawnTask: worktree probe degradation — throwing or absent probe is not a worktree (0.19.0)', async () => {
+  const workspaces = [{ id: 'ws-dhs', path: '/git/dhs-tool', sessionIds: ['session-super'] }];
+  const member = { sessionId: 'session-super', cwd: '/git/dhs-tool' };
+  // throwing probe degrades to plain ungrouped
+  const throwing = makeHarness({ listWorkspaces: () => workspaces, probeWorktree: () => { throw new Error('fs gone'); } });
+  const degraded = await throwing.ops.spawnTask({ prompt: 'probe throws', cwd: '/worktrees/feat-x/dhs-tool' }, member);
+  assert.equal(degraded.ok, true);
+  assert.equal(degraded.placement, 'ungrouped');
+  assert.match(degraded.warning, /ungrouped placement/);
+  assert.doesNotMatch(degraded.warning, /linked git worktree/); // degraded probe → plain ungrouped warning, not the worktree one
+  // absent probe (hosts / tests without the dependency) behaves the same
+  const bare = makeHarness({ listWorkspaces: () => workspaces });
+  const noProbe = await bare.ops.spawnTask({ prompt: 'no probe', cwd: '/worktrees/feat-x/dhs-tool' }, member);
+  assert.equal(noProbe.placement, 'ungrouped');
+  // a directory-.git (plain checkout) is NOT a worktree — probe sees a directory
+  const plain = makeHarness({ listWorkspaces: () => workspaces, probeWorktree: () => false });
+  const checkout = await plain.ops.spawnTask({ prompt: 'plain checkout', cwd: '/git/other-checkout' }, member);
+  assert.equal(checkout.placement, 'ungrouped');
+});
+
+test('ops.spawnTask: ancestor normalization kickoff suffix follows uiLocale (0.19.0)', async () => {
+  const workspaces = [{ id: 'ws-dhs', path: '/git/dhs-tool', sessionIds: ['session-super'] }];
+  const member = { sessionId: 'session-super', cwd: '/git/dhs-tool' };
+  const en = makeHarness({ listWorkspaces: () => workspaces, readUiLocale: () => 'en' });
+  const spawned = await en.ops.spawnTask({ prompt: 'subdir work', cwd: '/git/dhs-tool/web-search' }, member);
+  assert.equal(spawned.ok, true);
+  const kickoff = en.calls.prompt.at(-1).content[0].text;
+  assert.match(kickoff, /Working-directory note \(workspace normalization\): .*workspace root \/git\/dhs-tool/);
+  assert.match(kickoff, /target directory is \/git\/dhs-tool\/web-search/);
+  assert.match(kickoff, /Use explicit paths/);
+  // reportBack opt-out keeps the normalization note (it is a working-directory fact, not a convention)
+  const quiet = makeHarness({ listWorkspaces: () => workspaces });
+  const muted = await quiet.ops.spawnTask({ prompt: 'quiet subdir', cwd: '/git/dhs-tool/web-search', reportBack: false }, member);
+  assert.equal(muted.placement, 'ancestor-normalized');
+  const quietKickoff = quiet.calls.prompt.at(-1).content[0].text;
+  assert.match(quietKickoff, /工作目录提示（工作区归一）/);
+  assert.doesNotMatch(quietKickoff, /汇报约定/);
+});
+
+test('ops.spawnBatch: per-item receipts carry workspace placement + ungrouped warnings (0.19.0)', async () => {
+  const workspaces = [{ id: 'ws-dhs', path: '/git/dhs-tool', title: 'DHS', sessionIds: ['session-super'] }];
+  const harness = makeHarness({ listWorkspaces: () => workspaces, config: { confirmBeforeBatch: false } });
+  const batch = await harness.ops.spawnBatch({
+    tasks: [
+      { prompt: 'inside the tree', cwd: '/git/dhs-tool/sub' },
+      { prompt: 'outside the tree', cwd: '/elsewhere' },
+      { prompt: 'inherits the caller workspace' },
+    ],
+  }, SUPERVISOR);
+  assert.equal(batch.ok, true);
+  assert.equal(batch.startedCount, 3);
+  const [inside, outside, inherited] = batch.results;
+  assert.equal(inside.placement, 'ancestor-normalized');
+  assert.deepEqual(inside.workspace, { id: 'ws-dhs', title: 'DHS' });
+  assert.equal(inside.warning, undefined);
+  assert.equal(outside.placement, 'ungrouped');
+  assert.equal(outside.workspace, null);
+  assert.match(outside.warning, /ungrouped placement/);
+  assert.equal(inherited.placement, 'caller-inherited');
+  assert.deepEqual(inherited.workspace, { id: 'ws-dhs', title: 'DHS' });
+});
+
+test('ops.listTasks: ungrouped filter mirrors the host bucket via the shared resolver (0.19.0)', async () => {
+  const workspaces = [{ id: 'ws-dhs', path: '/git/dhs-tool', title: 'DHS', sessionIds: [] }];
+  const harness = makeHarness({ listWorkspaces: () => workspaces });
+  addRow(harness, { sessionId: 'session-in', cwd: '/git/dhs-tool' });
+  addRow(harness, { sessionId: 'session-in-trailing', cwd: '/git/dhs-tool/' }); // same path, trailing separator
+  addRow(harness, { sessionId: 'session-sub', cwd: '/git/dhs-tool/web-search' }); // subdirectory = ungrouped in the GUI
+  addRow(harness, { sessionId: 'session-out', cwd: '/elsewhere' });
+  addRow(harness, { sessionId: 'session-nocwd' }); // no cwd -> cannot belong to anything
+  addRow(harness, { sessionId: 'session-sub-agent', cwd: '/git/dhs-tool', origin: 'subagent' });
+  const view = await harness.ops.listTasks({ ungrouped: true }, SUPERVISOR);
+  assert.equal(view.ok, true);
+  assert.equal(view.ungrouped, true);
+  assert.deepEqual(view.tasks.map((task) => task.sessionId), ['session-sub', 'session-out', 'session-nocwd']);
+  assert.match(view.hint, /task_workspace/);
+  // filter composes with the default subagent fence and filter/limit
+  const filtered = await harness.ops.listTasks({ ungrouped: true, filter: 'elsewhere' }, SUPERVISOR);
+  assert.deepEqual(filtered.tasks.map((task) => task.sessionId), ['session-out']);
+  // no workspace registry at all: nothing can belong, every session shows up
+  const bare = makeHarness();
+  addRow(bare, { sessionId: 'session-anywhere', cwd: '/anywhere' });
+  const bareView = await bare.ops.listTasks({ ungrouped: true }, SUPERVISOR);
+  assert.deepEqual(bareView.tasks.map((task) => task.sessionId), ['session-anywhere']);
+  // a throwing registry snapshot degrades to the same "nothing belongs" view
+  const broken = makeHarness({ listWorkspaces: () => { throw new Error('registry gone'); } });
+  addRow(broken, { sessionId: 'session-anywhere', cwd: '/anywhere' });
+  const brokenView = await broken.ops.listTasks({ ungrouped: true }, SUPERVISOR);
+  assert.equal(brokenView.tasks.length, 1);
+  // unfiltered listing is unchanged
+  const all = await harness.ops.listTasks({}, SUPERVISOR);
+  assert.equal(all.count, 5);
+});
+
+test('registry: expectedWorkspace is recorded by spawn, persists, and is whitelisted on load (0.19.0)', async () => {
+  const file = tempRegistryPath();
+  const workspaces = [{ id: 'ws-dhs', path: '/git/dhs-tool', sessionIds: [] }];
+  const registry = new SpawnRegistry(file);
+  const harness = makeHarness({ listWorkspaces: () => workspaces, registry });
+  const member = { sessionId: 'session-super', cwd: '/git/dhs-tool' };
+  // ungrouped explicit cwd: expectedWorkspace keeps the caller's intent for remediation
+  const stray = await harness.ops.spawnTask({ prompt: 'stray task', cwd: '/worktrees/feat-x/tool' }, member);
+  assert.equal(stray.placement, 'ungrouped');
+  assert.equal(registry.get(stray.sessionId).expectedWorkspace, '/worktrees/feat-x/tool');
+  // ancestor-normalized: the requested subdirectory is preserved (cwd actually became the root)
+  const normalized = await harness.ops.spawnTask({ prompt: 'normalized task', cwd: '/git/dhs-tool/web-search' }, member);
+  assert.equal(normalized.placement, 'ancestor-normalized');
+  assert.equal(registry.get(normalized.sessionId).expectedWorkspace, '/git/dhs-tool/web-search');
+  // survives a reload (durable file round-trip)
+  const reloaded = new SpawnRegistry(file);
+  assert.equal(reloaded.get(stray.sessionId).expectedWorkspace, '/worktrees/feat-x/tool');
+  assert.equal(reloaded.get(normalized.sessionId).expectedWorkspace, '/git/dhs-tool/web-search');
+  // whitelist: malformed values are dropped on load instead of poisoning entries
+  const corrupt = JSON.parse(readFileSync(file, 'utf8'));
+  corrupt.entries[stray.sessionId].expectedWorkspace = 42;
+  corrupt.entries[normalized.sessionId].expectedWorkspace = '';
+  writeFileSync(file, JSON.stringify(corrupt), 'utf8');
+  const sanitized = new SpawnRegistry(file);
+  assert.equal(sanitized.get(stray.sessionId).expectedWorkspace, undefined);
+  assert.equal(sanitized.get(normalized.sessionId).expectedWorkspace, undefined);
 });
 
 test('ops.workspaceOp: list / attach / detach through the live entity (0.12.0)', async () => {
@@ -1730,6 +2067,11 @@ test('i18n: dictionaries carry the exact card labels and interpolate', () => {
   assert.match(uiStrings('zh').reportBackSuffix('session-x'), /发送后即结束当前回合/);
   assert.match(uiStrings('en').selectQuestionDefault(3), /^3 proposed task\(s\)/);
   assert.match(uiStrings('zh').selectQuestionDefault(3), /^共 3 个任务/);
+  // 0.19.0 ancestor-normalization kickoff suffix interpolates both paths, zh/en aligned
+  assert.match(uiStrings('zh').workspaceNormalizedSuffix('/git/root', '/git/root/sub'), /^工作目录提示（工作区归一）：.*归一到工作区根 \/git\/root.*目标目录是 \/git\/root\/sub/);
+  assert.match(uiStrings('zh').workspaceNormalizedSuffix('/git/root', '/git/root/sub'), /显式路径/);
+  assert.match(uiStrings('en').workspaceNormalizedSuffix('/git/root', '/git/root/sub'), /^Working-directory note \(workspace normalization\): .*workspace root \/git\/root.*target directory is \/git\/root\/sub/);
+  assert.match(uiStrings('en').workspaceNormalizedSuffix('/git/root', '/git/root/sub'), /Use explicit paths/);
 });
 
 test('i18n: report-back kickoff suffix follows uiLocale', async () => {
@@ -1815,6 +2157,8 @@ test('registerTools: eleven tools with delegation', async () => {
   const byName = Object.fromEntries(registered.map((tool) => [tool.name, tool]));
   assert.deepEqual(byName.task_list.parameters.sessionId, undefined);
   assert.ok(byName.task_list.parameters.team); // task_list team filter
+  assert.ok(byName.task_list.parameters.ungrouped); // 0.19.0 ungrouped remediation filter
+  assert.equal(byName.task_list.parameters.ungrouped.type, 'boolean');
   assert.equal(byName.task_send.parameters.sessionId.required, true);
   assert.deepEqual(byName.task_send.parameters.mode.enum, ['queue', 'steer']);
   assert.ok(byName.task_send.parameters.reference); // task_send correlation
