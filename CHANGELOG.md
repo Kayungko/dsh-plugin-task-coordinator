@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-09
+
+### Changed
+
+- **「编排」视图重设计（product-design 方向 2 · 流转泳道）**——用户反馈 0.20.0 拓扑画布靠左贴边且更想要"一屏看到各会话实时流转"；经 /product-design 三方向比选后按**活体泳道时间轴**重构呈现层（数据提取层原样保留）：
+  - **版心修复**：内容列 max-width 1040px 水平居中 + 24px 页边距（0.20.0 画布全宽铺开、节点从左侧起排的贴边问题根治）；
+  - **泳道结构**：总控泳道置顶贯通（自身活动流：派发/指令/收汇报/等待/取消），子会话每人一条泳道、按 team 分组（组头带 运行 n/m 汇总，未编组居末）；
+  - **时间轴**：时间左→右流动，缩放窗口 30分钟/2小时/8小时/全部（fit-all 自动容纳最早事件），**跟随最新**开关（暂停=冻结窗口端点便于回看，恢复=吸附回 now）；轴刻度 HH:MM（末刻度随活体状态显示「现在」）+ 贯穿网格线；
+  - **状态段**：每条泳道一段从首个事件延伸到窗口右缘的状态色段——运行中=accent 淡底+内描边+2s 脉冲、已完成=success 淡底、空闲=细中性线、离线=细弱线（R1 调研结论的诚实呈现：子会话历史运行区间不可得，色段表达**当前状态**而非历史区间）；
+  - **事件点**：spawn/send/report/wait/cancel 按时间戳落点（spawn 灰、send accent、report 绿环空心、wait 浅灰、cancel danger），hover tooltip 显示 事件名·mode·时刻；RECENT_MS=2 分钟内的事件点 scale 脉冲（prefers-reduced-motion 尊重）；窗口外事件不渲染；
+  - **泳道标签**：标题（单行截断）、短 ID、状态芯片、todos n/m、goal 阶段、相对时间（30s 节拍保鲜）；点击标签跳转子会话（`ctx.get('sessions')?.open`，降级复制 id 不变）；总控标签不可点；
+  - 工具栏：标题 + 子会话计数 + wait/cancel 汇总 + 缩放按钮组（active 态）+ 跟随最新开关 + 刷新；图例行改点/段语义。
+- 纯函数层：`layoutTopology`/`orchEdgePath`/`ORCH_LAYOUT`（节点坐标布局）移除，替换为 `layoutLanes`（team 分组泳道，确定性同前）、`laneEvents`（单泳道事件流，spawn 边缺失时以子记录时间兜底锚点）、`coordinatorEvents`（总控活动流）、`orchTimeWindow`（缩放/暂停/fit-all 窗口解析，最小跨度 60s 防退化）、`orchClockLabel`（locale 无关 HH:MM）；`exports.__orchestration` 测试面同步换血。
+
+### Tests
+
+- `verify-installed.mjs` 编排段按泳道重写（fixture 不变，仍全合成）：测试面新函数存在性 + `ORCH_ZOOMS` 形状；`layoutLanes` 确定性/码元序/未编组居末/组内 spawn 时间序；`laneEvents` 三事件排序与 mode 携带、窗口截断兜底锚点；`coordinatorEvents` 六事件折叠排序；`orchTimeWindow` 固定档/暂停冻结/fit-all 30s pad/无事件默认/最小跨度钳制；渲染探针改断言 泳道数与状态/状态段 3+配色/默认 30m 窗口仅 RECENT 汇报点双泳道渲染且带 ping/轴 5 刻度+「现在」/网格线 15/缩放按钮 4+active 唯一/跟随开关文案；门控探针改走泳道标签按钮（title 定位）跳转。仿真安装态 + 真实安装位均 ALL INTEGRATION CHECKS PASSED；105 单测保持全绿（宿主面零改动）。
+
 ## [0.20.0] - 2026-09-09
 
 ### Added
