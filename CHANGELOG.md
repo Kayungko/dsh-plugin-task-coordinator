@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-09-09
+
+### Fixed
+
+- **编排视图在长总控会话里显示空态（转录窗口截断）**——用户真机反馈：任何缩放档下都是「本会话未派发子任务」。根因即契约调研的「必须注意②」：chat store 只加载有限事件窗口，长会话（如 17 万事件的总控）的 task_spawn 记录落在**未加载的历史窗口外**，提取层在已加载窗口内零命中（节点形状经 records.d.ts 复核完全正确，非解析问题）。修复（better-display 同款手动分页模式）：
+  - 空态卡新增**已扫描计数**（「已扫描当前转录窗口 N 条节点，未发现派发记录」）——窗口空/窗口有节点但无派发两种情况可区分；
+  - `hasMore` 经标准席 `useSession` 读取（better-display Reader L190 同款），有未加载历史时：空态与工具栏出现**「载入更早记录」**按钮 + 窗口截断提示；
+  - 分页走 `ctx.get("sessions").binding(sessionId).session.loadOlder()`（better-display index.tsx L33-38 的同一条 face，slots-only 声明下经 ctx.get 寻视）；加载态禁用按钮，store 更新后快照变化**自动重提取**，可连续点击逐页回溯；
+  - 全链守卫：face 缺席/抛错/promise 拒绝一律落 flash 错误行，绝不抛渲染。
+
+### Tests
+
+- verify 门控段：sessions fake 增 `binding(id).session.loadOlder`，注入 `useSession` 席（hasMore:true）断言历史按钮出现且点击经门控 face 分页到位；空态新增「已扫描 N 条」断言（1 节点无派发窗口）；静态断言增 `.binding(coordinatorId)`。仿真安装态 + 真实安装位 ALL INTEGRATION CHECKS PASSED；105 单测保持全绿。
+
 ## [0.21.0] - 2026-09-09
 
 ### Changed

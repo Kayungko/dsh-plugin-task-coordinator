@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.21.0)
+ * dsh-plugin-task-coordinator — client module (0.21.1)
  *
  * Two surfaces:
  *  1. `conversation.session.header.utilities` slot — the "Copy session id"
@@ -232,7 +232,12 @@ window.__ModuleLoader__.load({
 				"orch.group.running": "运行 {running}/{total}",
 				"orch.legend.segRunning": "运行中泳道段",
 				"orch.legend.segDone": "已完成泳道段",
-				"orch.axis.now": "现在"
+				"orch.axis.now": "现在",
+				"orch.history.more": "载入更早记录",
+				"orch.history.loading": "正在加载更早记录…",
+				"orch.history.failed": "载入更早记录失败：{message}",
+				"orch.empty.scanned": "已扫描当前转录窗口 {n} 条节点，未发现派发记录。",
+				"orch.empty.windowHint": "长会话的早期派发可能在尚未加载的历史窗口里——点「载入更早记录」逐页回溯后自动重提取。"
 			},
 			en: {
 				"header.action": "Copy Session ID",
@@ -312,7 +317,12 @@ window.__ModuleLoader__.load({
 				"orch.group.running": "running {running}/{total}",
 				"orch.legend.segRunning": "running segment",
 				"orch.legend.segDone": "completed segment",
-				"orch.axis.now": "now"
+				"orch.axis.now": "now",
+				"orch.history.more": "Load older records",
+				"orch.history.loading": "Loading older records…",
+				"orch.history.failed": "Loading older records failed: {message}",
+				"orch.empty.scanned": "Scanned {n} nodes in the loaded transcript window; no dispatch records found.",
+				"orch.empty.windowHint": "In long sessions the early spawns may sit in the not-yet-loaded history window — page back with Load older records; the view re-extracts automatically."
 			}
 		};
 		/** Live LocaleRuntime (register/translate/getSnapshot/subscribe) when present. */
@@ -1264,6 +1274,11 @@ window.__ModuleLoader__.load({
 			const [zoomId, setZoomId] = react.useState("30m");
 			const [live, setLive] = react.useState(true);
 			const [frozenEnd, setFrozenEnd] = react.useState(null);
+			// 0.21.1: manual history paging (the better-display pattern) — the
+			// transcript is a finite window, so long supervisor sessions can hold
+			// spawn records OUTSIDE it; loadOlder() pages the store back and the
+			// snapshot change re-runs extraction automatically.
+			const [loadingOlder, setLoadingOlder] = react.useState(false);
 			const localeSnapshot = useStore ? useStore(subscribeLocale, getLocaleSnapshot) : NO_LOCALE_SNAPSHOT;
 			// Keep relative times and the RECENT_MS flow window fresh (every 30s).
 			react.useEffect(() => {
@@ -1284,6 +1299,12 @@ window.__ModuleLoader__.load({
 			try {
 				if (typeof props.useSessions === "function") sessionsList = props.useSessions((snapshot) => snapshot);
 			} catch (error) { sessionsError = String((error && error.message) || error); }
+			// hasMore: the session face's history flag (better-display reads the
+			// same seat: props.useSession(snapshot => snapshot.hasMore)).
+			let hasMore = null;
+			try {
+				if (typeof props.useSession === "function") hasMore = props.useSession((snapshot) => !!(snapshot && snapshot.hasMore));
+			} catch { hasMore = null; }
 			try {
 			const coordinatorId = typeof props.sessionId === "string" && props.sessionId.length > 0 ? props.sessionId : "";
 			const extraction = chat !== null ? safeExtractOrchestration(chat) : { ok: true, children: [], edges: [], notes: [] };
@@ -1324,6 +1345,50 @@ window.__ModuleLoader__.load({
 				});
 			};
 			const h = react.createElement;
+			// 0.21.1 history paging: sessions face → binding(sessionId).session
+			// → loadOlder() (better-display index.tsx L33-38 does exactly this
+			// with its declared inject; we sight the same service through
+			// ctx.get() under our slots-only declaration). Every failure lands
+			// as a flash line — never a throw.
+			const loadOlderHistory = () => {
+				if (loadingOlder) return;
+				try { setLoadingOlder(true); } catch { /* noop */ }
+				const finish = (message) => {
+					try { setLoadingOlder(false); } catch { /* noop */ }
+					if (message !== null) {
+						try {
+							setFlash({ kind: "error", text: message });
+							setTimeout(() => setFlash(null), 6000);
+						} catch { /* flash simply stays */ }
+					}
+				};
+				try {
+					const svc = hostCtx && typeof hostCtx.get === "function" ? hostCtx.get("sessions") : undefined;
+					const binding = svc && typeof svc.binding === "function" ? svc.binding(coordinatorId) : undefined;
+					const face = binding && typeof binding === "object" ? binding.session : undefined;
+					if (!face || typeof face.loadOlder !== "function") {
+						finish(t("orch.history.failed", { message: "sessions face unavailable" }));
+						return;
+					}
+					const result = face.loadOlder();
+					if (result && typeof result.then === "function") {
+						result.then(
+							() => finish(null),
+							(error) => finish(t("orch.history.failed", { message: String((error && error.message) || error) }))
+						);
+					} else finish(null);
+				} catch (error) {
+					finish(t("orch.history.failed", { message: String((error && error.message) || error) }));
+				}
+			};
+			const historyButton = hasMore === true
+				? h("button", {
+					type: "button",
+					className: "orchViewBtn",
+					disabled: loadingOlder,
+					onClick: loadOlderHistory
+				}, loadingOlder ? t("orch.history.loading") : t("orch.history.more"))
+				: null;
 			const statusChip = (state) => h("span", { className: "orchViewChip", "data-kind": "status", "data-state": state },
 				t(state === "running" ? "orch.status.running" : state === "completed" ? "orch.status.completed" : state === "idle" ? "orch.status.idle" : "orch.status.unknown"));
 			const liveState = (live) => (live ? (live.running ? "running" : live.completed ? "completed" : "idle") : "unknown");
@@ -1467,6 +1532,7 @@ window.__ModuleLoader__.load({
 							} catch { /* noop */ }
 						}
 					}, t(live ? "orch.live.on" : "orch.live.off")),
+					historyButton,
 					h("button", { type: "button", className: "orchViewBtn", onClick: () => { try { setRefreshNonce((nonce) => nonce + 1); setNowTick(Date.now()); } catch { /* noop */ } } }, t("orch.refresh"))
 				),
 				flash ? h("p", { className: "orchViewFlash", "data-kind": flash.kind }, flash.text) : null,
@@ -1475,6 +1541,11 @@ window.__ModuleLoader__.load({
 					? h("div", { className: "orchViewEmpty" },
 						h("p", { className: "orchViewEmptyTitle" }, t("orch.empty.title")),
 						h("p", { className: "orchViewEmptyText" }, t("orch.empty.hint")),
+						chat !== null && extraction.ok !== false
+							? h("p", { className: "orchViewEmptyText" }, t("orch.empty.scanned", { n: extraction.scanned ?? 0 })) : null,
+						hasMore === true
+							? h("p", { className: "orchViewEmptyText" }, t("orch.empty.windowHint")) : null,
+						historyButton,
 						h("p", { className: "orchViewEmptyText" }, t("orch.empty.suffix")))
 					: [
 						h("div", { key: "legend", className: "orchViewLegend" },

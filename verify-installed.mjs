@@ -920,8 +920,10 @@ const orchByText = (root, pattern) => {
     revision: 1,
   };
   // 0.20.0: the sessions service stands in behind the gate — the view's
-  // child-card click must sight it through ctx.get() and call open(id).
+  // lane-label click must sight it through ctx.get() and call open(id);
+  // 0.21.1: binding(id).session.loadOlder() is the history-paging face.
   const gatedOpened = [];
+  const gatedLoaded = [];
   const gatedServices = {
     locale: gatedRuntime,
     settingsScope: {
@@ -935,7 +937,10 @@ const orchByText = (root, pattern) => {
     // 0.18.4: the CLIENT wire answers a result envelope ({ok, value}), not the
     // bare catalog the host-side facade returns — the fake mirrors the wire.
     remote: { session: { modelCatalog: async () => ({ ok: true, value: { groups: [], failures: [], default: undefined } }) } },
-    sessions: { open: (id) => gatedOpened.push(id) },
+    sessions: {
+      open: (id) => gatedOpened.push(id),
+      binding: (id) => ({ session: { loadOlder: async () => { gatedLoaded.push(id); } } }),
+    },
   };
   const gatedSlotInjections = [];
   const gatedSlotService = {
@@ -985,7 +990,7 @@ const orchByText = (root, pattern) => {
   assert.equal(gatedOrchOccupation.options.order, 20, 'order 20 sits after the native chat(0)/trajectory(10) tabs');
   assert.match(gatedOrchOccupation.options.label(), /编排|Orchestration/);
   assert.equal(typeof gatedOrchOccupation.component, 'function');
-  const gatedOrchTree = gatedOrchOccupation.component({ sessionId: 'session-superview', useChat: orchChatSeat, useSessions: orchSessionsSeat });
+  const gatedOrchTree = gatedOrchOccupation.component({ sessionId: 'session-superview', useChat: orchChatSeat, useSessions: orchSessionsSeat, useSession: (selector) => selector({ hasMore: true }) });
   assert.equal(gatedOrchTree.type, 'div', 'orchestration view renders through the gated ctx');
   const gatedChildLanes = orchCollect(gatedOrchTree, (el) => el.props && String(el.props.className || '').includes('orchViewLane') && el.props['data-role'] === 'child');
   assert.equal(gatedChildLanes.length, 2, 'both synthetic children render as lanes through the gated ctx');
@@ -993,6 +998,12 @@ const orchByText = (root, pattern) => {
   assert.ok(gatedAlphaLabel, 'the alpha lane label button renders');
   gatedAlphaLabel.props.onClick();
   assert.deepEqual(gatedOpened, ['session-alpha'], 'lane-label click must navigate via ctx.get("sessions").open');
+  // 0.21.1: hasMore seat → history button → loadOlder through the gated face.
+  const gatedHistoryBtn = orchCollect(gatedOrchTree, (el) => el.type === 'button' && Array.isArray(el.children) && el.children.some((text) => typeof text === 'string' && /载入更早记录|Load older/.test(text)))[0];
+  assert.ok(gatedHistoryBtn, 'the hasMore seat surfaces the load-older button');
+  gatedHistoryBtn.props.onClick();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(gatedLoaded, ['session-superview'], 'the history button pages via ctx.get("sessions").binding(id).session.loadOlder()');
   if (docDesc) Object.defineProperty(globalThis, 'document', docDesc);
   else delete globalThis.document;
   if (navDesc) Object.defineProperty(globalThis, 'navigator', navDesc);
@@ -1177,6 +1188,10 @@ const orchEmptyTree = orchOccupation.component({ sessionId: 'session-plain' });
 assert.equal(orchEmptyTree.type, 'div');
 assert.ok(orchByText(orchEmptyTree, /未派发子任务|No tasks dispatched/), 'missing seats render the empty-state card');
 assert.ok(orchCollect(orchEmptyTree, (el) => el.props && el.props['data-kind'] === 'error').length >= 1, 'missing seats render a diagnostics line');
+// 0.21.1: a chat window WITHOUT spawn records reports its scanned size (the
+// window-truncation diagnostic — the user sees why the fleet looks empty).
+const orchWindowTree = orchOccupation.component({ sessionId: 'session-superview', useChat: (selector) => selector({ order: ['n1'], nodes: { get: () => ({ kind: 'text', data: {} }) } }) });
+assert.ok(orchByText(orchWindowTree, /已扫描当前转录窗口 1 条|Scanned 1 nodes/), 'the empty state reports the scanned window size');
 const orchBrokenTree = orchOccupation.component({ sessionId: 'session-superview', useChat: () => { throw new Error('chat seat boom'); }, useSessions: orchSessionsSeat });
 assert.ok(orchByText(orchBrokenTree, /chat seat boom/), 'a throwing seat surfaces its reason in a diagnostics line');
 
@@ -1195,6 +1210,7 @@ else delete globalThis.navigator;
 // service through ctx.get() (the runner's inject gate throws on direct
 // undeclared property reads), and the bundle never reads hostCtx.sessions.
 assert.match(clientSrc, /hostCtx\.get\("sessions"\)/, 'the child-card jump must sight sessions via ctx.get()');
+assert.match(clientSrc, /\.binding\(coordinatorId\)/, 'history paging goes through the sessions binding face');
 assert.doesNotMatch(clientSrc, /hostCtx\.sessions\b/, 'no direct hostCtx.sessions property read (runner inject gate)');
 assert.match(clientSrc, /name: "conversation\.view"/);
 assert.match(clientSrc, /id: "orchestration"/);
