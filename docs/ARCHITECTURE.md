@@ -75,7 +75,7 @@ flowchart LR
 分层约束（与 [unity-pipe](https://github.com/Kayungko/unity-pipe) 的移植边界思路一致，这里用 DI 达成）：
 
 - **纯模块**（`config.mjs` / `safety.mjs` / `title.mjs`）：零宿主 import，全部单测覆盖——59 个单元测试的主体；
-- **`registry.mjs`**：持久 spawn 注册表（团队工作流的跨重启记忆）。读写永不抛错：损坏/缺失降级为空注册表，损坏文件保留为 `*.corrupt-<ts>`；写入近似原子（临时文件 + 重命名）；容量上限裁剪（`registryMaxEntries`）；0.5.0 起每条记录还带 `depth` 与 `parentSessionId`（递归治理的依据），0.19.0 起可选带 `expectedWorkspace`（调用方期望归属路径，未分组落位的事后补救线索；字段级白名单加载）；
+- **`registry.mjs`**：持久 spawn 注册表（团队工作流的跨重启记忆）。读写永不抛错：损坏/缺失降级为空注册表，损坏文件保留为 `*.corrupt-<ts>`；写入近似原子（临时文件 + 重命名）；容量上限裁剪（`registryMaxEntries`）；0.5.0 起每条记录还带 `depth` 与 `parentSessionId`（递归治理的依据），0.19.0 起可选带 `expectedWorkspace`（调用方期望归属路径，未分组落位的事后补救线索；字段级白名单加载），0.25.0 起可选带 `externalRef`（外部派发方的自由文本对应标识，wire 契约 C1：trim ≤200、只存储回显不解析；同款字段级白名单加载）；
 - **`i18n.mjs`**：界面文案字典（zh/en）与语言解析（0.15.0，纯模块零宿主 import）。`resolveUiLocale` 只认精确 `en`，其余一律落 zh（绝不猜测未内置的语言）；`uiStrings(locale)` 返回冻结字典——确认卡标签/标题/问题、多选卡文案、汇报约定后缀、`/tasks` 元数据。宿主侧每次调用实时读 settings `locale.preference`，切语言无需重启；
 - **`ops.mjs`**：工厂函数 `createOps(deps)`，宿主对象（sessionController / agents / createUserMessage / limiter / registry / uuid / askUser）**全部经依赖注入**，离开宿主进程可完整测试；
 - **`tools.mjs`**：连 `defineTool` 都经注入——模型面注册与宿主包解耦；

@@ -148,8 +148,8 @@
 `registry.mjs` 记录协调者 spawn 过的会话——哪个团队、何时、什么意图、派生自谁：
 
 - **文件**：默认 `<DSH_HOME 或 ~/.dsh>/task-coordinator/registry.json`（`registryFile` 可覆盖）；格式版本化（当前 `1`）；
-- **记录字段**：`team` / `title` / `promptExcerpt`（**用户原始 prompt** 的摘录）/ `depth` / `parentSessionId`（后两者 0.5.0 起）/ `expectedWorkspace`（0.19.0 起：spawn 时调用方期望归属路径——显式 `cwd`，缺省时调用方 cwd；未分组/worktree/归一落位的**事后批量补救**线索）；
-- **消费面**：`task_list({ team })` 的成员判定、列表行与 `task_progress` 结果里的 `team` 富化、深度推导（§9）；`expectedWorkspace` 供 `task_list({ ungrouped: true })` 之后的补救决策；
+- **记录字段**：`team` / `title` / `promptExcerpt`（**用户原始 prompt** 的摘录）/ `depth` / `parentSessionId`（后两者 0.5.0 起）/ `expectedWorkspace`（0.19.0 起：spawn 时调用方期望归属路径——显式 `cwd`，缺省时调用方 cwd；未分组/worktree/归一落位的**事后批量补救**线索）/ `externalRef`（0.25.0 起：外部派发方的自由文本对应标识——建议格式 `<thread短id>:<波次名>`，只存储回显**不解析**；wire 契约 C1 见 §9）；
+- **消费面**：`task_list({ team })` 的成员判定、列表行与 `task_progress` 结果里的 `team` 富化、深度推导（§9）；`expectedWorkspace` 供 `task_list({ ungrouped: true })` 之后的补救决策；`externalRef` 经列表行与 `task_progress` 同款 registry 合并路径透出（跨代理会话对应——外部驱动方反查「这个 DSH 会话是我的哪个对话/波次派的」）；
 - **容错契约**：读取**永不抛错**——缺失或损坏降级为空注册表；损坏文件保留为 `*.corrupt-<时间戳>` 供检查，不静默丢弃；字段级白名单（非法类型值加载时丢弃）；
 - **写入**：近似原子（临时文件 + 重命名）；
 - **容量**：`registryMaxEntries`（默认 500）上限，最旧先裁剪。
@@ -177,6 +177,7 @@
 - **模型路由发现 [0.14.0]**：市场分发下每个部署接入的路线都不同，id 从不写死。`task_models` 调 `sessionController.modelCatalog()`（2722 行，Remote 门面公开方法；内部 `buildModelCatalog` 经 `llm.listProviders/listModels/resolveModelInfo` 聚合，1933-1980 行——GUI 模型选择器同源）投影为精确 id：provider 分组、model id、efforts、应用级 `default`、单点失败 `failedProviders`。宿主无此方法的老版本降级 `catalog-unavailable`。`model-unavailable` 错误经 `describeModelRoutes` 附可行动提示（优先该 provider 的 model id 列表，回退可路由 provider 列表；全链失败容忍，任何异常退回原始错误消息）。
 - **派发默认模型 [0.18.0]**：解析链三级化——显式工具参数 > 插件默认（durable 设置区 `task-coordinator`，`normalizeSpawnRoute` 纯函数：空对=null 跟随宿主默认、修剪、半对抛错）> 宿主默认。`spawnTask` 在调用未带 provider+model 时回退（reasoningEffort 显式值优先于默认值），回退路线走与显式指定**完全相同**的两级校验链（预校验零孤儿 + selectModel 安装）；ops 层对 `readSpawnDefaults` 包 try/catch——存储层畸形降级为「未设置」，绝不破坏派发。成功载荷回显 `modelSource`（`explicit`/`plugin-default`/`host-default`）；`task_models` 附 `pluginDefault`（读取同防御纪律）。批量逐项经 `spawnTask` 同路覆盖。客户端页签见 §12。
 - **界面本地化 [0.15.0]**：用户可见文案跟随宿主语言偏好——持久化于 settings 命名空间 `locale`（字段 `preference`：`zh`|`en`，`@deepseek-ai/dsh-client-locale` 拥有，GUI「设置→通用→语言」行写入；`settings.get(ns)` 直接返回解析值，未注册返回 undefined）。宿主侧每次调用实时解析 `i18n.mjs` 冻结字典（确认卡标签/标题/问题、多选卡、汇报约定后缀；`/tasks` 元数据挂载时捕获）；浏览器侧防御性接入 `LocaleRuntime`（不硬声明 inject，`ctx.locale` 缺失即退回内置中文字典；`register(NS,{zh,en})` + `translate(NS,key)` + `getSnapshot/subscribe` uSES 重渲染，语言切换与词典注册都 bump revision）。迟注册修复 [0.16.1]：locale 插件可能比按钮后装载，apply 一次性读取会漏掉服务，而宿主 `bind(ns)` 对未注册命名空间照发回显裸键的 `t`（`translate` 词典缺失返回原 key，client.js:1294）——改为 `ensureLocale()` 惰性重试（服务一被看见即注册，register bump revision 实时刷新已渲染出口；HMR "already" 拒绝视为已注册）+ `props.t` 裸键防护（返回值等于 key/`NS.key`/非字符串即回落内置 zh 字典）。回退纪律：只认精确 `en`，缺失/不可识别一律 zh——「未设置=跟随浏览器语言」是浏览器侧委托语义，宿主侧不可见，绝不猜测。
+- **externalRef 外部对应标识 [0.25.0]**（wire 契约 C1，`research/dshq-ledger-mailbox-spec.md` Part C，与 `dsh-plugin-task-bridge` v0.2.0 两端锁死、不得单方更改）：`task_spawn` 接受可选 `externalRef` 参数——外部派发方（如经桥驱动 DSH 的 Codex 对话）的自由文本标识，语义为**只存储回显、不解析**（建议格式 `<thread短id>:<波次名>`）。校验规则：string、trim 后 ≤200 字符；空串/仅空白视为**缺席**（成功但不携带）；`null`/`undefined` 与其他可选字段同规视为缺席；其余非字符串或超长 → `bad-request`，且校验先于会话创建（**零孤儿**）。落点：registry 记录（§7 字段表，持久化+损坏值加载过滤照 `expectedWorkspace` 0.19.0 先例）→ spawn 成功回执回显（trim 形态）→ `task_list` 行与 `task_progress` 结果透出（照 `team` 的 registry 合并路径，未记录不携带键）。校验实现在 ops 层而非仅工具 schema——桥消费方直接调 ops（§17.2），绕过宿主 schema 编译。**`task_spawn_batch` 本版不接受**（桥 MVP 无 batch 端点）：条目上的该字段被忽略（不转发/不记录/不回显），工具 schema `additionalProperties:false` 在宿主层拒绝。
 
 ## 10. 派发确认 [0.6.0 新增]
 
@@ -258,7 +259,7 @@
 
 - **安装入口**：`install.ps1`（仓库根为工作区便捷包装，`plugin/install.ps1` 为仓内等价版）——复制包文件、保证 profile `package.json` 的 `dependencies` + `dsh.profile.bundles` 登记，然后**必须重启宿主**才装载新 bundle。
 - **技能目录拷内容不拷目录**：`Copy-Item` 的源是目录且目标目录已存在时会拷**进去**（嵌套 `skills/skills/`），正式路径技能文件从此不再更新——0.4.0–0.8.3 的实际事故。现行脚本复制 `skills\*` 内容并清理历史嵌套残留；技能走 `patchReload: live`，内容更新**无需重启**即刻热刷新。
-- **安装态自检**：任何宿主/插件变更后，把 `verify-installed.mjs` 复制进安装目录运行（跑完删除），全绿才放行；它断言服务版本、11 工具、`/tasks`、确认闸门、多选确认子集强制、复用凭证跨批、task_workspace 实体链与 migrate 克隆五步链（目标 cwd 出生/元数据携带/同 cwd 拒绝零副作用）、spawn cwd 升级、**0.19.0 工作区落位（回执 placement/workspace 字段、祖先归一全链 workspaceId+根 cwd+i18n kickoff 提示+注册表 expectedWorkspace、未分组警告+task_list ungrouped 过滤）**、子会话模型指定（预校验拒绝/安装时序/成对约束/错误路线提示）、task_models 目录投影、客户端 i18n 回归（0.16.1：裸键 `t()` 回退内置词典、迟注册 locale 服务首见即注册、zh/en 实时解析）、工作区归属与客户端模块全链、0.17.0 投递回执（task_send queueDepth 分列断言、回报后缀让位协议句断言）、**0.24.0 服务缝（enabled 载荷含活 ops 且 13 成员可调、经载荷直调 listTasks 端到端、disabled 载荷 ops 缺席）**。
+- **安装态自检**：任何宿主/插件变更后，把 `verify-installed.mjs` 复制进安装目录运行（跑完删除），全绿才放行；它断言服务版本、11 工具、`/tasks`、确认闸门、多选确认子集强制、复用凭证跨批、task_workspace 实体链与 migrate 克隆五步链（目标 cwd 出生/元数据携带/同 cwd 拒绝零副作用）、spawn cwd 升级、**0.19.0 工作区落位（回执 placement/workspace 字段、祖先归一全链 workspaceId+根 cwd+i18n kickoff 提示+注册表 expectedWorkspace、未分组警告+task_list ungrouped 过滤）**、子会话模型指定（预校验拒绝/安装时序/成对约束/错误路线提示）、task_models 目录投影、客户端 i18n 回归（0.16.1：裸键 `t()` 回退内置词典、迟注册 locale 服务首见即注册、zh/en 实时解析）、工作区归属与客户端模块全链、0.17.0 投递回执（task_send queueDepth 分列断言、回报后缀让位协议句断言）、**0.24.0 服务缝（enabled 载荷含活 ops 且 13 成员可调、经载荷直调 listTasks 端到端、disabled 载荷 ops 缺席）**、**0.25.0 externalRef（spawn 带 ref → 回执 trim 回显 + registry 落盘 + list 行/progress 透出、超长 bad-request 零孤儿）**。
 
 ## 17. 服务缝（0.24.0 新增）
 

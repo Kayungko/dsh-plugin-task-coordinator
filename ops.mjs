@@ -344,6 +344,9 @@ export function createOps(deps) {
       sessionId: row.sessionId,
       title: projections.title ?? null,
       ...(recorded?.team !== undefined ? { team: recorded.team } : {}),
+      // externalRef (0.25.0): registry-merged like team — lets an external
+      // dispatcher scan the list and recognize its own spawns.
+      ...(recorded?.externalRef !== undefined ? { externalRef: recorded.externalRef } : {}),
       status: row.running ? 'running' : row.blank ? 'blank' : 'idle',
       cwd: row.cwd ?? null,
       updatedAt: row.updatedAt,
@@ -502,6 +505,9 @@ export function createOps(deps) {
         sessionId: targetId,
         shortId: shortId(targetId),
         ...(recorded?.team !== undefined ? { team: recorded.team } : {}),
+        // externalRef (0.25.0): the durable cross-agent correspondence marker,
+        // surfaced exactly like team (registry merge, absent when never given).
+        ...(recorded?.externalRef !== undefined ? { externalRef: recorded.externalRef } : {}),
         title: row?.projections?.values?.title ?? null,
         cwd: row?.cwd ?? null,
         updatedAt: row?.updatedAt ?? null,
@@ -611,11 +617,32 @@ export function createOps(deps) {
     },
 
     /** Capability 6: spawn a brand-new task; it appears in the session list. */
-    async spawnTask({ title, prompt, cwd, sessionId, agentPreset, team, reportBack, provider, model, reasoningEffort }, caller, signal) {
+    async spawnTask({ title, prompt, cwd, sessionId, agentPreset, team, reportBack, provider, model, reasoningEffort, externalRef }, caller, signal) {
       const callerDeny = checkCaller(caller, config);
       if (callerDeny) return failDeny(callerDeny);
       if (typeof prompt !== 'string' || prompt.trim().length === 0) {
         return fail(OP_CODES.BAD_REQUEST, 'prompt is required to start the new task');
+      }
+      // externalRef (0.25.0, wire contract C1 of research/dshq-ledger-mailbox-
+      // spec.md Part C — locked, do not change unilaterally): optional free-form
+      // external caller reference for cross-agent correspondence (suggested
+      // shape "<thread-short-id>:<wave-name>"). Stored and echoed VERBATIM,
+      // never parsed. Rules: string only; trimmed; <=200 chars after trim;
+      // empty/whitespace-only counts as ABSENT (not an error); null/undefined
+      // count as absent too (same convention as every other optional field on
+      // both layers); any other non-string or an over-length value is
+      // bad-request. Validation lives here (not only in the tool schema)
+      // because bridge consumers call ops directly.
+      let cleanExternalRef;
+      if (externalRef !== undefined && externalRef !== null) {
+        if (typeof externalRef !== 'string') {
+          return fail(OP_CODES.BAD_REQUEST, 'externalRef must be a string (free-form external caller reference, <=200 chars after trim)');
+        }
+        const trimmedRef = externalRef.trim();
+        if (trimmedRef.length > 200) {
+          return fail(OP_CODES.BAD_REQUEST, `externalRef must be at most 200 characters after trim (got ${trimmedRef.length})`);
+        }
+        if (trimmedRef.length > 0) cleanExternalRef = trimmedRef;
       }
       // Per-child model selection (0.13.0): provider+model are a pair; the
       // optional reasoningEffort only rides along with them. Validated up-front
@@ -825,6 +852,8 @@ export function createOps(deps) {
         depth: childDepth,
         parentSessionId: caller.sessionId,
         ...(expectedWorkspace !== undefined ? { expectedWorkspace } : {}),
+        // externalRef (0.25.0): durable so the correspondence survives restarts
+        ...(cleanExternalRef !== undefined ? { externalRef: cleanExternalRef } : {}),
       });
       // Install the per-child model BEFORE the kickoff so the very first turn
       // runs on the requested route. A failure leaves a traceable orphan (the
@@ -893,6 +922,9 @@ export function createOps(deps) {
         shortId: shortId(newId),
         title: appliedTitle,
         ...(cleanTeam !== undefined ? { team: cleanTeam } : {}),
+        // externalRef (0.25.0): echoed on the success receipt (trimmed form) so
+        // the dispatcher can confirm what was recorded — contract C1.
+        ...(cleanExternalRef !== undefined ? { externalRef: cleanExternalRef } : {}),
         cwd: effectiveCwd ?? null,
         // Workspace observability (0.19.0): every spawn receipt states which
         // workspace the task attached to ({id,title} | null) and HOW it was
@@ -1354,6 +1386,11 @@ export function createOps(deps) {
           reasoningEffort: item.reasoningEffort,
           team: cleanTeam,
           reportBack,
+          // NOTE (0.25.0): externalRef is deliberately NOT forwarded — batch
+          // dispatch is out of scope for this version (the bridge MVP has no
+          // batch endpoint). An item.externalRef present on the raw input is
+          // ignored (never recorded, never echoed); the tool schema's
+          // additionalProperties:false rejects it at the host schema layer.
         }, caller, signal);
         if (result.ok) startedCount += 1;
         // Per-item receipts carry the workspace observability fields (0.19.0)

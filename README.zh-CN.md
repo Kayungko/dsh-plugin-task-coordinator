@@ -103,7 +103,7 @@ pwsh install.ps1 -Source .
 | `task_list` | 列出协调可见的任务（含稳定 sessionId、状态、标题、todo/goal 进度）；可按 `team` 过滤；`ungrouped: true`（0.19.0）只列不属于任何工作区的会话——未分组桶的补救视图，配合 `task_workspace` 与注册表 `expectedWorkspace` 归置 |
 | `task_progress` | 深入读取单个任务：实时/冷状态、排队消息、对话尾部、todos、goal |
 | `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`；`reference` 关联先前指令），返回 `messageId` + `queueDepth` 回执 `{nextTurn, nextStep}`（投递后口径；next-turn 每轮恰消费 1 条，深度 N ≈ N 轮后才被读） |
-| `task_spawn` | 创建 + 命名 + 启动新任务（标题遵循 `MMDD｜类型｜主题`；可用 `team` 编组），返回 `correlationId`；默认附带回报约定；**工作区落位兜底链**（0.19.0）：精确匹配挂载（0.12.0）→ 子目录挂最近祖先工作区并归一到工作区根（默认 `ancestor` 档，回执+kickoff 双明示）→ git worktree 刻意保隔离落未分组（强警告）→ 未分组必附警告与补救提示；回执必带 `workspace`（{id,title} 或 null）与 `placement` 枚举；可选 `provider`+`model`（+`reasoningEffort`）指定子会话模型路线，开场前安装（0.13.0）；省略时回退插件默认路线（设置 → 任务编排，0.18.0），再回退宿主默认 |
+| `task_spawn` | 创建 + 命名 + 启动新任务（标题遵循 `MMDD｜类型｜主题`；可用 `team` 编组），返回 `correlationId`；默认附带回报约定；可选 `externalRef`（0.25.0）携带外部派发方的自由文本对应标识（如经任务桥派发的 Codex 对话——trim 后 ≤200 字符，registry 持久存储，回执/`task_list` 行/`task_progress` 透出，只存储回显不解析）；**工作区落位兜底链**（0.19.0）：精确匹配挂载（0.12.0）→ 子目录挂最近祖先工作区并归一到工作区根（默认 `ancestor` 档，回执+kickoff 双明示）→ git worktree 刻意保隔离落未分组（强警告）→ 未分组必附警告与补救提示；回执必带 `workspace`（{id,title} 或 null）与 `placement` 枚举；可选 `provider`+`model`（+`reasoningEffort`）指定子会话模型路线，开场前安装（0.13.0）；省略时回退插件默认路线（设置 → 任务编排，0.18.0），再回退宿主默认 |
 | `task_confirm` | 把拆分/派发方案做成**交互式审批卡**弹给用户，阻塞直到回答；批准返回单次 `confirmationId` |
 | `task_confirm_select` | 把任务清单做成**多选卡**（宿主中性提问 UI，非琥珀审批卡）：用户勾选要派发哪些（部分派发），可在自定义输入行写调整意见；批准把 `confirmationId` 绑定到选中子集，`task_spawn_batch` 强制校验（夹带未勾选标题报 `confirmation-mismatch`） |
 | `task_spawn_batch` | 一次批量创建整个拆分方案（`tasks: [{title?, prompt}]` + 统一 `team`）；达到确认阈值时必须携带 `confirmationId`；单条失败不中止整批 |

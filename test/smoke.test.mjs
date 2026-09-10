@@ -1099,6 +1099,107 @@ test('registry: expectedWorkspace is recorded by spawn, persists, and is whiteli
   assert.equal(sanitized.get(normalized.sessionId).expectedWorkspace, undefined);
 });
 
+/* ------------------------------------------------------------------ */
+/* externalRef: end-to-end external caller correspondence (0.25.0)     */
+/* Wire contract C1 (research/dshq-ledger-mailbox-spec.md Part C):     */
+/* string, optional, <=200 chars after trim; empty/whitespace = absent;*/
+/* non-string or over-length = bad-request. Stored/echoed, never parsed*/
+/* ------------------------------------------------------------------ */
+
+test('ops.spawnTask: externalRef validation triad — accept/absent/reject (0.25.0)', async () => {
+  const registry = new SpawnRegistry(tempRegistryPath());
+  const harness = makeHarness({ registry });
+  // ① valid: accepted, TRIMMED, echoed on the receipt and recorded durably
+  const ok1 = await harness.ops.spawnTask({ prompt: 'ref task', externalRef: '  thread-abc:wave-1  ' }, SUPERVISOR);
+  assert.equal(ok1.ok, true);
+  assert.equal(ok1.externalRef, 'thread-abc:wave-1', 'receipt echoes the trimmed ref');
+  assert.equal(registry.get(ok1.sessionId).externalRef, 'thread-abc:wave-1');
+  // boundary: exactly 200 chars after trim is accepted
+  const ref200 = 'r'.repeat(200);
+  const ok2 = await harness.ops.spawnTask({ prompt: 'boundary task', externalRef: ` ${ref200} ` }, SUPERVISOR);
+  assert.equal(ok2.ok, true);
+  assert.equal(ok2.externalRef, ref200);
+  // ② absent: undefined / null / empty / whitespace-only all mean ABSENT —
+  // spawn succeeds and NEITHER receipt nor registry carries the key
+  for (const [index, absent] of [[0, undefined], [1, null], [2, ''], [3, '   \t\n ']]) {
+    const result = await harness.ops.spawnTask({ prompt: `absent task ${index}`, externalRef: absent }, SUPERVISOR);
+    assert.equal(result.ok, true, `absent form ${index} must not fail the spawn`);
+    assert.equal('externalRef' in result, false, `absent form ${index} must not appear on the receipt`);
+    assert.equal('externalRef' in (registry.get(result.sessionId) ?? {}), false, `absent form ${index} must not be recorded`);
+  }
+  // ③ reject: any other non-string or an over-length value is bad-request —
+  // and rejection happens BEFORE creation (zero orphans)
+  const createdBefore = harness.calls.create.length;
+  for (const invalid of [42, true, { ref: 'x' }, ['x'], 'x'.repeat(201)]) {
+    const result = await harness.ops.spawnTask({ prompt: 'invalid ref task', externalRef: invalid }, SUPERVISOR);
+    assert.equal(result.ok, false, `invalid ref ${JSON.stringify(invalid)?.slice(0, 20)} must be rejected`);
+    assert.equal(result.code, 'bad-request');
+    assert.match(result.error, /externalRef/);
+  }
+  assert.equal(harness.calls.create.length, createdBefore, 'rejected externalRef must not create any session');
+});
+
+test('registry: externalRef round-trips through disk and is whitelisted on load (0.25.0)', async () => {
+  const file = tempRegistryPath();
+  const registry = new SpawnRegistry(file);
+  const harness = makeHarness({ registry });
+  const spawned = await harness.ops.spawnTask({ prompt: 'durable ref task', externalRef: 'thread-def:wave-2' }, SUPERVISOR);
+  assert.equal(registry.get(spawned.sessionId).externalRef, 'thread-def:wave-2');
+  // survives a reload (durable file round-trip)
+  const reloaded = new SpawnRegistry(file);
+  assert.equal(reloaded.get(spawned.sessionId).externalRef, 'thread-def:wave-2');
+  // whitelist: malformed values are dropped on load instead of poisoning entries
+  // (same discipline as expectedWorkspace, 0.19.0 precedent)
+  const corrupt = JSON.parse(readFileSync(file, 'utf8'));
+  corrupt.entries[spawned.sessionId].externalRef = 42;
+  writeFileSync(file, JSON.stringify(corrupt), 'utf8');
+  const sanitized = new SpawnRegistry(file);
+  assert.equal(sanitized.get(spawned.sessionId).externalRef, undefined);
+  assert.equal(sanitized.get(spawned.sessionId).promptExcerpt, 'durable ref task', 'the rest of the entry survives sanitization');
+  // empty-string values are dropped too
+  const corrupt2 = JSON.parse(readFileSync(file, 'utf8'));
+  corrupt2.entries[spawned.sessionId].externalRef = '';
+  writeFileSync(file, JSON.stringify(corrupt2), 'utf8');
+  assert.equal(new SpawnRegistry(file).get(spawned.sessionId).externalRef, undefined);
+});
+
+test('ops.listTasks + progress: externalRef surfaces from the registry (0.25.0)', async () => {
+  const registry = new SpawnRegistry(tempRegistryPath());
+  const harness = makeHarness({ registry });
+  const withRef = await harness.ops.spawnTask({ prompt: 'surfaced task', externalRef: 'thread-ghi:wave-3' }, SUPERVISOR);
+  const withoutRef = await harness.ops.spawnTask({ prompt: 'plain task' }, SUPERVISOR);
+  // list rows merge the registry field exactly like team
+  const listing = await harness.ops.listTasks({}, SUPERVISOR);
+  const refRow = listing.tasks.find((task) => task.sessionId === withRef.sessionId);
+  const plainRow = listing.tasks.find((task) => task.sessionId === withoutRef.sessionId);
+  assert.equal(refRow.externalRef, 'thread-ghi:wave-3');
+  assert.equal('externalRef' in plainRow, false, 'rows without a recorded ref must not carry the key');
+  // progress surfaces it too (recorded?.externalRef)
+  const refProgress = await harness.ops.progress(withRef.sessionId, SUPERVISOR);
+  assert.equal(refProgress.externalRef, 'thread-ghi:wave-3');
+  const plainProgress = await harness.ops.progress(withoutRef.sessionId, SUPERVISOR);
+  assert.equal('externalRef' in plainProgress, false);
+});
+
+test('ops.spawnBatch: externalRef is NOT accepted in this version (0.25.0)', async () => {
+  // Scope note: the bridge MVP has no batch endpoint, so batch dispatch stays
+  // out of the externalRef contract for 0.25.0 — an item-level externalRef is
+  // ignored (never forwarded to spawnTask, never recorded, never echoed).
+  const registry = new SpawnRegistry(tempRegistryPath());
+  const harness = makeHarness({ registry });
+  const confirmed = await harness.ops.confirmPlan({ plan: '# 派发计划' }, SUPERVISOR);
+  const batch = await harness.ops.spawnBatch({
+    tasks: [{ prompt: 'batch ref probe', externalRef: 'thread-batch:should-ignore' }],
+    confirmationId: confirmed.confirmationId,
+  }, SUPERVISOR);
+  assert.equal(batch.ok, true);
+  assert.equal(batch.startedCount, 1);
+  const item = batch.results[0];
+  assert.equal(item.ok, true);
+  assert.equal('externalRef' in item, false, 'per-item receipts must not carry externalRef');
+  assert.equal('externalRef' in (registry.get(item.sessionId) ?? {}), false, 'batch spawns must not record externalRef');
+});
+
 test('ops.workspaceOp: list / attach / detach through the live entity (0.12.0)', async () => {
   const workspaces = [{ id: 'ws-proja', path: '/proj/a', title: 'ProjA', sessionIds: ['session-old'] }];
   const entityCalls = [];
@@ -2256,6 +2357,10 @@ test('registerTools: eleven tools with delegation', async () => {
   assert.deepEqual(byName.task_send.parameters.mode.enum, ['queue', 'steer']);
   assert.ok(byName.task_send.parameters.reference); // task_send correlation
   assert.ok(byName.task_spawn.parameters.team); // task_spawn workstream
+  assert.ok(byName.task_spawn.parameters.externalRef); // 0.25.0 external caller reference
+  assert.equal(byName.task_spawn.parameters.externalRef.type, 'string');
+  assert.notEqual(byName.task_spawn.parameters.externalRef.required, true); // optional by contract C1
+  assert.equal(byName.task_spawn_batch.parameters.tasks.items.properties.externalRef, undefined, 'batch items must NOT expose externalRef (out of scope, 0.25.0)');
   assert.ok(byName.task_spawn.parameters.reportBack); // result push-back convention
   assert.equal(byName.task_confirm.parameters.plan.required, true);
   assert.ok(byName.task_confirm.parameters.reusable); // 0.11.0 mission-scoped approval

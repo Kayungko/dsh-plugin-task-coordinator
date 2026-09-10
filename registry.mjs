@@ -31,7 +31,7 @@ export class SpawnRegistry {
       ? Math.floor(options.maxEntries)
       : 500;
     this.now = typeof options.now === 'function' ? options.now : () => Date.now();
-    /** @type {Map<string, { team?: string; createdAt: number; title?: string; promptExcerpt?: string; expectedWorkspace?: string }>} */
+    /** @type {Map<string, { team?: string; createdAt: number; title?: string; promptExcerpt?: string; expectedWorkspace?: string; externalRef?: string }>} */
     this.entries = new Map();
     this.loaded = false;
   }
@@ -55,6 +55,12 @@ export class SpawnRegistry {
               ...(typeof entry.depth === 'number' && Number.isFinite(entry.depth) && entry.depth >= 1 ? { depth: entry.depth } : {}),
               ...(typeof entry.parentSessionId === 'string' && entry.parentSessionId.length > 0 ? { parentSessionId: entry.parentSessionId } : {}),
               ...(typeof entry.expectedWorkspace === 'string' && entry.expectedWorkspace.length > 0 ? { expectedWorkspace: entry.expectedWorkspace } : {}),
+              // externalRef (0.25.0): free-form external caller reference for
+              // cross-agent correspondence (bridge dispatchers record which
+              // external conversation/wave spawned a session). Stored and echoed
+              // verbatim, never parsed. Same field-level whitelist discipline as
+              // expectedWorkspace (0.19.0 precedent): malformed values drop on load.
+              ...(typeof entry.externalRef === 'string' && entry.externalRef.length > 0 ? { externalRef: entry.externalRef } : {}),
             });
           }
         }
@@ -69,7 +75,7 @@ export class SpawnRegistry {
   /**
    * Record one spawned session. Existing entries are merged (never lost).
    * @param {string} sessionId
-   * @param {{ team?: string; title?: string; promptExcerpt?: string; createdAt?: number; depth?: number; parentSessionId?: string; expectedWorkspace?: string }} entry
+   * @param {{ team?: string; title?: string; promptExcerpt?: string; createdAt?: number; depth?: number; parentSessionId?: string; expectedWorkspace?: string; externalRef?: string }} entry
    */
   record(sessionId, entry = {}) {
     this.ensureLoaded();
@@ -94,6 +100,9 @@ export class SpawnRegistry {
       ...(entry.expectedWorkspace !== undefined || existing?.expectedWorkspace !== undefined
         ? { expectedWorkspace: typeof entry.expectedWorkspace === 'string' && entry.expectedWorkspace.length > 0 ? entry.expectedWorkspace : existing?.expectedWorkspace }
         : {}),
+      ...(entry.externalRef !== undefined || existing?.externalRef !== undefined
+        ? { externalRef: typeof entry.externalRef === 'string' && entry.externalRef.length > 0 ? entry.externalRef : existing?.externalRef }
+        : {}),
     };
     if (merged.team === undefined) delete merged.team;
     if (merged.title === undefined) delete merged.title;
@@ -101,12 +110,13 @@ export class SpawnRegistry {
     if (merged.depth === undefined) delete merged.depth;
     if (merged.parentSessionId === undefined) delete merged.parentSessionId;
     if (merged.expectedWorkspace === undefined) delete merged.expectedWorkspace;
+    if (merged.externalRef === undefined) delete merged.externalRef;
     this.entries.set(sessionId, merged);
     this.prune();
     this.save();
   }
 
-  /** @returns {{ team?: string; createdAt: number; title?: string; promptExcerpt?: string; expectedWorkspace?: string } | undefined} */
+  /** @returns {{ team?: string; createdAt: number; title?: string; promptExcerpt?: string; expectedWorkspace?: string; externalRef?: string } | undefined} */
   get(sessionId) {
     this.ensureLoaded();
     return this.entries.get(sessionId);

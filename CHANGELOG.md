@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-09-10
+
+### Added
+
+- **externalRef 端到端会话对应**（设计权威 `research/dshq-ledger-mailbox-spec.md` Part C，wire 契约 C1 两端锁死；与 `dsh-plugin-task-bridge` v0.2.0 同波施工）——派发方可随 spawn 携带自由文本外部标识（建议格式 `<thread短id>:<波次名>`），DSH 全链存储透出，解决「桥派发的会话无法反查是哪个外部对话/波次派的」（桥伪 caller 恒为 `task-bridge-external`）：
+  - **固定契约（C1，不得单方更改）**：`externalRef` string、可选、trim 后 ≤200 字符；空串/仅空白视为缺席；非字符串（null/undefined 与其他可选字段同规视为缺席）或超长 → `bad-request`；语义=自由文本，只存储回显**不解析**；
+  - **registry**：白名单增可选字段 `externalRef`（持久化 + 损坏值加载过滤，照 `expectedWorkspace` 0.19.0 先例——非法类型/空串加载时丢弃、不毒化条目）；
+  - **ops.spawnTask**：接受 `externalRef` 参数并按 C1 校验（校验在会话创建**之前**——违规零孤儿）；成功后 registry 记录 + 回执回显（trim 形态）；`task_list` 行与 `task_progress` 结果透出（照 `team` 字段的 registry 合并路径，未记录时不携带键）；
+  - **task_spawn 工具 schema**：增可选 `externalRef` 参数（英文 description，跨代理对应用途）；
+  - **范围注**：`task_spawn_batch` 本版**不接受** externalRef（桥 MVP 无 batch 端点）——条目上的该字段被忽略（不转发/不记录/不回显），工具 schema `additionalProperties:false` 在宿主层直接拒绝。
+
+### Tests
+
+- smoke 111→115（+4 块）：校验三态（接受并 trim/200 边界、缺席四形态 undefined/null/空串/仅空白、拒绝五形态含 201 超长且零孤儿）、registry 磁盘往返 + 加载白名单（42/空串丢弃、条目其余字段存活）、list+progress 透出（有 ref 行携带/无 ref 行不带键）、batch 不接受（回执与 registry 均无）；既有 registerTools 块补 schema 钉扎（task_spawn 有 externalRef/batch items 无）。verify-installed：spawn 带 ref → 回执 trim 回显 + registry 落盘 + list 行 + progress 透出 + 超长 bad-request 零孤儿。junction 仿真安装位 ALL PASSED；真实安装位复检与活体（经桥真机写端点）留总控（红线：本波次不部署）。
+
 ## [0.24.1] - 2026-09-10
 
 ### Fixed

@@ -645,6 +645,28 @@ assert.deepEqual(ungroupedList.tasks.map((task) => task.sessionId), [straySpawn.
 assert.match(ungroupedList.hint, /task_workspace/);
 console.log('workspace placement : OK -> ancestor-normalized (workspaceId + root cwd + i18n kickoff note + registry expectedWorkspace) | ungrouped receipt warning + task_list ungrouped filter');
 
+// 0.25.0 externalRef (wire contract C1): a spawn may carry a free-form external
+// caller reference — trimmed, echoed on the receipt, recorded durably in the
+// registry, and surfaced on task_list rows / task_progress. Synthetic value
+// only (脱敏红线). Over-length is rejected BEFORE creation (zero orphans).
+// NOTE: placed after the slash-command section on purpose (same reason as the
+// task_workspace / placement spawns above) — an extra spawn before the slash
+// section would push the mock id sequence to session-spawned-10 and make the
+// short-id prefix 'spawned-1' ambiguous.
+const refSpawn = await byName.task_spawn.execute({ prompt: 'externalRef 对应验证', externalRef: '  thread-synth:wave-verify  ' }, supervisorExec);
+assert.equal(refSpawn.ok, true);
+assert.equal(refSpawn.externalRef, 'thread-synth:wave-verify', 'receipt echoes the TRIMMED externalRef');
+assert.equal(JSON.parse(readFileSync(registryFile, 'utf8')).entries[refSpawn.sessionId].externalRef, 'thread-synth:wave-verify', 'registry records externalRef durably');
+const refList = await byName.task_list.execute({ filter: refSpawn.sessionId }, supervisorExec);
+const refRow = refList.tasks.find((task) => task.sessionId === refSpawn.sessionId);
+assert.equal(refRow.externalRef, 'thread-synth:wave-verify', 'list row surfaces externalRef from the registry');
+const refProgress = await byName.task_progress.execute({ sessionId: refSpawn.sessionId }, supervisorExec);
+assert.equal(refProgress.externalRef, 'thread-synth:wave-verify', 'progress surfaces externalRef');
+const refBad = await byName.task_spawn.execute({ prompt: '不应创建', externalRef: 'x'.repeat(201) }, supervisorExec);
+assert.equal(refBad.ok, false);
+assert.equal(refBad.code, 'bad-request', 'over-length externalRef must be rejected bad-request');
+console.log('externalRef        : OK -> trimmed receipt echo + durable registry record + list/progress surfacing + over-length rejected before creation');
+
 // 0.16.0 task_workspace migrate: true cross-workspace move — the clone +
 // attach + archive route over the five host primitives (readSession →
 // sessions.create+flush → target attachSession → archiveSession).
