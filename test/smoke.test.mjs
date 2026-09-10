@@ -452,7 +452,16 @@ function addLiveAgent(harness, sessionId, { status = 'running', events = [], nex
       return this.idlePromise ?? Promise.resolve();
     },
     inbox: { nextTurn, nextStep },
-    session: { id: sessionId, seq: events.length, events, header: { id: sessionId } },
+    // 0.24.1: the REAL host Session entity exposes seq + snapshotEvents(from, to)
+    // (dsh-session lib L1331/L1342) — the plain `.events` array below is the
+    // legacy test-host fallback only; ops.progress prefers snapshotEvents.
+    session: {
+      id: sessionId,
+      seq: events.length,
+      events,
+      header: { id: sessionId },
+      snapshotEvents: () => events,
+    },
   };
   harness.liveAgents.set(sessionId, agent);
   return agent;
@@ -510,6 +519,42 @@ test('ops.progress: cold session falls back to inspect', async () => {
   assert.equal(result.agentState, 'cold-idle');
   assert.deepEqual(result.recent.map((entry) => entry.text), ['cold question', 'cold answer']);
   assert.equal(harness.calls.inspect.length, 1);
+});
+
+test('ops.progress: recent reads the REAL session API (0.24.1 regression)', async () => {
+  // The production bug class: the live host Session entity exposes seq +
+  // ranged snapshotEvents() — NOT a plain .events array. Reading the imaginary
+  // .events made recent silently EMPTY in production since inception, and the
+  // mocks carried the same imaginary shape so nothing caught it (mock≠real,
+  // the 0.18.4 envelope class).
+  const harness = makeHarness();
+  addRow(harness, { sessionId: 'session-real', projections: { asOfSeq: 1, values: { title: 'R' } } });
+  const events = [
+    { type: 'user/message', seq: 0, time: 1, data: { content: [{ type: 'text', text: 'real kickoff' }], source: { kind: 'user' } } },
+    { type: 'assistant/message', seq: 1, time: 2, data: { message: { content: [{ type: 'text', text: 'real reply' }] } } },
+  ];
+  const agent = addLiveAgent(harness, 'session-real', { status: 'idle', events: [] });
+  // Real-entity shape: ranged snapshotEvents and NO .events property at all.
+  let snapshotCalls = 0;
+  agent.session = {
+    id: 'session-real',
+    seq: 2,
+    header: { id: 'session-real' },
+    snapshotEvents: (from = 0, to = 2) => { snapshotCalls += 1; return events.filter((event) => event.seq >= from && event.seq < to); },
+  };
+  const result = await harness.ops.progress('session-real', SUPERVISOR);
+  assert.equal(result.ok, true);
+  assert.equal(snapshotCalls, 1, 'the recent projection must go through snapshotEvents');
+  assert.deepEqual(result.recent.map((entry) => entry.text), ['real kickoff', 'real reply']);
+  // A hostile snapshotEvents degrades recent to empty — never breaks progress.
+  agent.session = { id: 'session-real', seq: 2, snapshotEvents: () => { throw new Error('snapshot boom'); } };
+  const hostile = await harness.ops.progress('session-real', SUPERVISOR);
+  assert.equal(hostile.ok, true);
+  assert.deepEqual(hostile.recent, []);
+  // The legacy/test-host fallback (plain .events) still projects.
+  agent.session = { id: 'session-real', seq: 2, events };
+  const legacy = await harness.ops.progress('session-real', SUPERVISOR);
+  assert.deepEqual(legacy.recent.map((entry) => entry.text), ['real kickoff', 'real reply']);
 });
 
 test('ops.sendMessage: self-address rejected', async () => {
@@ -2270,16 +2315,20 @@ test('service seam: apply() provides a two-shaped taskCoordinator payload (0.24.
   // here — pin the seam's source shape instead. verify-installed.mjs
   // re-verifies the RUNNING payload (enabled: ops present and callable;
   // disabled: ops absent) against the real installed copy.
+  // NOTE: version-agnostic patterns on purpose — the lockstep with
+  // package.json is asserted dynamically below (a hardcoded version pin
+  // would fail on every bump, as 0.24.1 demonstrated).
   const src = readFileSync(new URL('../index.mjs', import.meta.url), 'utf8');
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   // disabled branch: the service still exists, but ops is ABSENT — the
   // bridge consumer's 503 degrade signal, never a missing service
-  assert.match(src, /ctx\.provide\('taskCoordinator', \{ config, version: '0\.24\.0' \}\);/, 'disabled branch must provide { config, version } with ops absent');
+  assert.match(src, /ctx\.provide\('taskCoordinator', \{ config, version: '[^']+' \}\);/, 'disabled branch must provide { config, version } with ops absent');
   // enabled branch: the full payload — the field name is exactly `ops`
-  assert.match(src, /ctx\.provide\('taskCoordinator', \{ config, version: '0\.24\.0', ops \}\);/, 'enabled branch must provide { config, version, ops }');
+  assert.match(src, /ctx\.provide\('taskCoordinator', \{ config, version: '[^']+', ops \}\);/, 'enabled branch must provide { config, version, ops }');
   // the ops-bearing provide must come after createOps (the instance only
   // exists once the factory has run on the enabled path)
   const opsAt = src.indexOf('const ops = createOps(');
-  const fullProvideAt = src.indexOf("ctx.provide('taskCoordinator', { config, version: '0.24.0', ops })");
+  const fullProvideAt = src.indexOf(`ctx.provide('taskCoordinator', { config, version: '${pkg.version}', ops })`);
   assert.ok(opsAt >= 0 && fullProvideAt > opsAt, 'the ops-bearing provide must follow createOps');
   // exactly one provide per branch — cordis throws on a duplicate provide of
   // the same service, so there is no "provide early, provide again later"
@@ -2289,9 +2338,8 @@ test('service seam: apply() provides a two-shaped taskCoordinator payload (0.24.
   assert.equal((src.match(/createOps\(/g) ?? []).length, 1, 'apply() must build the ops exactly once');
   assert.match(src, /const dispose = registerTools\(ctx, ops, \{ defineTool \}, config\);/, 'registerTools must receive the same ops variable the provide carries');
   // the version string stays in lockstep with package.json
-  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  assert.equal(pkg.version, '0.24.0');
-  assert.match(src, new RegExp(`ctx\\.provide\\('taskCoordinator', \\{ config, version: '${pkg.version}', ops \\}\\);`), 'the enabled provide must carry the package version');
+  assert.match(src, new RegExp(`ctx\\.provide\\('taskCoordinator', \\{ config, version: '${pkg.version.replace(/\./g, '\\.')}', ops \\}\\);`), 'the enabled provide must carry the package version');
+  assert.match(src, new RegExp(`ctx\\.provide\\('taskCoordinator', \\{ config, version: '${pkg.version.replace(/\./g, '\\.')}' \\}\\);`), 'the disabled provide must carry the package version too');
 });
 
 test('service seam: the provided ops is the 13-member createOps surface (0.24.0)', () => {

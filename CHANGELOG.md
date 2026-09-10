@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-09-10
+
+### Fixed
+
+- **`task_progress.recent` 生产环境恒为空（自功能诞生起的潜伏缺陷，桥首航复盘抓出）**——live agent 路径读的是 `agent.session.events`，而真实宿主 Session 实体暴露的是 `seq + eventAt()/snapshotEvents(from, to)`（dsh-session lib L1331/L1342；宿主消费方 dsh-time-context L137-138 同款 seq 逆序+eventAt 走法实证），虚构属性 → `events ?? []` → recent 永远 []。verify/smoke 的 mock 携带同一虚构形状，缺陷从未被测试面暴露（**mock≠real，与 0.18.4 信封 bug 同类**）。修复：
+  - 新增 `tailFromSession(session, limit)`：优先走**带界** `snapshotEvents(max(0, seq-400), seq)`（RECENT_SCAN_WINDOW=400——17 万事件级大会话绝不整表复制）；敌意/异常 snapshotEvents 降级空 recent，绝不破坏 progress 本体；legacy `.events` 数组回退保留（测试宿主用）；
+  - cold 路径不变（`sessionController.inspect()` 确实返回 events 数组，宿主源码 L2680 实证）；
+  - **mock 全面换真形状**：verify 的 worker mock 故意去掉 `.events` 只留 ranged snapshotEvents（recent 非空即钉死生产 API 路径）；smoke harness 补 snapshotEvents + 新增 0.24.1 回归钉扎块（ranged 语义/敌意降级/legacy 回退三态）。
+- 影响面说明：该缺陷只影响 recent 展示字段；queue/todos/goal/agentState 等其余 progress 字段一直正确（不同数据源）。桥端 /v1/progress 透传同一 ops——修复后 Codex 拉模型的「读子任务反馈 / 拉总控回信」通道才真正可用（桥首航复盘的直接产出：探针会话与总控会话的 recent 实测均为空，双路径对照钉死根因在 ops 而非桥）。
+
+### Tests
+
+- smoke 110→111（新增 recent 真 API 回归块）；verify recent 断言改走真形状 mock（length=2 保持，但证明的是 snapshotEvents 路径）。仿真 + 真实安装位 ALL PASSED；活体探针（桥 /v1/progress 读到真实 recent 尾部）待重启后由总控执行。
+
 ## [0.24.0] - 2026-09-10
 
 ### Added

@@ -79,15 +79,24 @@ liveAgents.set('session-worker', {
   steer(message) { this.delivered.push({ via: 'steer', message }); },
   whenIdle() { return Promise.resolve(); },
   inbox: { nextTurn: [], nextStep: [] },
-  session: {
-    id: 'session-worker',
-    seq: 3,
-    header: { id: 'session-worker', cwd: '/proj' },
-    events: [
+  session: (() => {
+    // REAL Session-entity shape (0.24.1 regression pin): the live host session
+    // exposes seq + ranged snapshotEvents(from, to) — NOT a plain `.events`
+    // array (dsh-session lib L1331/L1342). The old mock carried the imaginary
+    // `.events` shape and masked the production bug (recent always []). This
+    // mock deliberately OMITS `.events` so a non-empty recent proves the
+    // snapshotEvents path is the one running.
+    const events = [
       { type: 'user/message', seq: 1, time: 1, data: { content: [{ type: 'text', text: 'kickoff' }], source: { kind: 'user' } } },
       { type: 'assistant/message', seq: 2, time: 2, data: { message: { content: [{ type: 'text', text: 'working on it' }] } } },
-    ],
-  },
+    ];
+    return {
+      id: 'session-worker',
+      seq: 3,
+      header: { id: 'session-worker', cwd: '/proj' },
+      snapshotEvents: (from = 0, to = 3) => events.filter((event) => event.seq >= from && event.seq < to),
+    };
+  })(),
 });
 
 const ctx = {

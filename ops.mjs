@@ -354,6 +354,38 @@ export function createOps(deps) {
     };
   }
 
+  /**
+   * Bounded scan window (events) for the live-session recent projection:
+   * snapshotEvents() copies a range, so a huge session (100k+ events) must
+   * never be copied whole just to read the tail. 400 events comfortably
+   * contain progressTailMessages user/assistant messages amid tool noise.
+   */
+  const RECENT_SCAN_WINDOW = 400;
+
+  /**
+   * Recent-tail projection from a LIVE agent session (0.24.1 fix): the real
+   * host Session entity exposes seq + eventAt()/snapshotEvents(from, to) —
+   * NOT a plain `.events` array (dsh-session lib/index.js L1331/L1342;
+   * host consumers like dsh-time-context walk seq backwards the same way).
+   * Reading the imaginary `.events` made task_progress's recent silently
+   * EMPTY in production since inception — the verify mock carried the same
+   * imaginary shape, so the gap never surfaced (same mock≠real class as the
+   * 0.18.4 envelope bug). The legacy `.events` fallback stays for test hosts
+   * only; verify/smoke mocks now model the REAL snapshotEvents shape.
+   */
+  function tailFromSession(session, limit) {
+    if (!session || typeof session !== 'object') return [];
+    try {
+      if (typeof session.snapshotEvents === 'function' && Number.isFinite(session.seq)) {
+        const from = Math.max(0, session.seq - RECENT_SCAN_WINDOW);
+        return tailFromEvents(session.snapshotEvents(from, session.seq), limit);
+      }
+      return tailFromEvents(session.events, limit); // legacy/test-host shape
+    } catch {
+      return []; // a hostile snapshotEvents must never break progress itself
+    }
+  }
+
   /** Extract the last surface-visible messages from a session event array. */
   function tailFromEvents(events, limit) {
     const picked = [];
@@ -490,7 +522,7 @@ export function createOps(deps) {
             text: excerpt(blocksToText(message.content), config.excerptChars),
           })),
         ];
-        result.recent = tailFromEvents(agent.session?.events, config.progressTailMessages);
+        result.recent = tailFromSession(agent.session, config.progressTailMessages);
         result.seq = agent.session?.seq ?? null;
       } else {
         result.agentState = 'cold-idle';

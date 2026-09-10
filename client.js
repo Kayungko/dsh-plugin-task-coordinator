@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.24.0)
+ * dsh-plugin-task-coordinator — client module (0.24.1)
  *
  * 0.22.0: the card topology is BACK as the orchestration view's form (user
  * verdict after living with the 0.21.x lane timeline: cards + directional
