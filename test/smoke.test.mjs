@@ -2101,6 +2101,29 @@ test('ops.waitFor: multi-target timeout lists the still-running targets', async 
   assert.match(result.hint, /consider ending your turn/);
 });
 
+test('ops.cancelTask: target guards run before requesting cancellation', async () => {
+  const harness = makeHarness({ config: { allowSubagentUse: true } });
+  addLiveAgent(harness, SUPERVISOR.sessionId);
+  const child = addLiveAgent(harness, 'session-child');
+  child.session.header.origin = 'subagent';
+
+  const self = await harness.ops.cancelTask(SUPERVISOR.sessionId, SUPERVISOR);
+  assert.equal(self.ok, false);
+  assert.equal(self.code, 'self-send-denied');
+  const subagent = await harness.ops.cancelTask('session-child', SUPERVISOR);
+  assert.equal(subagent.ok, false);
+  assert.equal(subagent.code, 'subagent-target-denied');
+  assert.deepEqual(harness.calls.cancel, []);
+});
+
+test('ops.cancelTask: unknown and disallowed callers cannot cancel another task', async () => {
+  const harness = makeHarness();
+  addLiveAgent(harness, 'session-a');
+  assert.equal((await harness.ops.cancelTask('session-a', {})).code, 'caller-unknown');
+  assert.equal((await harness.ops.cancelTask('session-a', { ...SUPERVISOR, origin: 'subagent' })).code, 'subagent-caller-denied');
+  assert.deepEqual(harness.calls.cancel, []);
+});
+
 test('ops.cancelTask: live cancel and cold refusal', async () => {
   const harness = makeHarness();
   addLiveAgent(harness, 'session-a');
@@ -2431,6 +2454,11 @@ test('registerTools: eleven tools with delegation', async () => {
   const denyResult = await byName.task_send.execute({ sessionId: 'session-super', message: 'hi' }, exec);
   assert.equal(denyResult.ok, false);
   assert.equal(denyResult.code, 'self-send-denied');
+  addLiveAgent(harness, exec.agent.id);
+  const cancelSelf = await byName.task_cancel.execute({ sessionId: exec.agent.id }, exec);
+  assert.equal(cancelSelf.ok, false);
+  assert.equal(cancelSelf.code, 'self-send-denied');
+  assert.deepEqual(harness.calls.cancel, []);
   const waitBad = await byName.task_wait.execute({}, exec);
   assert.equal(waitBad.ok, false);
   assert.equal(waitBad.code, 'bad-request');
