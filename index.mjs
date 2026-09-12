@@ -33,6 +33,7 @@ import { registerTools } from './tools.mjs';
 import { registerCommands } from './commands.mjs';
 import { mountCoordinatorSkills } from './skills.mjs';
 import { SpawnRegistry } from './registry.mjs';
+import { installFamilyRoutes } from './family.mjs';
 import { resolveUiLocale, uiStrings } from './i18n.mjs';
 import { SPAWN_MODELS_NS, SPAWN_MODELS_BASE, buildSpawnModelsSchema, normalizeSpawnRoute, normalizeQueueCap, validateSpawnModelsSection } from './settings.mjs';
 
@@ -300,6 +301,7 @@ export function apply(ctx, input = {}) {
   // or wrap them. This is the enabled-branch provide; the disabled early
   // return above provided the reduced payload.
   ctx.provide('taskCoordinator', { config, version: '0.25.2', ops });
+  installFamilyRoutes(ctx, { registry, sessionController });
   const dispose = registerTools(ctx, ops, { defineTool }, config);
   const disposeCommands = registerCommands(ctx, ops, uiStrings(readUiLocale()));
   ctx.effect(() => () => {

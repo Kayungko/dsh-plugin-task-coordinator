@@ -315,3 +315,14 @@ cordis 加载器的 isolate 机制（`@deepseek-ai/cordis-plugin-loader/src/conf
 **热切换说明**（升级场景）：已装环境从 `true` 升级到共享 label 时，loader 的 `loader/patch-context` 钩子会走一次实现迁移（isolate.ts:96-153：新 isolate map → 服务 diff → fiber reload → 实现从旧 Symbol 迁到新 Symbol → notify 依赖方）。机制源码已验证（isolate.ts step 5, L132-136）；**热切换实测未做**（调研 §6 未验证项 2——需在测试宿主上验证「旧 label 运行中 → 热更 patch → 服务连续性」，总控部署后补跑）。首次部署是冷加载，不涉及迁移。
 
 **Realm GC**：entry dispose 时若无其他 entry 引用同 label 则回收（isolate.ts:155-172）。桥卸载不影响 coordinator；coordinator 卸载则桥的惰性 `ctx.get('taskCoordinator')` 返回 undefined → 桥降级 503。
+
+## 所属编排只读查询
+
+宿主通过 `ctx.connection.fetch.register` 注册以下 GET 路由，复用 Connection 的 Host/Origin 校验与浏览器鉴权；不另开端口、不使用 task-bridge 凭据，不改变 11 个模型工具或 `taskCoordinator.ops` 服务契约。
+
+- `/api/task-coordinator/family?sessionId=…`：读取当前用户可见会话对应的注册表父链与后代；返回 `rootSessionId`、`currentPath`、`nodes`、`associated` 和 `ancestryComplete`。节点只包含身份、父级、层级、分组、标题、时间和可见性，不返回提示词、工作区路径或 externalRef。同名 team 不会把不同根编排或不同父节点的任务合并。
+- `/api/task-coordinator/history?sessionId=…&targetId=…`：target 必须属于 sessionId 的同一编排，且它与其父会话都在可见列表内。仅对该父会话调用原生 `sessionController.page`，每次 30 条消息，插件最多扫描 2000 条事件，返回派发/指令/汇报的结构化事实和 `nextCursor`（`throughSeq`、`beforeSeq`）。不调用 `resolveAgent`、`inspect` 或发送工具，不为浏览恢复 Agent。
+
+首次请求以父会话投影的 `asOfSeq` 固定历史上界，后续请求使用返回游标；不会在前端自动拉取全部历史。分页边界缺少调用头时标记部分覆盖，不臆造往来。注册表保留上限导致祖先缺失时 `ancestryComplete=false`；损坏或循环父链返回错误，不能解释为“未关联”。注册表未覆盖的旧任务仍可回退展示当前已加载的转录，并标明数据范围。
+
+客户端切换会话或选中任务时取消旧请求，旧响应不能覆盖新焦点；只读关系定时刷新，实时运行状态继续来自宿主会话列表。首次安装含这些路由的版本须重新加载宿主插件，单独刷新页面无法创建宿主路由。

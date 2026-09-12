@@ -86,6 +86,24 @@ test('many tasks wrap inside measured bounds, with no overlaps; ordering and lay
     }
   }
 });
+test('family projection expands the current lineage and keeps nested parent links separate from sibling teams',()=>{
+  const {api}=harness();
+  const family={rootSessionId:'root',nodes:[
+    {sessionId:'root',parentSessionId:null,familyDepth:0},
+    {sessionId:'a',parentSessionId:'root',familyDepth:1,team:'same',time:1},
+    {sessionId:'b',parentSessionId:'root',familyDepth:1,team:'same',time:2},
+    {sessionId:'c',parentSessionId:'a',familyDepth:2,team:'same',time:3},
+    {sessionId:'d',parentSessionId:'b',familyDepth:2,team:'same',time:4},
+  ]};
+  const projected=api.orchFamilyProjection(family,new Set(['root','a','c']));
+  assert.deepEqual(projected.children.map(c=>c.sessionId),['a','b','c']);
+  assert.equal(projected.edges.find(e=>e.to==='c').from,'a');
+  const layout=api.layoutTopology(projected,1000);
+  assert.ok(layout.nodes.c.y>layout.nodes.a.y+layout.nodes.a.height);
+  assert.equal(layout.rows.find(r=>r.ids.includes('c')).parentId,'a');
+  const collapsed=api.orchFamilyProjection(family,new Set(['root']));
+  assert.deepEqual(collapsed.children.map(c=>c.sessionId),['a','b']);
+});
 test('repeated relations aggregate while failed delivery stays inspectable without a success edge', () => {
   const h = harness(), props = fixture();
   const extraction = h.api.extractOrchestration(props.useChat(x => x));

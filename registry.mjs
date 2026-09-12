@@ -34,16 +34,19 @@ export class SpawnRegistry {
     /** @type {Map<string, { team?: string; createdAt: number; title?: string; promptExcerpt?: string; expectedWorkspace?: string; externalRef?: string }>} */
     this.entries = new Map();
     this.loaded = false;
+    this.loadState = 'unloaded';
   }
 
   /** Load lazily and tolerantly; safe to call repeatedly. */
   ensureLoaded() {
     if (this.loaded) return;
     this.loaded = true;
-    if (!existsSync(this.filePath)) return;
+    if (!existsSync(this.filePath)) { this.loadState = 'missing'; return; }
     try {
       const parsed = JSON.parse(readFileSync(this.filePath, 'utf8'));
       const raw = parsed && typeof parsed === 'object' ? parsed.entries : null;
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { this.loadState = 'invalid'; return; }
+      let malformed = parsed.version !== undefined && parsed.version !== REGISTRY_FORMAT_VERSION;
       if (raw && typeof raw === 'object') {
         for (const [sessionId, entry] of Object.entries(raw)) {
           if (typeof sessionId === 'string' && entry && typeof entry === 'object' && Number.isFinite(entry.createdAt)) {
@@ -62,13 +65,15 @@ export class SpawnRegistry {
               // expectedWorkspace (0.19.0 precedent): malformed values drop on load.
               ...(typeof entry.externalRef === 'string' && entry.externalRef.length > 0 ? { externalRef: entry.externalRef } : {}),
             });
-          }
+          } else malformed = true;
         }
       }
+      this.loadState = malformed ? 'invalid' : 'ready';
     } catch {
       // Preserve the broken file for inspection, start clean.
       try { renameSync(this.filePath, `${this.filePath}.corrupt-${this.now()}`); } catch { /* best effort */ }
       this.entries.clear();
+      this.loadState = 'invalid';
     }
   }
 
@@ -112,6 +117,7 @@ export class SpawnRegistry {
     if (merged.expectedWorkspace === undefined) delete merged.expectedWorkspace;
     if (merged.externalRef === undefined) delete merged.externalRef;
     this.entries.set(sessionId, merged);
+    this.loadState = 'ready';
     this.prune();
     this.save();
   }
@@ -120,6 +126,14 @@ export class SpawnRegistry {
   get(sessionId) {
     this.ensureLoaded();
     return this.entries.get(sessionId);
+  }
+
+  /** Minimal, detached topology projection; never expose prompts or local paths. */
+  snapshot() {
+    this.ensureLoaded();
+    return { state: this.loadState, maxEntries: this.maxEntries, entries: [...this.entries].map(([sessionId, row]) => ({
+      sessionId, createdAt: row.createdAt, parentSessionId: row.parentSessionId, depth: row.depth, title: row.title, team: row.team,
+    })) };
   }
 
   /** @returns {string[]} session ids recorded under one team, oldest first */

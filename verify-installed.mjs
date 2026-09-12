@@ -100,6 +100,7 @@ liveAgents.set('session-worker', {
   })(),
 });
 
+const familyRoutes = new Map();
 const ctx = {
   logger: { info: (message) => console.log('[plugin]', message), warn: (message) => console.log('[plugin][warn]', message) },
   provides: {},
@@ -107,7 +108,7 @@ const ctx = {
   mountedPlugins: [],
   commandRegistrations: [],
   provide(key, value) { this.provides[key] = value; },
-  effect(factory) { this.effects.push(factory); },
+  effect(factory) { const dispose = factory(); this.effects.push(() => dispose); },
   plugin(pluginModule, config) {
     this.mountedPlugins.push([pluginModule, config]);
     return () => {};
@@ -116,6 +117,10 @@ const ctx = {
   // immediately, so the plugin's section installs during apply().
   inject(deps, callback) {
     if (deps.includes('settings')) callback({ settings: ctx.get('settings') });
+    if (deps.includes('connection')) callback({ connection: { fetch: { register(route) {
+      familyRoutes.set(route.path, route);
+      return () => familyRoutes.delete(route.path);
+    } } } });
   },
   commands: {
     register(definition) {
@@ -788,7 +793,18 @@ assert.equal(cancelResult.ok, true);
 console.log('task_cancel        : OK');
 
 // 6. dispose path
+assert.equal(familyRoutes.size, 2, 'family and history routes mount through Connection');
+const familyChildId = Object.keys(registryPayload.entries).find(id => registryPayload.entries[id].parentSessionId === 'session-super');
+assert.ok(familyChildId, 'spawned child fixture exists');
+const familyResponse = await familyRoutes.get('/api/task-coordinator/family').fetch(new Request(`http://dsh.internal/api/task-coordinator/family?sessionId=${encodeURIComponent(familyChildId)}`));
+assert.equal(familyResponse.status, 200);
+const familyResult = await familyResponse.json();
+assert.equal(familyResult.rootSessionId, 'session-super');
+assert.ok(familyResult.nodes.some(node => node.sessionId === familyChildId));
+assert.ok(familyResult.nodes.every(node => !['promptExcerpt', 'expectedWorkspace', 'externalRef'].some(key => Object.hasOwn(node, key))));
+console.log('family routes      : OK -> child resolves its supervisor via the same spawn registry, minimal read-only payload');
 for (const factory of ctx.effects) factory()();
+assert.equal(familyRoutes.size, 0, 'dispose removes both Connection routes');
 assert.equal(registrations.length, 0, 'dispose must unregister all tools');
 console.log('dispose            : OK -> all tools unregistered');
 

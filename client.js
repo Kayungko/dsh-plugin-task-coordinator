@@ -2,7 +2,7 @@
  * dsh-plugin-task-coordinator — client module (0.25.2)
  *
  * Current UI: responsive grouped topology with selection, a read-only inspector,
- * aggregated relations, and explicit navigation. No host writes or new services.
+ * aggregated relations, explicit navigation, and authenticated read-only family queries.
  *
  * 0.22.0: the card topology is BACK as the orchestration view's form (user
  * verdict after living with the 0.21.x lane timeline: cards + directional
@@ -226,6 +226,27 @@ window.__ModuleLoader__.load({
 				"orch.event.steerHint": "总控发送了插入执行指令（steer）。",
 				"orch.event.queueHint": "总控发送了后续执行指令（queue）。",
 				"orch.event.failedHint": "此次指令投递失败，未计入成功连线。",
+				"orch.family.localOnly": "注册表未保留这些历史任务的关联，当前显示本会话已加载的关系。",
+				"orch.family.context": "当前任务：{title} · 正在查看所属编排",
+				"orch.family.current": "当前",
+				"orch.family.expand": "展开 {n} 个子任务",
+				"orch.family.collapse": "收起 {n} 个子任务",
+				"orch.family.unavailable": "所属编排查询暂不可用，当前仅显示本会话已加载的记录。可刷新重试；首次启用此功能需重新加载宿主插件。",
+				"orch.family.partial": "部分上级记录已缺失，当前展示可恢复的任务关系。",
+				"orch.family.historyScope": "往来来源：{title}",
+				"orch.family.historyError": "往来记录读取失败，可重试；任务关系仍然保留。",
+				"orch.family.noEvents": "本页未找到往来记录，可能需要载入更早记录。",
+				"orch.family.unassociated": "当前会话未关联编排",
+				"orch.family.unassociatedHint": "注册表中没有此会话的派发关系。历史任务也可能已超出注册表保留范围。",
+				"orch.family.registry": "所属编排 · 注册表关系",
+				"orch.family.openRoot": "打开总控",
+				"orch.family.locate": "定位当前任务",
+				"orch.family.loading": "正在查找所属编排",
+				"orch.family.loadingHint": "正在读取父级与同组任务，请稍候。",
+				"orch.family.reportHint": "此任务向上级任务发送了汇报。",
+				"orch.family.spawnHint": "上级任务派发了此任务。",
+				"orch.family.steerHint": "上级任务发送了插入执行指令。",
+				"orch.family.queueHint": "上级任务发送了后续执行指令。",
 				"view.tab": "编排",
 				"orch.empty.title": "本会话尚未派发子任务",
 				"orch.empty.hint": "在对话中让总控拆分并派发任务后，即可在这里查看任务关系与进展。",
@@ -331,6 +352,27 @@ window.__ModuleLoader__.load({
 				"orch.event.steerHint": "The supervisor sent a mid-run instruction (steer).",
 				"orch.event.queueHint": "The supervisor sent a follow-up instruction (queue).",
 				"orch.event.failedHint": "Delivery failed and is excluded from successful links.",
+				"orch.family.localOnly": "These historical relationships are no longer in the registry. Showing records loaded in this session.",
+				"orch.family.context": "Current task: {title} · Viewing its orchestration",
+				"orch.family.current": "Current",
+				"orch.family.expand": "Expand {n} child tasks",
+				"orch.family.collapse": "Collapse {n} child tasks",
+				"orch.family.unavailable": "Orchestration lookup is unavailable. Only records loaded in this session are shown. Refresh to retry; newly installed host routes require a plugin reload.",
+				"orch.family.partial": "Some ancestors are no longer recorded. Showing the relationships that can be recovered.",
+				"orch.family.historyScope": "Exchanges from: {title}",
+				"orch.family.historyError": "Could not load exchanges. Retry; the task relationships are retained.",
+				"orch.family.noEvents": "No exchanges found on this page. Older records may be available.",
+				"orch.family.unassociated": "This session has no recorded orchestration",
+				"orch.family.unassociatedHint": "No dispatch relationship was found in the registry. Older tasks may be outside its retention window.",
+				"orch.family.registry": "Orchestration · Registry relationships",
+				"orch.family.openRoot": "Open supervisor",
+				"orch.family.locate": "Locate current task",
+				"orch.family.loading": "Finding this orchestration",
+				"orch.family.loadingHint": "Loading parent and sibling tasks.",
+				"orch.family.reportHint": "This task reported to its parent task.",
+				"orch.family.spawnHint": "The parent task dispatched this task.",
+				"orch.family.steerHint": "The parent sent a mid-run instruction.",
+				"orch.family.queueHint": "The parent sent a follow-up instruction.",
 				"view.tab": "Orchestration",
 				"orch.empty.title": "No tasks dispatched in this session",
 				"orch.empty.hint": "Ask the supervisor to split and dispatch tasks in the conversation. Their relationships and progress will appear here.",
@@ -918,6 +960,13 @@ window.__ModuleLoader__.load({
 		const STYLE_ID_ORCH = "dsh-plugin-task-coordinator/orchestration-view";
 		const ORCH_CSS = `
 .orchViewRoot{--orch-ink:var(--dsw-alias-label-primary,#161b26);--orch-muted:var(--dsw-alias-label-secondary,#687284);--orch-line:var(--dsw-alias-border-l2,#e3e7ee);--orch-surface:var(--dsw-alias-bg-base,#fff);--orch-soft:var(--dsw-alias-bg-module-platform,#f5f6f9);--orch-accent:var(--dsw-alias-state-business-primary,#4176e6);--orch-green:color-mix(in srgb,var(--dsw-alias-state-success-primary,#22c55e) 65%,var(--orch-ink));max-width:1440px;width:100%;min-width:0;align-self:center;margin:0 auto;min-height:100%;box-sizing:border-box;color:var(--orch-ink);font-family:var(--dsw-font-family,inherit);container:orch / inline-size;font-size:14px;line-height:1.5}
+
+.orchViewFamilyContext{font-size:13px;color:var(--orch-muted);margin:0 0 16px}
+.orchViewCurrent{position:absolute;right:8px;top:10px;font-size:10px;background:var(--orch-soft);color:var(--orch-accent);padding:1px 5px;border-radius:4px}
+.orchViewBranch{position:absolute;display:flex;align-items:center;justify-content:center;gap:3px;width:42px;height:22px;border:1px solid var(--orch-line);border-radius:5px;background:var(--orch-surface);color:var(--orch-accent);font-size:11px!important}
+.orchViewBranch .orchViewIcon{width:13px;height:13px}
+.orchViewHistoryControls{margin-bottom:16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.orchViewHistoryControls .orchViewRelationHint{width:100%;margin:0}
 .orchViewRoot *{box-sizing:border-box}
 .orchViewRoot{padding-bottom:calc(var(--dsh-composer-height,0px) + 24px)}
 .orchViewRoot ::selection{background:color-mix(in srgb,var(--orch-accent) 20%,transparent)}
@@ -977,6 +1026,7 @@ window.__ModuleLoader__.load({
 .orchViewLegendKey[data-kind='send']{border-color:var(--orch-accent)}
 .orchViewLegendKey[data-kind='report']{border-color:var(--orch-muted);border-top-style:dashed}
 .orchViewInspector{border-left:1px solid var(--orch-line);padding:30px 24px;min-width:0;align-self:stretch;overflow-wrap:anywhere}
+.orchViewInspector{position:sticky;top:0;align-self:start;max-height:calc(var(--dsh-conversation-viewport-height,100vh) - var(--dsh-composer-height,0px) - 24px);overflow-y:auto;scrollbar-width:thin}
 .orchViewInspectorTop{display:flex;gap:10px;align-items:start;justify-content:space-between}
 .orchViewInspector h2{font-size:21px;line-height:1.4;margin:0;font-weight:650}
 .orchViewInspectorStatus{display:flex;gap:12px;align-items:center;margin:16px 0 12px}
@@ -1008,6 +1058,7 @@ window.__ModuleLoader__.load({
 .orchViewEmpty .orchViewIconTile{width:48px;height:48px;margin:0 auto}
 @container orch (max-width:900px){.orchViewWorkspace{grid-template-columns:minmax(0,1fr);min-height:0}.orchViewMain{min-height:0}.orchViewInspector{border-left:0;border-top:1px solid var(--orch-line)}.orchViewFacts{grid-template-columns:1fr 1fr 2fr}.orchViewFactModel{grid-column:auto}.orchViewInspector .orchViewPrimary{max-width:300px}.orchViewLegend{margin-top:0}.orchViewToolbar{margin-bottom:20px}}
 @container orch (max-width:460px){.orchViewMain,.orchViewInspector{padding:20px 12px}.orchViewTitle{font-size:20px}.orchViewFacts{grid-template-columns:1fr 1fr}.orchViewFactModel{grid-column:auto}.orchViewHistory{padding:0}.orchViewNode{padding:12px 8px}.orchViewNodeTitle{font-size:13px}.orchViewLegend{gap:12px}}
+@container orch (max-width:900px){.orchViewInspector{position:static;max-height:none;overflow:visible}}
 @media(prefers-reduced-motion:reduce){.orchViewFlow{animation:none}.orchViewNode{transition:none}}
 `;
 
@@ -1244,12 +1295,12 @@ window.__ModuleLoader__.load({
 			const groups = new Map();
 			for (const child of extraction?.children || []) {
 				if (!child || typeof child.sessionId !== "string") continue;
-				const team = typeof child.team === "string" ? child.team : "";
+				const team = child.parentSessionId ? JSON.stringify([child.parentSessionId,child.team || ""]) : typeof child.team === "string" ? child.team : "";
 				if (!groups.has(team)) groups.set(team, []);
 				groups.get(team).push(child);
 			}
 			const firstDispatch = team => groups.get(team).reduce((first, child) => Math.min(first, child.time || 0), Infinity);
-			const teams = [...groups.keys()].filter(Boolean).sort((a,b) => firstDispatch(a) - firstDispatch(b) || (a < b ? -1 : 1));
+			const teams = [...groups.keys()].filter(Boolean).sort((a,b) => (groups.get(a)[0].familyDepth || 1) - (groups.get(b)[0].familyDepth || 1) || firstDispatch(a) - firstDispatch(b) || (a < b ? -1 : 1));
 			if (groups.has("")) teams.push("");
 			const innerWidth = width - 24;
 			const maxColumns = Math.max(1, Math.min(3, Math.floor((innerWidth - 12) / 122)));
@@ -1257,13 +1308,13 @@ window.__ModuleLoader__.load({
 			const specifications = teams.map(team => {
 				const bucket = groups.get(team).slice().sort((a,b) => ((a.time ?? 0) - (b.time ?? 0)) || (a.sessionId < b.sessionId ? -1 : 1));
 				const columns = Math.min(maxColumns, bucket.length);
-				return { team, bucket, columns, minWidth: 24 + columns * minCardWidth + (columns - 1) * 12 };
+				return { key: team, team: bucket[0].team || "", parentId: bucket[0].parentSessionId || ORCH_COORD, depth: bucket[0].familyDepth || 1, bucket, columns, minWidth: 24 + columns * minCardWidth + (columns - 1) * 12 };
 			});
 			const bands = [];
 			let band = [], usedWidth = 0;
 			for (const spec of specifications) {
 				const nextWidth = usedWidth + (band.length ? L.gapX : 0) + spec.minWidth;
-				if (band.length && (band.length === 3 || nextWidth > innerWidth)) {
+				if (band.length && (band.length === 3 || band[0].depth !== spec.depth || nextWidth > innerWidth)) {
 					bands.push(band); band = []; usedWidth = 0;
 				}
 				usedWidth += (band.length ? L.gapX : 0) + spec.minWidth;
@@ -1282,10 +1333,10 @@ window.__ModuleLoader__.load({
 				const bandWidth = fixedWidth + cardColumns * nodeWidth;
 				let x = (width - bandWidth) / 2;
 				let bandHeight = 0;
-				for (const {team, bucket, columns} of members) {
+				for (const {key, team, parentId, bucket, columns} of members) {
 					const groupWidth = 24 + columns * nodeWidth + (columns - 1) * 12;
 					const height = 64 + Math.ceil(bucket.length / columns) * (L.nodeH + 12);
-					const row = { team, x, y, width: groupWidth, height, band: bandIndex, ids: bucket.map(c => c.sessionId) };
+					const row = { groupKey: key, team, parentId, x, y, width: groupWidth, height, band: bandIndex, ids: bucket.map(c => c.sessionId) };
 					rows.push(row);
 					bucket.forEach((child, i) => {
 						nodes[child.sessionId] = { x: x + 12 + (i % columns) * (nodeWidth + 12), y: y + 64 + Math.floor(i / columns) * (L.nodeH + 12), width: nodeWidth, height: L.nodeH };
@@ -1300,14 +1351,14 @@ window.__ModuleLoader__.load({
 		/** One visual edge per relation and team, while the inspector retains
 		 * individual events. Rejected sends never become successful graph edges. */
 		function orchGroupRelations(extraction) {
-			const teams = new Map(extraction.children.map(child => [child.sessionId, child.team || ""]));
+			const teams = new Map(extraction.children.map(child => [child.sessionId, { team: child.team || "", parentId: child.parentSessionId || ORCH_COORD }]));
 			const grouped = new Map();
 			for (const edge of extraction.edges) {
 				const id = edge.kind === "report" ? edge.from : edge.to;
 				if (!teams.has(id) || edge.delivered === false) continue;
-				const team = teams.get(id);
-				const key = JSON.stringify([team, edge.kind]);
-				if (!grouped.has(key)) grouped.set(key, { team, kind: edge.kind, count: 0, time: 0, ids: new Set() });
+				const {team,parentId} = teams.get(id);
+				const key = JSON.stringify([parentId, team, edge.kind]);
+				if (!grouped.has(key)) grouped.set(key, { team, parentId, kind: edge.kind, count: 0, time: 0, ids: new Set() });
 				const row = grouped.get(key);
 				row.count++;
 				row.time = Math.max(row.time, edge.time || 0);
@@ -1373,8 +1424,8 @@ window.__ModuleLoader__.load({
 		}
 		/**
 		 * The "编排" conversation view: live orchestration topology with the
-		 * CURRENT session as the supervisor. Pure client-side READ-ONLY view
-		 * (zero host changes, zero writes). Seats come from the standard
+		 * current session's recorded family, with a current-transcript fallback.
+		 * READ-ONLY host queries provide lineage and paged parent exchanges. Seats use the standard
 		 * session-scoped set: useChat (transcript), useSessions (live rows),
 		 * sessionId; `t` arrives through the registration's locale namespace.
 		 * Crash discipline: every optional seat read and effect body is
@@ -1382,6 +1433,86 @@ window.__ModuleLoader__.load({
 		 * the failure itself — the host's SlotErrorBoundary must never
 		 * abdicate this entry.
 		 */
+		async function orchReadFamily(path, params, signal) {
+			const origin = globalThis.location?.origin;
+			const url = new URL(path, origin && origin !== "null" ? origin : "http://dsh.internal");
+			for (const [key,value] of Object.entries(params)) if (value !== undefined) url.searchParams.set(key,String(value));
+			const response = await globalThis.fetch(url, { signal, credentials: "same-origin" });
+			let value;
+			try { value = await response.json(); } catch { throw new Error("family-service-unavailable"); }
+			if (!response.ok || value?.ok !== true) throw new Error(typeof value?.code === "string" ? value.code : "family-service-unavailable");
+			return value;
+		}
+		function orchFamilyProjection(family, expanded) {
+			const members = family.nodes.filter(node => node.sessionId !== family.rootSessionId);
+			const byId = new Map(family.nodes.map(node => [node.sessionId,node]));
+			const visible = members.filter(node => {
+				let id = node.parentSessionId, hops = 0;
+				while (id && id !== family.rootSessionId) {
+					if (++hops > 64 || !expanded.has(id)) return false;
+					id = byId.get(id)?.parentSessionId;
+				}
+				return id === family.rootSessionId;
+			});
+			const parentOf = node => node.parentSessionId === family.rootSessionId ? ORCH_COORD : node.parentSessionId;
+			const children = visible.map(node => ({ ...node, parentSessionId: parentOf(node), team: node.team || "" }));
+			return { ok: true, children, allChildren: members, notes: [], scanned: 0,
+				edges: children.map(node => ({ kind: "spawn", from: node.parentSessionId, to: node.sessionId, time: node.time, source: "registry" })) };
+		}
+		function useOrchestrationFamily(sessionId, refresh, tick, listSize, selection) {
+			const [remote, setRemote] = react.useState({ owner: "", status: "loading", value: null });
+			const [branches, setBranches] = react.useState({ owner: "", value: [] });
+			const [history, setHistory] = react.useState({ key: "", status: "loading", events: [], nextCursor: null });
+			const historyAbort = react.useRef(null);
+			const historyRequest = react.useRef(0);
+			react.useEffect(() => {
+				if (!sessionId) return;
+				const controller = new AbortController();
+				let alive = true;
+				setRemote(old => old.owner === sessionId ? { ...old, status: old.value ? "ready" : "loading", error: null } : { owner: sessionId, status: "loading", value: null });
+				void orchReadFamily("/api/task-coordinator/family", { sessionId }, controller.signal).then(value => {
+					if (!alive) return;
+					if (!Array.isArray(value.nodes) || !Array.isArray(value.currentPath) || typeof value.rootSessionId !== "string" || value.currentSessionId !== sessionId) throw new Error("family-shape-invalid");
+					setRemote({ owner: sessionId, status: "ready", value });
+					setBranches(old => old.owner === sessionId ? old : { owner: sessionId, value: [...value.currentPath, sessionId] });
+				}).catch(() => { if (alive) setRemote(old => ({ owner: sessionId, status: "error", value: old.owner === sessionId ? old.value : null })); });
+				return () => { alive = false; controller.abort(); };
+			}, [sessionId, refresh, tick, listSize]);
+			const family = remote.owner === sessionId ? remote.value : null;
+			const expanded = new Set(branches.owner === sessionId ? branches.value : family?.currentPath || []);
+			const members = family?.nodes.filter(node => node.sessionId !== family.rootSessionId) || [];
+			const selected = members.find(node => selection?.owner === sessionId && node.sessionId === selection.id) || members.find(node => node.sessionId === sessionId) || members[0];
+			const historyKey = family && selected ? `${sessionId}:${selected.sessionId}` : "";
+			const loadHistory = async (append = false) => {
+				if (!historyKey || !selected) return;
+				const controller = new AbortController();
+				historyAbort.current?.abort(); historyAbort.current = controller;
+				const requestId = ++historyRequest.current;
+				const cursor = append && history.key === historyKey ? history.nextCursor : null;
+				if (append && !cursor) return;
+				setHistory(old => ({ key: historyKey, status: "loading", events: append && old.key === historyKey ? old.events : [], nextCursor: cursor, hasMore: append && old.hasMore }));
+				try {
+					const value = await orchReadFamily("/api/task-coordinator/history", { sessionId, targetId: selected.sessionId, ...cursor }, controller.signal);
+					if (controller.signal.aborted || requestId !== historyRequest.current) return;
+					if (!Array.isArray(value.events) || value.targetSessionId !== selected.sessionId || value.sourceSessionId !== selected.parentSessionId) throw new Error("history-shape-invalid");
+					setHistory(old => {
+						const map = new Map([...(append && old.key === historyKey ? old.events : []), ...value.events].map(event => [event.seq,event]));
+						return { ...value, key: historyKey, status: "ready", events: [...map.values()].sort((a,b) => a.seq-b.seq) };
+					});
+				} catch { if (!controller.signal.aborted && requestId === historyRequest.current) setHistory(old => ({ ...old, key: historyKey, status: "error" })); }
+			};
+			react.useEffect(() => {
+				void loadHistory();
+				return () => { historyRequest.current++; historyAbort.current?.abort(); };
+			}, [historyKey, refresh]);
+			return { family, expanded, selected,
+				status: remote.owner === sessionId ? remote.status : "initial",
+				history: history.key === historyKey ? history : { status: "loading", events: [] }, loadHistory,
+				locate: () => setBranches({ owner: sessionId, value: [...(family?.currentPath || []),sessionId] }),
+				toggle: id => setBranches(old => { const next = new Set(old.owner === sessionId ? old.value : expanded); if (next.has(id)) next.delete(id); else next.add(id); return { owner: sessionId, value: [...next] }; }),
+			};
+		}
+
 		function OrchestrationView(props) {
 			ensureLocale();
 			const t = (key, params) => {
@@ -1397,6 +1528,7 @@ window.__ModuleLoader__.load({
 			};
 			const [refreshNonce, setRefreshNonce] = react.useState(0);
 			const [selection, setSelection] = react.useState(null);
+			const [focusNonce, setFocusNonce] = react.useState(0);
 			const [viewWidth, setViewWidth] = react.useState(1180);
 			const rootRef = react.useRef(null);
 			const inspectorRef = react.useRef(null);
@@ -1454,10 +1586,23 @@ window.__ModuleLoader__.load({
 			try {
 				if (typeof props.useSession === "function") hasMore = props.useSession((snapshot) => !!(snapshot && snapshot.hasMore));
 			} catch { hasMore = null; }
+			const currentSessionId = typeof props.sessionId === "string" ? props.sessionId : "";
+			const familyView = useOrchestrationFamily(currentSessionId, refreshNonce, nowTick, sessionsList?.ids?.length, selection);
+			react.useEffect(() => {
+				if (!familyView.family?.associated || familyView.family.rootSessionId === currentSessionId) return;
+				try { rootRef.current?.querySelector('[data-role="child"][data-current="true"]')?.scrollIntoView({ block: "nearest", behavior: "instant" }); } catch { /* the selected state remains visible in the inspector */ }
+			}, [currentSessionId, familyView.family?.rootSessionId, focusNonce]);
 			try {
-			const coordinatorId = typeof props.sessionId === "string" && props.sessionId.length > 0 ? props.sessionId : "";
-			const extraction = chat !== null ? safeExtractOrchestration(chat) : { ok: true, children: [], edges: [], notes: [] };
+			const coordinatorId = familyView.family?.rootSessionId || currentSessionId;
+			const localExtraction = chat !== null ? safeExtractOrchestration(chat) : { ok: true, children: [], edges: [], notes: [] };
+			const familyActive = familyView.family?.associated === true;
+			const extraction = familyActive ? orchFamilyProjection(familyView.family, familyView.expanded) : localExtraction;
+			if (familyActive && familyView.history.status === "ready") {
+				extraction.edges.push(...familyView.history.events.filter(edge => edge.kind !== "spawn").map(edge => ({ ...edge,
+					from: edge.from === coordinatorId ? ORCH_COORD : edge.from, to: edge.to === coordinatorId ? ORCH_COORD : edge.to })));
+			}
 			const children = extraction.children;
+			const allChildren = extraction.allChildren || children;
 			const layout = layoutTopology(extraction, viewWidth - (viewWidth > 900 ? 350 : 0) - (viewWidth <= 460 ? 24 : 48));
 			const byId = sessionsList && sessionsList.byId && typeof sessionsList.byId === "object" ? sessionsList.byId : null;
 			const coordinatorLive = orchSessionInfo(byId, coordinatorId);
@@ -1545,12 +1690,13 @@ window.__ModuleLoader__.load({
 			};
 			const statusChip = (state) => h("span", { className: "orchViewChip", "data-kind": "status", "data-state": state }, t(`orch.status.${state}`));
 			const liveState = live => live ? (live.running ? "running" : live.completed ? "completed" : "idle") : "unknown";
-			const selected = orchSelectedChild(children, selection, coordinatorId);
+			const selected = familyActive ? familyView.selected : orchSelectedChild(children, selection, currentSessionId);
 			const selectedId = selected?.sessionId;
 			const selectedLive = selected ? orchSessionInfo(byId, selectedId) : null;
 			const fullTitle = child => orchSessionInfo(byId, child.sessionId)?.title || child.title || child.sessionId;
 			const titleFor = child => orchTaskTitle(fullTitle(child));
-			const coordinatorTitle = orchTaskTitle(coordinatorLive?.title || t("orch.coordinator"));
+			const coordinatorTitle = orchTaskTitle(coordinatorLive?.title || familyView.family?.nodes.find(node => node.sessionId === coordinatorId)?.title || t("orch.coordinator"));
+			const selectedModel = selected?.model?.model || localExtraction.children.find(child => child.sessionId === selectedId)?.model?.model;
 			const todoText = live => live?.todos ? t("orch.todos", live.todos) : t("orch.todos.none");
 			const childCard = child => {
 				const pos = layout.nodes[child.sessionId];
@@ -1560,17 +1706,19 @@ window.__ModuleLoader__.load({
 				return h("button", {
 					type: "button", key: child.sessionId, className: "orchViewNode", "data-role": "child", "data-state": state,
 					"aria-pressed": child.sessionId === selectedId,
+					"data-current": child.sessionId === currentSessionId,
 					"aria-label": `${titleFor(child)} · ${t(`orch.status.${state}`)} · ${todoText(live)}`,
 					style: { left: pos.x, top: pos.y, width: pos.width, height: pos.height },
 					title: fullTitle(child),
 					onClick: () => {
-						setSelection({ owner: coordinatorId, id: child.sessionId });
+						setSelection({ owner: currentSessionId, id: child.sessionId });
 						if (viewWidth <= 900) {
 							try { inspectorRef.current?.scrollIntoView({ block: "start", behavior: "instant" }); } catch { /* selection still works */ }
 						}
 					}
 				}, icon(state === "completed" ? "done" : state === "unknown" ? "unknown" : "task", true),
 					h("span", { className: "orchViewNodeTitle" }, titleFor(child)),
+					child.sessionId === currentSessionId ? h("span", { className: "orchViewCurrent" }, t("orch.family.current")) : null,
 					statusChip(state),
 					h("span", { className: "orchViewNodeTodo" }, todoText(live)),
 					h("span", { className: "orchViewId", title: child.sessionId }, child.shortId || child.sessionId.slice(-8)));
@@ -1580,19 +1728,20 @@ window.__ModuleLoader__.load({
 				icon("supervisor", true), h("div", { className: "orchViewCoordinatorCopy" },
 					h("div", { className: "orchViewNodeTitle" }, coordinatorTitle),
 					h("div", { className: "orchViewNodeChips" }, h("span", { className: "orchViewChip" }, t("orch.coordinator")), statusChip(liveState(coordinatorLive))),
-					h("div", { className: "orchViewModel" }, coordinatorLive?.goalPhase ? t("orch.goal", { phase: coordinatorLive.goalPhase }) : t("orch.supervising", { n: children.length }))));
+					h("div", { className: "orchViewModel" }, coordinatorLive?.goalPhase ? t("orch.goal", { phase: coordinatorLive.goalPhase }) : t("orch.supervising", { n: allChildren.length }))));
 			// SVG is the actual topology geometry, not a replacement for icon art.
 			// Inline paths use per-element arrow geometry to avoid global marker-id
 			// collisions when two host conversation surfaces are mounted at once.
 			const edgeElements = [];
 			for (const relation of orchGroupRelations(extraction)) {
-				const group = layout.rows.find(row => row.team === relation.team);
+				const group = layout.rows.find(row => row.team === relation.team && row.parentId === relation.parentId);
 				if (!group) continue;
 				const active = relation.ids.has(selectedId);
 				const report = relation.kind === "report";
 				const offset = relation.kind === "send" ? -6 : report ? 6 : 0;
-				const x1 = cp.x + cp.width / 2 + offset;
-				const y1 = cp.y + cp.height;
+				const sourceNode = layout.nodes[relation.parentId] || cp;
+				const x1 = sourceNode.x + sourceNode.width / 2 + offset;
+				const y1 = sourceNode.y + sourceNode.height;
 				const x2 = group.x + group.width / 2 + offset;
 				const y2 = group.y;
 				const middleY = y2 - 50 + offset;
@@ -1602,9 +1751,9 @@ window.__ModuleLoader__.load({
 				const railX = isLowerBand ? 6 + offset / 2 : x1;
 				const start = isLowerBand ? `M${x1},${y1} V${y1+18} H${railX}` : `M${x1},${y1}`;
 				const d = `${start} V${middleY - 6} Q${railX},${middleY} ${railX + Math.sign(x2-railX)*6},${middleY} H${x2-Math.sign(x2-railX)*6} Q${x2},${middleY} ${x2},${middleY+6} V${y2}`;
-				edgeElements.push(h("path", { key: `${relation.team}:${relation.kind}`, d, "data-relation": true, className: `${base}${recent && active ? " orchViewFlow" : ""}`, "data-selected": active },
+				edgeElements.push(h("path", { key: `${relation.parentId}:${relation.team}:${relation.kind}`, d, "data-relation": true, className: `${base}${recent && active ? " orchViewFlow" : ""}`, "data-selected": active },
 					h("title", null, `${t(`orch.legend.${relation.kind}`)} · ${relation.count}`)));
-				edgeElements.push(h("path", { key: `arrow:${relation.team}:${relation.kind}`, d: report ? `M${x1-3},${y1+5} L${x1},${y1} L${x1+3},${y1+5}` : `M${x2-3},${y2-5} L${x2},${y2} L${x2+3},${y2-5}`, className: base, "data-selected": active }));
+				edgeElements.push(h("path", { key: `arrow:${relation.parentId}:${relation.team}:${relation.kind}`, d: report ? `M${x1-3},${y1+5} L${x1},${y1} L${x1+3},${y1+5}` : `M${x2-3},${y2-5} L${x2},${y2} L${x2+3},${y2-5}`, className: base, "data-selected": active }));
 			}
 			// Group membership links stay inside the header-to-card gutter. The
 			// selected task gets a blue link without crossing another task's card.
@@ -1613,12 +1762,22 @@ window.__ModuleLoader__.load({
 				const x = pos.x + pos.width / 2;
 				return h("path", { key: `member:${id}`, d: `M${x},${pos.y-12} V${pos.y} m-3,-5 l3,5 l3,-5`, className: id === selectedId ? "orchViewEdge orchViewEdgeSend" : "orchViewEdge" });
 			}));
-			const groupElements = layout.rows.map(group => h("section", { key: group.team, className: "orchViewGroup", style: { left: group.x, top: group.y, width: group.width, height: group.height }, "aria-label": group.team || t("orch.ungrouped") },
-				h("div", { className: "orchViewGroupHeading" }, icon("group"), h("h3", null, group.team || t("orch.ungrouped")), h("span", { className: "orchViewCount" }, `· ${group.ids.length}`))));
-			const selectedEvents = selected ? extraction.edges.filter(edge => edge.to === selectedId || edge.from === selectedId).sort((a,b) => (a.time || 0) - (b.time || 0)) : [];
-			const eventList = selectedEvents.slice(-20);
+			const groupElements = layout.rows.map(group => h("section", { key: group.groupKey, className: "orchViewGroup", style: { left: group.x, top: group.y, width: group.width, height: group.height }, "aria-label": group.team || t("orch.ungrouped") },
+				h("div", { className: "orchViewGroupHeading" }, icon("group"), h("h3", { title: group.parentId !== ORCH_COORD ? orchSessionInfo(byId,group.parentId)?.title : undefined }, group.parentId !== ORCH_COORD ? `${orchTaskTitle(orchSessionInfo(byId,group.parentId)?.title || group.parentId)} / ${group.team || t("orch.ungrouped")}` : group.team || t("orch.ungrouped")), h("span", { className: "orchViewCount" }, `· ${group.ids.length}`))));
+			const selectedEvents = familyActive ? familyView.history.events : selected ? extraction.edges.filter(edge => edge.to === selectedId || edge.from === selectedId).sort((a,b) => (a.time || 0) - (b.time || 0)) : [];
+			const branchButtons = familyActive ? children.flatMap(child => {
+				const count = allChildren.filter(node => node.parentSessionId === child.sessionId).length;
+				if (!count) return [];
+				const pos = layout.nodes[child.sessionId];
+				return [h("button", { key: `branch:${child.sessionId}`, className: "orchViewBranch", type: "button",
+					style: { left: pos.x+pos.width-50, top: pos.y+pos.height-28 },
+					"aria-label": t(familyView.expanded.has(child.sessionId) ? "orch.family.collapse" : "orch.family.expand", { n: count }),
+					"aria-expanded": familyView.expanded.has(child.sessionId), onClick: () => familyView.toggle(child.sessionId) },
+					icon("group"), String(count))];
+			}) : [];
+			const eventList = familyActive ? selectedEvents : selectedEvents.slice(-20);
 			const eventLabel = edge => t(edge.kind === "send" ? (edge.delivered === false ? "orch.event.failed" : edge.delivered === undefined ? "orch.event.unconfirmed" : "orch.event.send") : `orch.event.${edge.kind}`);
-			const eventDescription = edge => edge.kind === "send"
+			const eventDescription = edge => familyActive ? t(edge.kind === "report" ? "orch.family.reportHint" : edge.kind === "spawn" ? "orch.family.spawnHint" : edge.delivered === false ? "orch.event.failedHint" : edge.mode === "steer" ? "orch.family.steerHint" : "orch.family.queueHint") : edge.kind === "send"
 				? t(edge.delivered === false ? "orch.event.failedHint" : edge.mode === "steer" ? "orch.event.steerHint" : "orch.event.queueHint")
 				: t(edge.kind === "report" ? "orch.event.reportHint" : "orch.event.spawnHint");
 			const inspector = selected ? h("aside", { className: "orchViewInspector", ref: inspectorRef, "aria-label": t("orch.detail") },
@@ -1628,26 +1787,34 @@ window.__ModuleLoader__.load({
 				h("dl", { className: "orchViewFacts" },
 					h("div", null, h("dt", null, t("orch.detail.todos")), h("dd", { className: "orchViewTodoValue" }, selectedLive?.todos ? `${selectedLive.todos.done} / ${selectedLive.todos.total}` : "—")),
 					h("div", null, h("dt", null, t("orch.detail.updated")), h("dd", null, orchAgoText(selectedLive?.updatedAt, now, t))),
-					selected.model?.model ? h("div", { className: "orchViewFactModel" }, h("dt", null, t("orch.detail.model")), h("dd", null, selected.model.model)) : null,
+					selectedModel ? h("div", { className: "orchViewFactModel" }, h("dt", null, t("orch.detail.model")), h("dd", null, selectedModel)) : null,
 					selectedLive?.goalPhase ? h("div", { className: "orchViewFactModel" }, h("dt", null, t("orch.detail.goal")), h("dd", null, selectedLive.goalPhase)) : null),
 				h("button", { className: "orchViewPrimary", type: "button", onClick: () => openChild(selected) }, t("orch.open"), icon("external")),
 				h("p", { className: "orchViewMeta orchViewId", title: selectedId }, `${t("orch.detail.id")} · ${selectedId}`),
 				!selectedLive ? h("p", { className: "orchViewMeta" }, t("orch.detail.unknown")) : null,
 				h("section", { className: "orchViewRelations" },
 					h("h3", null, t("orch.detail.relations"), h("span", { className: "orchViewCount" }, String(selectedEvents.length))),
-					h("p", { className: "orchViewRelationHint" }, t("orch.detail.scope")),
-					selectedEvents.length > 20 ? h("p", { className: "orchViewRelationHint" }, t("orch.detail.recent")) : null,
+					h("p", { className: "orchViewRelationHint" }, familyActive ? t("orch.family.historyScope", { title: orchTaskTitle(orchSessionInfo(byId,selected.parentSessionId)?.title || selected.parentSessionId) }) : t("orch.detail.scope")),
+					familyActive ? h("div", { className: "orchViewHistoryControls" },
+						h("p", { className: "orchViewRelationHint", role: "status" }, t(familyView.history.status === "error" ? "orch.family.historyError" : familyView.history.status === "loading" ? "orch.history.loading" : familyView.history.coverage === "partial" ? "orch.history.partial" : "orch.history.loaded")),
+						familyView.history.status === "error" ? h("button", { type: "button", className: "orchViewBtn", onClick: () => familyView.loadHistory(false) }, t("orch.retry")) : null,
+						familyView.history.hasMore ? h("button", { type: "button", className: "orchViewBtn", disabled: familyView.history.status === "loading", onClick: () => familyView.loadHistory(true) }, t("orch.history.more")) : null,
+						familyView.history.status === "ready" && !selectedEvents.length ? h("p", { className: "orchViewRelationHint" }, t("orch.family.noEvents")) : null) : null,
+					!familyActive && selectedEvents.length > 20 ? h("p", { className: "orchViewRelationHint" }, t("orch.detail.recent")) : null,
 					h("ol", { className: "orchViewEvents" }, ...eventList.map((edge, i) => h("li", { className: "orchViewEvent", key: `${selectedId}:${i}:${edge.time}`, "data-kind": edge.kind, "data-failed": edge.delivered === false },
 						h("div", { className: "orchViewEventHeading" }, h("strong", null, eventLabel(edge)), h("time", { title: typeof edge.time === "number" && Number.isFinite(edge.time) ? new Date(edge.time).toLocaleString() : undefined }, orchAgoText(edge.time, now, t))),
 						h("p", null, eventDescription(edge))))))) : null;
 			const diagnostics = [];
-			if (chatError !== null || chat === null) diagnostics.push(h("p", { key: "chat", className: "orchViewFlash", "data-kind": "error" }, t("orch.degraded.chat", { message: chatError || t("orch.service.missing") })));
+			if (familyView.family && !familyActive && localExtraction.children.length) diagnostics.push(h("p", { key:"registry-retention",className:"orchViewFlash" },t("orch.family.localOnly")));
+			if (familyView.status === "error") diagnostics.push(h("p", { key: "family", className: "orchViewFlash" }, t("orch.family.unavailable")));
+			if (familyView.family?.ancestryComplete === false) diagnostics.push(h("p", { key: "lineage", className: "orchViewFlash" }, t("orch.family.partial")));
+			if (!familyActive && (chatError !== null || chat === null)) diagnostics.push(h("p", { key: "chat", className: "orchViewFlash", "data-kind": "error" }, t("orch.degraded.chat", { message: chatError || t("orch.service.missing") })));
 			if (sessionsError !== null || sessionsList === null) diagnostics.push(h("p", { key: "sessions", className: "orchViewFlash" }, t("orch.degraded.sessions")));
 			if (extraction.ok === false) diagnostics.push(h("p", { key: "extract", className: "orchViewFlash", "data-kind": "error" }, t("orch.error.extract", { message: extraction.error })));
-			const emptyTitle = chat === null || extraction.ok === false ? "orch.empty.unavailable" : hasMore !== false ? "orch.empty.partial" : "orch.empty.title";
-			const emptyHint = chat === null || extraction.ok === false ? "orch.empty.unavailableHint" : hasMore !== false ? "orch.empty.windowHint" : "orch.empty.hint";
-			const runningCount = children.filter(child => liveState(orchSessionInfo(byId, child.sessionId)) === "running").length;
-			const completedCount = children.filter(child => liveState(orchSessionInfo(byId, child.sessionId)) === "completed").length;
+			const emptyTitle = familyView.status === "loading" && !familyView.family ? "orch.family.loading" : familyView.family ? "orch.family.unassociated" : chat === null || extraction.ok === false ? "orch.empty.unavailable" : hasMore !== false ? "orch.empty.partial" : "orch.empty.title";
+			const emptyHint = familyView.status === "loading" && !familyView.family ? "orch.family.loadingHint" : familyView.family ? "orch.family.unassociatedHint" : chat === null || extraction.ok === false ? "orch.empty.unavailableHint" : hasMore !== false ? "orch.empty.windowHint" : "orch.empty.hint";
+			const runningCount = allChildren.filter(child => liveState(orchSessionInfo(byId, child.sessionId)) === "running").length;
+			const completedCount = allChildren.filter(child => liveState(orchSessionInfo(byId, child.sessionId)) === "completed").length;
 			const tree = h("div", { className: "orchViewRoot", ref: rootRef },
 				flash ? h("p", { className: "orchViewFlash", "data-kind": flash.kind, role: "status" }, flash.text) : null,
 				...diagnostics,
@@ -1655,15 +1822,19 @@ window.__ModuleLoader__.load({
 					h("main", { className: "orchViewMain" },
 						h("div", { className: "orchViewToolbar" },
 							h("div", { className: "orchViewHeading" }, h("div", { className: "orchViewHeadingLine" }, h("h1", { className: "orchViewTitle" }, coordinatorTitle), statusChip(liveState(coordinatorLive)), h("span", { className: "orchViewRole" }, t("orch.coordinator"))),
-								h("p", { className: "orchViewMeta" }, t("orch.summary", { n: children.length, running: runningCount, completed: completedCount }))),
-							h("div", { className: "orchViewHistory" }, h("span", null, t(hasMore === false ? "orch.history.loaded" : "orch.history.partial")), historyButton,
+								h("p", { className: "orchViewMeta" }, t("orch.summary", { n: allChildren.length, running: runningCount, completed: completedCount }))),
+							h("div", { className: "orchViewHistory" },
+								h("span", null, t(familyActive ? "orch.family.registry" : hasMore === false ? "orch.history.loaded" : "orch.history.partial")), familyActive ? null : historyButton,
+								familyActive && coordinatorId !== currentSessionId ? h("button", { type: "button", className: "orchViewBtn", onClick: () => openChild({ sessionId: coordinatorId }) }, t("orch.family.openRoot")) : null,
+								familyActive && coordinatorId !== currentSessionId ? h("button", { type: "button", className: "orchViewBtn", onClick: () => { familyView.locate(); setSelection({owner:currentSessionId,id:currentSessionId}); setFocusNonce(n=>n+1); } }, t("orch.family.locate")) : null,
 								h("button", { type: "button", className: "orchViewBtn", title: t("orch.refresh"), "aria-label": t("orch.refresh"), onClick: () => { setRefreshNonce(n => n+1); setNowTick(Date.now()); } }, icon("refresh")))),
+						familyActive && coordinatorId !== currentSessionId ? h("p", { className: "orchViewFamilyContext" }, t("orch.family.context", { title: orchTaskTitle(orchSessionInfo(byId,currentSessionId)?.title || currentSessionId) })) : null,
 						children.length === 0 ? h("div", { className: "orchViewEmpty" }, icon("group", true), h("h2", null, t(emptyTitle)), h("p", null, t(emptyHint)),
-							chat !== null && extraction.ok !== false ? h("p", null, t("orch.empty.scanned", { n: extraction.scanned || 0 })) : null)
+							!familyView.family && chat !== null && extraction.ok !== false ? h("p", null, t("orch.empty.scanned", { n: extraction.scanned || 0 })) : null)
 						: h("div", { className: "orchViewCanvas", "aria-label": t("orch.topology") }, h("div", { className: "orchViewLayer", style: { width: layout.size.width, height: layout.size.height } },
 							...groupElements,
 							h("svg", { className: "orchViewSvg", width: layout.size.width, height: layout.size.height, viewBox: `0 0 ${layout.size.width} ${layout.size.height}`, "aria-hidden": true }, ...edgeElements, ...memberEdges),
-							coordinatorCard, ...children.map(childCard))),
+							coordinatorCard, ...children.map(childCard), ...branchButtons)),
 						children.length ? h("div", { className: "orchViewLegend" }, ...["send", "spawn", "report"].map(kind => h("span", { key: kind }, h("i", { className: "orchViewLegendKey", "data-kind": kind }), t(`orch.legend.${kind}`))), h("span", null, t("orch.legend.recent"))) : null),
 					inspector));
 			return tree;
@@ -1746,6 +1917,7 @@ window.__ModuleLoader__.load({
 			extractOrchestration,
 			layoutTopology,
 			orchGroupRelations,
+			orchFamilyProjection,
 			orchSelectedChild,
 			orchTaskTitle,
 			orchToolFacts,
