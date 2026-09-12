@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [0.25.2] - 2026-09-12
+
+### Tests
+
+- **verify-installed 的 migrate 段改为按宿主 core 版本自适应**（2.0.9 升级当天实测驱动）：旧断言无条件期望 migrate 成功——0.1.5 核上 v0.25.1 守卫**正确拒绝**反而把 verify 标红（守卫首次全链活体拒绝实为通过信号）。现按 `detectHostCoreVersion()` 分流：新核断言 LIVE 拒绝（code=migrate-disabled、错误含 P0 原因与 attach/detach 出路、**零克隆零归档**）；旧核保持原五步全链断言（clone+attach+archive+meta 平移+same-cwd 拒绝）。守卫块新增「决策与实际解析核一致」断言并按核打印活体路径。运行时零改动（纯测试面）。
+- **验证方法学适配 Desktop 2.0.9 新布局**（运维注记）：新宿主核心包全部收进 app.asar（app.asar.unpacked 仅剩 node-pty 等原生模块，profile node_modules 的 @deepseek-ai 被清空）——裸 node 从安装位跑 verify 不再可解析（MODULE_NOT_FOUND）。新规范跑法：①Electron-as-node（`ELECTRON_RUN_AS_NODE=1` + 宿主 exe）fs 遍历复制抽取 asar 内 `@deepseek-ai/*` 与顶层依赖（yaml 等）到 verify-root\node_modules（注意：Electron cpSync 不支持目录级 asar 源，报误导性 NOT_FOUND；GUI 子系统进程需管道强制等待）②插件安装位拷贝进 verify-root ③裸 node 从 verify-root 跑（ESM 向上解析命中）。旧 junction 仿真法因布局变化作废。
+
 ## [0.25.1] - 2026-09-12
 
 ### Changed

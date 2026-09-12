@@ -671,46 +671,63 @@ console.log('externalRef        : OK -> trimmed receipt echo + durable registry 
 // 0.16.0 task_workspace migrate: true cross-workspace move — the clone +
 // attach + archive route over the five host primitives (readSession →
 // sessions.create+flush → target attachSession → archiveSession).
+// 0.25.2: the block is CORE-VERSION-AWARE — on a >=0.1.5 host the v0.25.1
+// guard must refuse the migration (LIVE refusal path: upstream flush no
+// longer persists plugin-created sessions and readSession throws on seeded
+// ones); on an old core the full chain runs and must succeed.
+const verifyCore = detectHostCoreVersion();
+const verifyGuarded = shouldGuardMigrate(verifyCore);
 migrateTargets.push({ id: 'ws-verify2', path: '/proj2', sessionIds: [] });
 const migrateResult = await byName.task_workspace.execute(
   { action: 'migrate', sessionId: 'session-migrate-me', workspaceId: 'ws-verify2' },
   supervisorExec,
 );
-assert.equal(migrateResult.ok, true, `migrate must succeed: ${migrateResult.error ?? ''}`);
-assert.equal(migrateResult.sessionId, 'session-migrated-1', 'result reports the NEW session id');
-assert.equal(migrateResult.migratedFrom, 'session-migrate-me');
-assert.equal(migrateResult.workspaceId, 'ws-verify2');
-assert.equal(migrateResult.archived, true);
-assert.equal(migrateCreateRequests[0].meta.cwd, '/proj2', 'clone born with the TARGET workspace path');
-assert.equal(migrateCreateRequests[0].meta.createdAt, 999, 'original createdAt preserved');
-assert.equal(migrateCreateRequests[0].meta.agentPreset, 'preset-verify', 'original agentPreset preserved');
-assert.equal(migrateCreateRequests[0].seed.length, 2, 'the complete log is seeded');
-assert.ok(migrateTargets[0].sessionIds.includes('session-migrated-1'), 'clone attached to the target workspace');
-assert.deepEqual(archivedSessions, ['session-migrate-me'], 'original durably archived');
-// a source whose cwd already equals the target path is refused with an attach
-// hint — no redundant clone, no archive
-const noopMigrate = await byName.task_workspace.execute(
-  { action: 'migrate', sessionId: 'session-same-cwd', workspaceId: 'ws-verify2' },
-  supervisorExec,
-);
-assert.equal(noopMigrate.code, 'bad-request');
-assert.match(noopMigrate.error, /use action 'attach'/);
-assert.equal(migrateCreateRequests.length, 1, 'same-cwd refusal clones nothing');
-assert.deepEqual(archivedSessions, ['session-migrate-me'], 'same-cwd refusal archives nothing');
-console.log('task_workspace migrate: OK -> clone+attach+archive route, meta carry-over (cwd/createdAt/preset/seed), same-cwd refusal');
+if (verifyGuarded) {
+  assert.equal(migrateResult.ok, false, 'guarded host must refuse migrate');
+  assert.equal(migrateResult.code, 'migrate-disabled');
+  assert.match(migrateResult.error, /sessions\.flush/, 'refusal carries the P0 rationale');
+  assert.match(migrateResult.error, /attach\/detach/, 'refusal carries the alternative route');
+  assert.equal(migrateCreateRequests.length, 0, 'guarded migrate clones nothing');
+  assert.deepEqual(archivedSessions, [], 'guarded migrate archives nothing');
+  console.log(`task_workspace migrate: OK -> guard LIVE refusal on core ${verifyCore} (zero clone/archive, P0/P1 guidance carried)`);
+} else {
+  assert.equal(migrateResult.ok, true, `migrate must succeed: ${migrateResult.error ?? ''}`);
+  assert.equal(migrateResult.sessionId, 'session-migrated-1', 'result reports the NEW session id');
+  assert.equal(migrateResult.migratedFrom, 'session-migrate-me');
+  assert.equal(migrateResult.workspaceId, 'ws-verify2');
+  assert.equal(migrateResult.archived, true);
+  assert.equal(migrateCreateRequests[0].meta.cwd, '/proj2', 'clone born with the TARGET workspace path');
+  assert.equal(migrateCreateRequests[0].meta.createdAt, 999, 'original createdAt preserved');
+  assert.equal(migrateCreateRequests[0].meta.agentPreset, 'preset-verify', 'original agentPreset preserved');
+  assert.equal(migrateCreateRequests[0].seed.length, 2, 'the complete log is seeded');
+  assert.ok(migrateTargets[0].sessionIds.includes('session-migrated-1'), 'clone attached to the target workspace');
+  assert.deepEqual(archivedSessions, ['session-migrate-me'], 'original durably archived');
+  // a source whose cwd already equals the target path is refused with an attach
+  // hint — no redundant clone, no archive
+  const noopMigrate = await byName.task_workspace.execute(
+    { action: 'migrate', sessionId: 'session-same-cwd', workspaceId: 'ws-verify2' },
+    supervisorExec,
+  );
+  assert.equal(noopMigrate.code, 'bad-request');
+  assert.match(noopMigrate.error, /use action 'attach'/);
+  assert.equal(migrateCreateRequests.length, 1, 'same-cwd refusal clones nothing');
+  assert.deepEqual(archivedSessions, ['session-migrate-me'], 'same-cwd refusal archives nothing');
+  console.log('task_workspace migrate: OK -> clone+attach+archive route, meta carry-over (cwd/createdAt/preset/seed), same-cwd refusal');
+}
 
-// 0.25.1 host core guard: the junction-simulated host resolves 0.1.2-rc.1 —
-// the OLD core — so the guard must NOT trigger (allow path), and the migrate
-// five-step chain above having succeeded is the end-to-end proof of that.
+// 0.25.1/0.25.2 host core guard: pure three-state pinned + the LIVE path for
+// THIS core proven by the version-aware block above (old core → allow path via
+// the full migrate chain; new core → refusal path with zero side effects).
 assert.equal(typeof shouldGuardMigrate, 'function', 'guard decision function exported');
 assert.equal(shouldGuardMigrate('0.1.2-rc.1'), false, '0.1.2 系放行');
 assert.equal(shouldGuardMigrate('0.1.5-rc.1'), true, '0.1.5 预发布视为新核');
 assert.equal(shouldGuardMigrate(null), false, 'null fail-open');
 assert.deepEqual(parseCoreVersion('0.1.5-rc.1'), [0, 1, 5], 'numeric triple parse ignores prerelease');
-const realCore = detectHostCoreVersion();
-assert.ok(typeof realCore === 'string' && /^0\.1\.2/.test(realCore), `junction host should resolve the 0.1.2 core, got ${realCore}`);
-assert.equal(shouldGuardMigrate(realCore), false, 'resolved OLD core must NOT trigger the guard (旧核放行)');
-console.log('migrate guard      : OK -> real 0.1.2 core resolves + guard stays open (allow path), pure three-state pinned');
+assert.ok(typeof verifyCore === 'string' && /^\d+\.\d+\.\d+/.test(verifyCore), `host core should resolve, got ${verifyCore}`);
+assert.equal(shouldGuardMigrate(verifyCore), verifyGuarded, 'the guard decision must match the resolved core');
+console.log(verifyGuarded
+  ? `migrate guard      : OK -> real ${verifyCore} core detected + LIVE refusal path exercised, pure three-state pinned`
+  : `migrate guard      : OK -> real ${verifyCore} core resolves + guard stays open (allow path), pure three-state pinned`);
 
 // 0.13.0 per-child model selection: catalog pre-validation, then install via
 // sessionController.selectModel between create and kickoff (order matters).
