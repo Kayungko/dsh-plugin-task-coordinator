@@ -1608,6 +1608,8 @@ export function createOps(deps) {
       if (callerDeny) return failDeny(callerDeny);
       const agent = agents.get(targetId);
       if (!agent) return fail(OP_CODES.TARGET_COLD, 'target has no live agent; nothing to cancel');
+      const targetDeny = checkTarget(caller, { sessionId: targetId, origin: agent.session?.header?.origin });
+      if (targetDeny) return failDeny(targetDeny);
       try {
         await sessionController.cancel({ sessionId: targetId });
       } catch (error) {
