@@ -1,3 +1,4 @@
+import { EXTERNAL_CALLER, externalGroup, cleanReceipt } from './external.mjs';
 // Read-only orchestration queries carried by the host's authenticated Connection.
 // No prompts, filesystem paths, external references or provider output cross this API.
 export const FAMILY_PATH = '/api/task-coordinator/family';
@@ -10,7 +11,15 @@ export function buildFamily(snapshot, sessionId, visibleIds) {
   if (!safeId(sessionId)) return fail('bad-session-id', 400);
   if (!visibleIds.has(sessionId)) return fail('session-not-visible', 404);
   if (snapshot.state !== 'ready' && snapshot.state !== 'missing') return fail('registry-unavailable');
-  const entries = new Map(snapshot.entries.map(row => [row.sessionId, row]));
+  const projected = snapshot.entries.map(row => {
+    if (row.parentSessionId !== EXTERNAL_CALLER) return row;
+    const group = row.externalGroup ?? externalGroup(row);
+    return { ...row, parentSessionId: group.id, externalAssociation: group.known ? 'known' : 'unknown' };
+  });
+  const entries = new Map(projected.map(row => [row.sessionId, row]));
+  for (const row of projected) if (row.externalAssociation) entries.set(row.parentSessionId, {
+    sessionId: row.parentSessionId, kind: 'external', externalAssociation: row.externalAssociation,
+  });
   const path = [], visited = new Set();
   let rootId = sessionId, ancestryComplete = true;
   while (entries.get(rootId)?.parentSessionId) {
@@ -23,7 +32,7 @@ export function buildFamily(snapshot, sessionId, visibleIds) {
   if (visited.has(rootId)) return fail('lineage-cycle');
   path.push(rootId); path.reverse();
   const children = new Map();
-  for (const row of snapshot.entries) {
+  for (const row of projected) {
     if (!safeId(row.parentSessionId)) continue;
     if (!children.has(row.parentSessionId)) children.set(row.parentSessionId, []);
     children.get(row.parentSessionId).push(row);
@@ -37,6 +46,7 @@ export function buildFamily(snapshot, sessionId, visibleIds) {
     const visible = visibleIds.has(id);
     nodes.push({ sessionId: id, parentSessionId: id === rootId ? null : row?.parentSessionId,
       familyDepth: depth, available: visible,
+      ...(row?.kind === 'external' ? { kind: 'external', association: row.externalAssociation } : {}),
       ...(visible && row ? { title: clipped(row.title), team: clipped(row.team), time: row.createdAt } : {}) });
     const sorted = (children.get(id) || []).slice().sort((a,b) => a.createdAt - b.createdAt || a.sessionId.localeCompare(b.sessionId, 'en'));
     for (const child of sorted) queue.push({ id: child.sessionId, depth: depth + 1 });
@@ -93,7 +103,24 @@ export function createFamilyQueries({ registry, sessionController }) {
       const target = family.nodes.find(row => row.sessionId === targetId);
       if (!target?.available || !target.parentSessionId) return fail('target-not-in-family', 404);
       const parent = rows.find(row => row.sessionId === target.parentSessionId);
-      if (!parent) return fail('parent-not-visible', 404);
+      if (!parent) {
+        const root = family.nodes.find(row => row.sessionId === target.parentSessionId);
+        if (root?.kind !== 'external') return fail('parent-not-visible', 404);
+        const recorded = registry.snapshot().entries.find(row => row.sessionId === targetId);
+        const receipts = (recorded?.bridgeReceipts ?? []).map(cleanReceipt).filter(Boolean);
+        const throughSeq = cursor?.throughSeq ?? recorded?.receiptSeq ?? 0;
+        const beforeSeq = cursor?.beforeSeq ?? throughSeq + 1;
+        if (!Number.isSafeInteger(throughSeq) || throughSeq < 0 || throughSeq > (recorded?.receiptSeq ?? 0) ||
+            !Number.isSafeInteger(beforeSeq) || beforeSeq < 1 || beforeSeq > throughSeq + 1) return fail('bad-cursor', 400);
+        const candidates = receipts.filter(r => r.seq <= throughSeq && r.seq < beforeSeq);
+        const page = candidates.slice(-30);
+        const hasMore = candidates.length > page.length;
+        return { ok: true, sourceSessionId: target.parentSessionId, targetSessionId: targetId,
+          events: page.map(r => ({ ...r, from: target.parentSessionId, to: targetId })),
+          hasMore, nextCursor: hasMore ? { throughSeq, beforeSeq: page[0].seq } : null,
+          scanned: page.length, unmatched: 0, coverage: 'partial', source: 'bridge-receipts',
+          note: 'Delivery receipts only; historical gaps and external replies are not reconstructed. Delivery does not prove consumption.' };
+      }
       if (typeof sessionController.page !== 'function') return fail('history-service-unavailable');
       const throughSeq = cursor?.throughSeq ?? parent.projections?.asOfSeq;
       const beforeSeq = cursor?.beforeSeq;

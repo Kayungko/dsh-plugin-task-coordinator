@@ -1,3 +1,4 @@
+import { COORDINATOR_CAPABILITIES } from './feedback.mjs';
 /**
  * dsh-plugin-task-coordinator — entry point.
  *
@@ -300,7 +301,7 @@ export function apply(ctx, input = {}) {
   // contract (docs/PROTOCOL.md §17): consumers call members, never replace
   // or wrap them. This is the enabled-branch provide; the disabled early
   // return above provided the reduced payload.
-  ctx.provide('taskCoordinator', { config, version: '0.25.2', ops });
+  ctx.provide('taskCoordinator', { config, version: '0.25.2', ops, capabilities: COORDINATOR_CAPABILITIES });
   installFamilyRoutes(ctx, { registry, sessionController });
   const dispose = registerTools(ctx, ops, { defineTool }, config);
   const disposeCommands = registerCommands(ctx, ops, uiStrings(readUiLocale()));

@@ -1,3 +1,5 @@
+import { decodeCursor, feedbackPage, messageProjection } from './feedback.mjs';
+import { EXTERNAL_CALLER } from './external.mjs';
 /**
  * Session operations for dsh-plugin-task-coordinator.
  *
@@ -464,12 +466,15 @@ export function createOps(deps) {
    * 0.18.4 envelope bug). The legacy `.events` fallback stays for test hosts
    * only; verify/smoke mocks now model the REAL snapshotEvents shape.
    */
-  function tailFromSession(session, limit) {
+  function tailFromSession(session, limit, capture, nextSeq = null) {
     if (!session || typeof session !== 'object') return [];
     try {
       if (typeof session.snapshotEvents === 'function' && Number.isFinite(session.seq)) {
-        const from = Math.max(0, session.seq - RECENT_SCAN_WINDOW);
-        return tailFromEvents(session.snapshotEvents(from, session.seq), limit);
+        const from = nextSeq ?? Math.max(0, session.seq - RECENT_SCAN_WINDOW);
+        const throughSeq = session.seq;
+        const events = session.snapshotEvents(from, Math.min(throughSeq, from + RECENT_SCAN_WINDOW));
+        if (capture) Object.assign(capture, { events, from, throughSeq });
+        return tailFromEvents(events, limit);
       }
       return tailFromEvents(session.events, limit); // legacy/test-host shape
     } catch {
@@ -479,28 +484,7 @@ export function createOps(deps) {
 
   /** Extract the last surface-visible messages from a session event array. */
   function tailFromEvents(events, limit) {
-    const picked = [];
-    for (const event of events ?? []) {
-      const data = event?.data;
-      if (!data) continue;
-      if (event.type === 'user/message') {
-        const text = blocksToText(data.content);
-        if (!text) continue;
-        picked.push({
-          role: 'user',
-          source: data.source?.kind ?? 'user',
-          text: excerpt(text, config.excerptChars),
-        });
-      } else if (event.type === 'assistant/message') {
-        const text = blocksToText(data.message?.content);
-        if (!text) continue;
-        picked.push({
-          role: 'assistant',
-          text: excerpt(text, config.excerptChars),
-        });
-      }
-    }
-    return picked.slice(-limit);
+    return (events ?? []).map(event => messageProjection(event, config.excerptChars)).filter(Boolean).slice(-limit);
   }
 
   /** Inbox depth probe used by the rate limiter. */
@@ -577,12 +561,16 @@ export function createOps(deps) {
     },
 
     /** Capability 2: read one task's current progress without disturbing it. */
-    async progress(targetId, caller, signal) {
+    async progress(targetId, caller, signal, { cursor, messageId } = {}) {
       const callerDeny = checkCaller(caller, config);
       if (callerDeny) return failDeny(callerDeny);
       if (typeof targetId !== 'string' || targetId.length === 0) {
         return fail(OP_CODES.BAD_REQUEST, 'sessionId is required');
       }
+      let nextSeq;
+      try { nextSeq = decodeCursor(cursor, targetId); } catch { return fail(OP_CODES.BAD_REQUEST, 'invalid progress cursor for this session'); }
+      if (messageId !== undefined && (typeof messageId !== 'string' || !messageId || messageId.length > 256)) return fail(OP_CODES.BAD_REQUEST, 'invalid messageId');
+      const captured = { events: null, from: 0, throughSeq: null };
       const row = await findRow(targetId, signal);
       const targetDeny = checkTarget(caller, row && { sessionId: row.sessionId, origin: row.origin });
       if (targetDeny) return failDeny(targetDeny);
@@ -607,16 +595,18 @@ export function createOps(deps) {
         result.queue = [
           ...(agent.inbox?.nextTurn ?? []).map((message) => ({
             placement: 'next-turn',
+            ...(typeof message.id === 'string' ? { messageId: message.id } : {}),
             source: message.source?.kind ?? 'unknown',
             text: excerpt(blocksToText(message.content), config.excerptChars),
           })),
           ...(agent.inbox?.nextStep ?? []).map((message) => ({
             placement: 'next-step',
+            ...(typeof message.id === 'string' ? { messageId: message.id } : {}),
             source: message.source?.kind ?? 'unknown',
             text: excerpt(blocksToText(message.content), config.excerptChars),
           })),
         ];
-        result.recent = tailFromSession(agent.session, config.progressTailMessages);
+        result.recent = tailFromSession(agent.session, config.progressTailMessages, captured, nextSeq);
         result.seq = agent.session?.seq ?? null;
       } else {
         result.agentState = 'cold-idle';
@@ -624,12 +614,27 @@ export function createOps(deps) {
         result.queue = [];
         try {
           const observed = await sessionController.inspect(targetId, signal);
-          result.recent = tailFromEvents(observed?.events, config.progressTailMessages);
+          const events = observed?.events;
+          result.recent = tailFromEvents(events, config.progressTailMessages);
+          if (Array.isArray(events) && events.length && events.every(e => Number.isSafeInteger(e?.seq))) {
+            const throughSeq = events.reduce((max, e) => Math.max(max, e.seq), -1) + 1;
+            const from = nextSeq ?? Math.max(0, throughSeq - RECENT_SCAN_WINDOW);
+            Object.assign(captured, { throughSeq, from, events: events.filter(e => e.seq >= from && e.seq < Math.min(throughSeq, from + RECENT_SCAN_WINDOW)) });
+          }
         } catch (error) {
           result.recent = [];
           result.inspectError = error?.message ?? String(error);
         }
       }
+      result.feedback = feedbackPage({ sessionId: targetId, ...captured, nextSeq,
+        limit: config.progressTailMessages, chars: config.excerptChars, source: agent ? 'live' : 'persisted' });
+      if (cursor !== undefined) result.recent = []; // Incremental callers consume feedback.messages only.
+      if (messageId !== undefined) result.consumption = {
+        messageId,
+        state: result.queue.some(m => m.messageId === messageId) ? 'queued' :
+          (captured.events ?? []).some(e => e.type === 'user/message' && e.data?.id === messageId) ? 'observed' : 'unknown',
+        meaning: 'observed means present in the scanned transcript; it does not prove execution or completion',
+      };
       return result;
     },
 
@@ -675,6 +680,9 @@ export function createOps(deps) {
       if (mode === 'steer') resolved.agent.steer(message);
       else resolved.agent.followup(message);
       limiter.accept(targetId);
+      const receiptPersisted = caller.sessionId === EXTERNAL_CALLER ? registry?.recordBridgeReceipt?.(targetId, {
+        kind: 'send', time: Date.now(), messageId: message?.id, mode, delivered: true,
+      }) : undefined;
       // Post-send queue depth (includes this message): the nextTurn count is the
       // number of rounds before this message is read — the host claims exactly
       // one next-turn message per round.
@@ -692,6 +700,7 @@ export function createOps(deps) {
       return {
         ok: true,
         delivered: true,
+        ...(receiptPersisted !== undefined ? { receiptPersisted } : {}),
         targetId,
         mode,
         ...(message?.id !== undefined ? { messageId: message.id } : {}),
@@ -1004,9 +1013,13 @@ export function createOps(deps) {
           ...(cleanTeam !== undefined ? { team: cleanTeam } : {}),
         };
       }
+      const receiptPersisted = caller.sessionId === EXTERNAL_CALLER ? registry?.recordBridgeReceipt?.(newId, {
+        kind: 'spawn', time: Date.now(), correlationId, delivered: started,
+      }) : undefined;
       return {
         ok: true,
         sessionId: newId,
+        ...(receiptPersisted !== undefined ? { receiptPersisted } : {}),
         shortId: shortId(newId),
         title: appliedTitle,
         ...(cleanTeam !== undefined ? { team: cleanTeam } : {}),
@@ -1542,6 +1555,18 @@ export function createOps(deps) {
       const clamped = Math.min(requested, config.waitMaxTimeoutMs);
       const startedAt = Date.now();
 
+      let rows;
+      try {
+        const listed = await sessionController.list({}, signal);
+        rows = Array.isArray(listed) ? listed : listed?.items;
+        if (!Array.isArray(rows)) throw new Error();
+      } catch { return fail(OP_CODES.WAIT_FAILED, 'target list unavailable; task state is unknown'); }
+      for (const id of targets) {
+        const row = rows.find(row => row.sessionId === id);
+        const denial = checkTarget(caller, row);
+        if (denial) return { ...failDeny(denial), sessionId: id };
+        if (!agents.get(id) && row.running === true) return { ...fail(OP_CODES.WAIT_FAILED, 'target is running without an observable local agent'), sessionId: id };
+      }
       const snapshot = targets.map((id) => {
         const agent = agents.get(id);
         const alreadyIdle = !agent || agent.status === 'idle';
@@ -1574,14 +1599,16 @@ export function createOps(deps) {
       const idleWatches = snapshot
         .filter((entry) => !entry.idle && entry.agent)
         .map((entry) => entry.agent.whenIdle().then(() => { entry.idle = true; return entry.sessionId; }));
+      let timer, abortHandler;
       const timeout = new Promise((resolve) => {
-        const timer = setTimeout(() => resolve('timeout'), clamped);
+        timer = setTimeout(() => resolve('timeout'), clamped);
         if (typeof timer.unref === 'function') timer.unref();
       });
       const aborted = new Promise((resolve) => {
         if (!signal) return;
         if (signal.aborted) return resolve('aborted');
-        signal.addEventListener('abort', () => resolve('aborted'), { once: true });
+        abortHandler = () => resolve('aborted');
+        signal.addEventListener('abort', abortHandler, { once: true });
       });
       const barrier = mode === 'all' ? Promise.all(idleWatches).then(() => 'all-idle') : Promise.race(idleWatches);
       let woke;
@@ -1589,6 +1616,9 @@ export function createOps(deps) {
         woke = await Promise.race([barrier, timeout, aborted]);
       } catch (error) {
         return fail(OP_CODES.WAIT_FAILED, `wait failed: ${error?.message ?? error}`);
+      } finally {
+        clearTimeout(timer);
+        if (abortHandler) signal?.removeEventListener('abort', abortHandler);
       }
       if (woke === 'aborted') return finish(false, 'wait aborted by caller');
       if (woke === 'timeout') {

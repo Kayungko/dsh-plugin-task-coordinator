@@ -233,6 +233,8 @@ window.__ModuleLoader__.load({
 				"orch.family.collapse": "收起 {n} 个子任务",
 				"orch.family.unavailable": "所属编排查询暂不可用，当前仅显示本会话已加载的记录。可刷新重试；首次启用此功能需重新加载宿主插件。",
 				"orch.family.partial": "部分上级记录已缺失，当前展示可恢复的任务关系。",
+				"orch.family.externalRoot": "外部总控",
+				"orch.family.unknownRoot": "外部来源未关联",
 				"orch.family.historyScope": "往来来源：{title}",
 				"orch.family.historyError": "往来记录读取失败，可重试；任务关系仍然保留。",
 				"orch.family.noEvents": "本页未找到往来记录，可能需要载入更早记录。",
@@ -359,6 +361,8 @@ window.__ModuleLoader__.load({
 				"orch.family.collapse": "Collapse {n} child tasks",
 				"orch.family.unavailable": "Orchestration lookup is unavailable. Only records loaded in this session are shown. Refresh to retry; newly installed host routes require a plugin reload.",
 				"orch.family.partial": "Some ancestors are no longer recorded. Showing the relationships that can be recovered.",
+				"orch.family.externalRoot": "External supervisor",
+				"orch.family.unknownRoot": "Unlinked external source",
 				"orch.family.historyScope": "Exchanges from: {title}",
 				"orch.family.historyError": "Could not load exchanges. Retry; the task relationships are retained.",
 				"orch.family.noEvents": "No exchanges found on this page. Older records may be available.",
@@ -1695,7 +1699,8 @@ window.__ModuleLoader__.load({
 			const selectedLive = selected ? orchSessionInfo(byId, selectedId) : null;
 			const fullTitle = child => orchSessionInfo(byId, child.sessionId)?.title || child.title || child.sessionId;
 			const titleFor = child => orchTaskTitle(fullTitle(child));
-			const coordinatorTitle = orchTaskTitle(coordinatorLive?.title || familyView.family?.nodes.find(node => node.sessionId === coordinatorId)?.title || t("orch.coordinator"));
+			const externalRoot = familyView.family?.nodes.find(node => node.sessionId === coordinatorId && node.kind === "external");
+			const coordinatorTitle = externalRoot ? t(externalRoot.association === "known" ? "orch.family.externalRoot" : "orch.family.unknownRoot") : orchTaskTitle(coordinatorLive?.title || familyView.family?.nodes.find(node => node.sessionId === coordinatorId)?.title || t("orch.coordinator"));
 			const selectedModel = selected?.model?.model || localExtraction.children.find(child => child.sessionId === selectedId)?.model?.model;
 			const todoText = live => live?.todos ? t("orch.todos", live.todos) : t("orch.todos.none");
 			const childCard = child => {
@@ -1794,7 +1799,7 @@ window.__ModuleLoader__.load({
 				!selectedLive ? h("p", { className: "orchViewMeta" }, t("orch.detail.unknown")) : null,
 				h("section", { className: "orchViewRelations" },
 					h("h3", null, t("orch.detail.relations"), h("span", { className: "orchViewCount" }, String(selectedEvents.length))),
-					h("p", { className: "orchViewRelationHint" }, familyActive ? t("orch.family.historyScope", { title: orchTaskTitle(orchSessionInfo(byId,selected.parentSessionId)?.title || selected.parentSessionId) }) : t("orch.detail.scope")),
+					h("p", { className: "orchViewRelationHint" }, familyActive ? t("orch.family.historyScope", { title: (externalRoot && selected.parentSessionId === coordinatorId ? coordinatorTitle : orchTaskTitle(orchSessionInfo(byId,selected.parentSessionId)?.title || selected.parentSessionId)) }) : t("orch.detail.scope")),
 					familyActive ? h("div", { className: "orchViewHistoryControls" },
 						h("p", { className: "orchViewRelationHint", role: "status" }, t(familyView.history.status === "error" ? "orch.family.historyError" : familyView.history.status === "loading" ? "orch.history.loading" : familyView.history.coverage === "partial" ? "orch.history.partial" : "orch.history.loaded")),
 						familyView.history.status === "error" ? h("button", { type: "button", className: "orchViewBtn", onClick: () => familyView.loadHistory(false) }, t("orch.retry")) : null,
@@ -1825,7 +1830,7 @@ window.__ModuleLoader__.load({
 								h("p", { className: "orchViewMeta" }, t("orch.summary", { n: allChildren.length, running: runningCount, completed: completedCount }))),
 							h("div", { className: "orchViewHistory" },
 								h("span", null, t(familyActive ? "orch.family.registry" : hasMore === false ? "orch.history.loaded" : "orch.history.partial")), familyActive ? null : historyButton,
-								familyActive && coordinatorId !== currentSessionId ? h("button", { type: "button", className: "orchViewBtn", onClick: () => openChild({ sessionId: coordinatorId }) }, t("orch.family.openRoot")) : null,
+								familyActive && !externalRoot && coordinatorId !== currentSessionId ? h("button", { type: "button", className: "orchViewBtn", onClick: () => openChild({ sessionId: coordinatorId }) }, t("orch.family.openRoot")) : null,
 								familyActive && coordinatorId !== currentSessionId ? h("button", { type: "button", className: "orchViewBtn", onClick: () => { familyView.locate(); setSelection({owner:currentSessionId,id:currentSessionId}); setFocusNonce(n=>n+1); } }, t("orch.family.locate")) : null,
 								h("button", { type: "button", className: "orchViewBtn", title: t("orch.refresh"), "aria-label": t("orch.refresh"), onClick: () => { setRefreshNonce(n => n+1); setNowTick(Date.now()); } }, icon("refresh")))),
 						familyActive && coordinatorId !== currentSessionId ? h("p", { className: "orchViewFamilyContext" }, t("orch.family.context", { title: orchTaskTitle(orchSessionInfo(byId,currentSessionId)?.title || currentSessionId) })) : null,

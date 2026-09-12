@@ -326,3 +326,15 @@ cordis 加载器的 isolate 机制（`@deepseek-ai/cordis-plugin-loader/src/conf
 首次请求以父会话投影的 `asOfSeq` 固定历史上界，后续请求使用返回游标；不会在前端自动拉取全部历史。分页边界缺少调用头时标记部分覆盖，不臆造往来。注册表保留上限导致祖先缺失时 `ancestryComplete=false`；损坏或循环父链返回错误，不能解释为“未关联”。注册表未覆盖的旧任务仍可回退展示当前已加载的转录，并标明数据范围。
 
 客户端切换会话或选中任务时取消旧请求，旧响应不能覆盖新焦点；只读关系定时刷新，实时运行状态继续来自宿主会话列表。首次安装含这些路由的版本须重新加载宿主插件，单独刷新页面无法创建宿主路由。
+
+
+## Codex 协作增量（未发布）
+
+- enabled 服务载荷新增只读 capabilities，对应 feedback.mjs 的 COORDINATOR_CAPABILITIES；原 13 个 ops 名称不变，disabled 仍不提供 ops。
+- progress(targetId, caller, signal, options?) 新增 options.cursor/messageId；无选项保持原 recent。feedback 的游标绑定目标 ID，coverage 说明完整页、部分或不可用；consumption 的 observed 仅证明扫描转录中存在消息，不证明执行完成。
+- waitFor 在判断 live agent 之前读取可见会话列表并校验目标；不存在不能返回 cold-idle。无法观测的运行状态返回 wait-failed。
+- snapshot 中 externalGroup 是自由文本 externalRef 的不透明分组投影，不输出 ref，也不作为授权身份。无 ref 的旧桥任务按任务隔离，association=unknown。
+- 外部根是展示节点；其 history 不查虚拟父会话，而读 registry 的白名单 bridgeReceipts（每任务最多 100 条、每页 30 条）。返回 source=bridge-receipts、coverage=partial；旧记录、外部回信和消费状态不补造。原生父节点继续遵守上一节宿主分页契约。
+- receiptPersisted=false 只表示记账失败；派发/消息可能已经生效，不允许据此重发。
+
+跨三层参数、回执、兼容策略见 [Codex 接入增量契约](../../bridge-mcp/docs/codex-integration.md)。该相邻仓链接供本工作区查阅，各包独立部署时以其随包 README/技能为入口。

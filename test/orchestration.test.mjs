@@ -3,14 +3,16 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('../client.js', import.meta.url), 'utf8');
-function harness(service) {
+function harness(service, family) {
   let entry, View, cursor = 0;
   const state = [];
   const react = {
     createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
     useState(initial) {
       const index = cursor++;
-      if (!(index in state)) state[index] = typeof initial === 'function' ? initial() : initial;
+      if (!(index in state)) state[index] = family && initial?.owner === '' && initial?.status === 'loading' && initial?.value === null
+        ? { owner: family.currentSessionId, status: 'ready', value: family }
+        : typeof initial === 'function' ? initial() : initial;
       return [state[index], value => { state[index] = typeof value === 'function' ? value(state[index]) : value; }];
     },
     useRef: value => ({ current: value }),
@@ -145,4 +147,20 @@ test('history requests use the bound session face, expose loading, and recover a
   const tree = h.render(props);
   assert.equal(collect(tree, el => el.props.className === 'orchViewLink')[0].props.disabled, false);
   assert.match(text(tree), /fixture paging failure/);
+});
+
+
+test('external roots are labelled and never offer navigation to a synthetic session', () => {
+  for (const association of ['known', 'unknown']) {
+    const root = 'task-bridge-external:synthetic';
+    const family = { associated: true, currentSessionId: 'task-a', rootSessionId: root,
+      currentPath: [root, 'task-a'], nodes: [
+        { sessionId: root, kind: 'external', association, available: false },
+        { sessionId: 'task-a', parentSessionId: root, available: true },
+      ] };
+    const h = harness(undefined, family);
+    const tree = h.render({ ...fixture(), sessionId: 'task-a' });
+    assert.match(text(tree), association === 'known' ? /外部总控/ : /外部来源未关联/);
+    assert.equal(collect(tree, el => el.type === 'button' && text(el).includes('打开总控')).length, 0);
+  }
 });

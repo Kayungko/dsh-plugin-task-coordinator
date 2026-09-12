@@ -2010,6 +2010,7 @@ test('ops.spawnTask: recursion depth is tracked and capped', async () => {
 
 test('ops.waitFor: already idle settles immediately', async () => {
   const harness = makeHarness();
+  for (const sessionId of ['session-a','session-b','session-cold']) addRow(harness, { sessionId });
   addLiveAgent(harness, 'session-a', { status: 'idle' });
   const result = await harness.ops.waitFor({ sessionId: 'session-a' }, SUPERVISOR);
   assert.equal(result.settled, true);
@@ -2019,7 +2020,8 @@ test('ops.waitFor: already idle settles immediately', async () => {
 
 test('ops.waitFor: cold session settles immediately', async () => {
   const harness = makeHarness();
-  const result = await harness.ops.waitFor({ sessionId: 'session-ghost' }, SUPERVISOR);
+  for (const sessionId of ['session-a','session-b','session-cold']) addRow(harness, { sessionId });
+  const result = await harness.ops.waitFor({ sessionId: 'session-cold' }, SUPERVISOR);
   assert.equal(result.settled, true);
   assert.match(result.reason, /already idle/);
   assert.equal(result.targets[0].agentState, 'cold-idle');
@@ -2027,6 +2029,7 @@ test('ops.waitFor: cold session settles immediately', async () => {
 
 test('ops.waitFor: times out on never-idle agent', async () => {
   const harness = makeHarness();
+  for (const sessionId of ['session-a','session-b','session-cold']) addRow(harness, { sessionId });
   const agent = addLiveAgent(harness, 'session-a', { status: 'running' });
   agent.idlePromise = new Promise(() => {}); // never resolves
   const result = await harness.ops.waitFor({ sessionId: 'session-a', timeoutMs: 50 }, SUPERVISOR);
@@ -2037,6 +2040,7 @@ test('ops.waitFor: times out on never-idle agent', async () => {
 
 test('ops.waitFor: settles when agent goes idle', async () => {
   const harness = makeHarness();
+  for (const sessionId of ['session-a','session-b','session-cold']) addRow(harness, { sessionId });
   const agent = addLiveAgent(harness, 'session-a', { status: 'running' });
   let release;
   agent.idlePromise = new Promise((resolve) => {
@@ -2051,6 +2055,7 @@ test('ops.waitFor: settles when agent goes idle', async () => {
 
 test('ops.waitFor: bad input is rejected with codes', async () => {
   const harness = makeHarness();
+  for (const sessionId of ['session-a','session-b','session-cold']) addRow(harness, { sessionId });
   const noTarget = await harness.ops.waitFor({}, SUPERVISOR);
   assert.equal(noTarget.code, 'bad-request');
   const badMode = await harness.ops.waitFor({ sessionId: 'session-a', mode: 'some' }, SUPERVISOR);
@@ -2059,6 +2064,7 @@ test('ops.waitFor: bad input is rejected with codes', async () => {
 
 test('ops.waitFor: multi-target mode all settles only when every target is idle', async () => {
   const harness = makeHarness();
+  for (const sessionId of ['session-a','session-b','session-cold']) addRow(harness, { sessionId });
   const agentA = addLiveAgent(harness, 'session-a', { status: 'running' });
   const agentB = addLiveAgent(harness, 'session-b', { status: 'running' });
   let releaseA;
@@ -2077,6 +2083,7 @@ test('ops.waitFor: multi-target mode all settles only when every target is idle'
 
 test('ops.waitFor: multi-target mode any settles on the first idle', async () => {
   const harness = makeHarness();
+  for (const sessionId of ['session-a','session-b','session-cold']) addRow(harness, { sessionId });
   const agentA = addLiveAgent(harness, 'session-a', { status: 'running' });
   const agentB = addLiveAgent(harness, 'session-b', { status: 'running' });
   let releaseA;
@@ -2091,6 +2098,7 @@ test('ops.waitFor: multi-target mode any settles on the first idle', async () =>
 
 test('ops.waitFor: multi-target timeout lists the still-running targets', async () => {
   const harness = makeHarness();
+  for (const sessionId of ['session-a','session-b','session-cold']) addRow(harness, { sessionId });
   const agentA = addLiveAgent(harness, 'session-a', { status: 'running' });
   const agentB = addLiveAgent(harness, 'session-b', { status: 'running' });
   agentA.idlePromise = new Promise(() => {});
@@ -2472,11 +2480,11 @@ test('service seam: apply() provides a two-shaped taskCoordinator payload (0.24.
   // bridge consumer's 503 degrade signal, never a missing service
   assert.match(src, /ctx\.provide\('taskCoordinator', \{ config, version: '[^']+' \}\);/, 'disabled branch must provide { config, version } with ops absent');
   // enabled branch: the full payload — the field name is exactly `ops`
-  assert.match(src, /ctx\.provide\('taskCoordinator', \{ config, version: '[^']+', ops \}\);/, 'enabled branch must provide { config, version, ops }');
+  assert.match(src, /ctx\.provide\('taskCoordinator', \{ config, version: '[^']+', ops, capabilities: COORDINATOR_CAPABILITIES \}\);/, 'enabled branch must provide { config, version, ops }');
   // the ops-bearing provide must come after createOps (the instance only
   // exists once the factory has run on the enabled path)
   const opsAt = src.indexOf('const ops = createOps(');
-  const fullProvideAt = src.indexOf(`ctx.provide('taskCoordinator', { config, version: '${pkg.version}', ops })`);
+  const fullProvideAt = src.indexOf(`ctx.provide('taskCoordinator', { config, version: '${pkg.version}', ops, capabilities: COORDINATOR_CAPABILITIES })`);
   assert.ok(opsAt >= 0 && fullProvideAt > opsAt, 'the ops-bearing provide must follow createOps');
   // exactly one provide per branch — cordis throws on a duplicate provide of
   // the same service, so there is no "provide early, provide again later"
@@ -2486,7 +2494,7 @@ test('service seam: apply() provides a two-shaped taskCoordinator payload (0.24.
   assert.equal((src.match(/createOps\(/g) ?? []).length, 1, 'apply() must build the ops exactly once');
   assert.match(src, /const dispose = registerTools\(ctx, ops, \{ defineTool \}, config\);/, 'registerTools must receive the same ops variable the provide carries');
   // the version string stays in lockstep with package.json
-  assert.match(src, new RegExp(`ctx\\.provide\\('taskCoordinator', \\{ config, version: '${pkg.version.replace(/\./g, '\\.')}', ops \\}\\);`), 'the enabled provide must carry the package version');
+  assert.match(src, new RegExp(`ctx\\.provide\\('taskCoordinator', \\{ config, version: '${pkg.version.replace(/\./g, '\\.')}', ops, capabilities: COORDINATOR_CAPABILITIES \\}\\);`), 'the enabled provide must carry the package version');
   assert.match(src, new RegExp(`ctx\\.provide\\('taskCoordinator', \\{ config, version: '${pkg.version.replace(/\./g, '\\.')}' \\}\\);`), 'the disabled provide must carry the package version too');
 });
 
@@ -2500,4 +2508,28 @@ test('service seam: the provided ops is the 13-member createOps surface (0.24.0)
   for (const member of expected) {
     assert.equal(typeof harness.ops[member], 'function', `ops.${member} must be a function (bridge consumers call it)`);
   }
+});
+
+
+test('bridge spawn and send record correlation facts after delivery, without prompt content', async () => {
+  const entries = new Map(), receipts = [];
+  const registry = { get: id => entries.get(id), record: (id, row) => entries.set(id, row),
+    recordBridgeReceipt: (id, row) => { receipts.push({ id, ...row }); return true; } };
+  const h = makeHarness({ registry, config: { minSendIntervalMs: 0 } });
+  const caller = { sessionId: 'task-bridge-external', cwd: '/proj' };
+  const spawned = await h.ops.spawnTask({ prompt: 'PRIVATE-KICKOFF', externalRef: 'ref:wave' }, caller);
+  assert.equal(spawned.ok, true);
+  assert.equal(spawned.receiptPersisted, true);
+  addLiveAgent(h, spawned.sessionId, { status: 'running' });
+  const sent = await h.ops.sendMessage({ targetId: spawned.sessionId, text: 'PRIVATE-FOLLOWUP', reference: spawned.correlationId }, caller);
+  assert.equal(sent.ok, true);
+  assert.equal(sent.receiptPersisted, true);
+  assert.deepEqual(receipts.map(r => r.kind), ['spawn', 'send']);
+  assert.equal(receipts[0].correlationId, spawned.correlationId);
+  assert.equal(receipts[1].messageId, sent.messageId);
+  assert.doesNotMatch(JSON.stringify(receipts), /PRIVATE/);
+  registry.recordBridgeReceipt = () => false;
+  const failedRecord = await h.ops.sendMessage({ targetId: spawned.sessionId, text: 'another' }, caller);
+  assert.equal(failedRecord.delivered, true);
+  assert.equal(failedRecord.receiptPersisted, false);
 });

@@ -1,5 +1,11 @@
 # 更新日志
 
+## [Unreleased] — Codex 协作增量
+
+等待校验真实目标；增量消息游标与消息身份对账；外部分组投影及有界、可持久化派发/投递回执；未知归属和历史缺口保留明确标记。
+
+仅源码变更，不表示已部署、重启或完成实机验收。
+
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
 ## [Unreleased]

@@ -58,12 +58,14 @@ export function registerTools(ctx, ops, deps, config) {
     name: 'task_progress',
     description: 'Read one task\'s current progress without disturbing it: live/cold status, queued messages, recent conversation tail, todos and goal. Read-only.',
     parameters: {
+      cursor: { type: 'string', description: 'Opaque feedback.nextCursor for incremental messages; check coverage for gaps.' },
+      messageId: { type: 'string', description: 'Delivery receipt id to reconcile; observed does not imply completion.' },
       sessionId: { type: 'string', required: true, description: 'Target task session id (from task_list).' },
     },
     output: OUTPUT,
     async execute(args, exec) {
       try {
-        return await ops.progress(args.sessionId, callerFrom(exec), exec?.signal);
+        return await ops.progress(args.sessionId, callerFrom(exec), exec?.signal, { cursor: args.cursor, messageId: args.messageId });
       } catch (error) {
         return { ok: false, code: 'internal', error: error?.message ?? String(error) };
       }

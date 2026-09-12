@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { externalGroup, cleanReceipt } from './external.mjs';
 /**
  * Durable spawn registry for dsh-plugin-task-coordinator.
  *
@@ -52,6 +54,8 @@ export class SpawnRegistry {
           if (typeof sessionId === 'string' && entry && typeof entry === 'object' && Number.isFinite(entry.createdAt)) {
             this.entries.set(sessionId, {
               createdAt: entry.createdAt,
+              ...(Array.isArray(entry.bridgeReceipts) ? { bridgeReceipts: entry.bridgeReceipts.map(cleanReceipt).filter(Boolean).slice(-100) } : {}),
+              ...(Number.isSafeInteger(entry.receiptSeq) && entry.receiptSeq >= 0 ? { receiptSeq: entry.receiptSeq } : {}),
               ...(typeof entry.team === 'string' && entry.team.length > 0 ? { team: entry.team } : {}),
               ...(typeof entry.title === 'string' && entry.title.length > 0 ? { title: entry.title } : {}),
               ...(typeof entry.promptExcerpt === 'string' && entry.promptExcerpt.length > 0 ? { promptExcerpt: entry.promptExcerpt } : {}),
@@ -86,6 +90,7 @@ export class SpawnRegistry {
     this.ensureLoaded();
     const existing = this.entries.get(sessionId);
     const merged = {
+      ...(existing?.bridgeReceipts ? { bridgeReceipts: existing.bridgeReceipts, receiptSeq: existing.receiptSeq } : {}),
       createdAt: existing?.createdAt ?? (Number.isFinite(entry.createdAt) ? entry.createdAt : this.now()),
       ...(entry.team !== undefined || existing?.team !== undefined
         ? { team: typeof entry.team === 'string' && entry.team.length > 0 ? entry.team : existing?.team }
@@ -128,11 +133,25 @@ export class SpawnRegistry {
     return this.entries.get(sessionId);
   }
 
+  recordBridgeReceipt(sessionId, value) {
+    this.ensureLoaded();
+    const entry = this.entries.get(sessionId);
+    if (!entry) return false; // Do not invent ownership for existing unregistered sessions.
+    const seq = Math.max(entry.receiptSeq ?? 0, ...((entry.bridgeReceipts ?? []).map(r => r.seq)), 0) + 1;
+    const receipt = cleanReceipt({ ...value, seq });
+    if (!receipt) return false;
+    entry.bridgeReceipts = [...(entry.bridgeReceipts ?? []), receipt].slice(-100);
+    entry.receiptSeq = seq;
+    return this.save();
+  }
+
   /** Minimal, detached topology projection; never expose prompts or local paths. */
   snapshot() {
     this.ensureLoaded();
     return { state: this.loadState, maxEntries: this.maxEntries, entries: [...this.entries].map(([sessionId, row]) => ({
-      sessionId, createdAt: row.createdAt, parentSessionId: row.parentSessionId, depth: row.depth, title: row.title, team: row.team,
+      sessionId, externalGroup: externalGroup({ sessionId, ...row }),
+      bridgeReceipts: (row.bridgeReceipts ?? []).map(r => ({ ...r })), receiptSeq: row.receiptSeq ?? 0,
+      createdAt: row.createdAt, parentSessionId: row.parentSessionId, depth: row.depth, title: row.title, team: row.team,
     })) };
   }
 
@@ -168,11 +187,19 @@ export class SpawnRegistry {
         null,
         2,
       );
-      const tmp = `${this.filePath}.tmp-${this.now()}`;
+      const tmp = `${this.filePath}.tmp-${randomUUID()}`;
       writeFileSync(tmp, payload, 'utf8');
-      renameSync(tmp, this.filePath);
+      for (let attempt = 0; ; attempt++) {
+        try { renameSync(tmp, this.filePath); break; }
+        catch (error) {
+          if (attempt >= 3 || !['EBUSY', 'EPERM', 'EACCES'].includes(error?.code)) throw error;
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10 * (attempt + 1));
+        }
+      }
+      return true;
     } catch {
       // The registry is an enhancement, never a failure path for coordination.
+      return false;
     }
   }
 }
