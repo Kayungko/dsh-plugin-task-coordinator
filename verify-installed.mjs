@@ -15,6 +15,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveUiLocale, uiStrings } from './i18n.mjs';
+import { parseCoreVersion, shouldGuardMigrate, detectHostCoreVersion } from './ops.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -697,6 +698,19 @@ assert.match(noopMigrate.error, /use action 'attach'/);
 assert.equal(migrateCreateRequests.length, 1, 'same-cwd refusal clones nothing');
 assert.deepEqual(archivedSessions, ['session-migrate-me'], 'same-cwd refusal archives nothing');
 console.log('task_workspace migrate: OK -> clone+attach+archive route, meta carry-over (cwd/createdAt/preset/seed), same-cwd refusal');
+
+// 0.25.1 host core guard: the junction-simulated host resolves 0.1.2-rc.1 —
+// the OLD core — so the guard must NOT trigger (allow path), and the migrate
+// five-step chain above having succeeded is the end-to-end proof of that.
+assert.equal(typeof shouldGuardMigrate, 'function', 'guard decision function exported');
+assert.equal(shouldGuardMigrate('0.1.2-rc.1'), false, '0.1.2 系放行');
+assert.equal(shouldGuardMigrate('0.1.5-rc.1'), true, '0.1.5 预发布视为新核');
+assert.equal(shouldGuardMigrate(null), false, 'null fail-open');
+assert.deepEqual(parseCoreVersion('0.1.5-rc.1'), [0, 1, 5], 'numeric triple parse ignores prerelease');
+const realCore = detectHostCoreVersion();
+assert.ok(typeof realCore === 'string' && /^0\.1\.2/.test(realCore), `junction host should resolve the 0.1.2 core, got ${realCore}`);
+assert.equal(shouldGuardMigrate(realCore), false, 'resolved OLD core must NOT trigger the guard (旧核放行)');
+console.log('migrate guard      : OK -> real 0.1.2 core resolves + guard stays open (allow path), pure three-state pinned');
 
 // 0.13.0 per-child model selection: catalog pre-validation, then install via
 // sessionController.selectModel between create and kickoff (order matters).

@@ -24,6 +24,8 @@
  * programmatically instead of parsing prose.
  */
 
+import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 import { blocksToText, checkCaller, checkTarget, excerpt } from './safety.mjs';
 import { buildSpawnTitle } from './title.mjs';
 import { uiStrings } from './i18n.mjs';
@@ -53,10 +55,96 @@ export const OP_CODES = Object.freeze({
   MIGRATE_UNAVAILABLE: 'migrate-unavailable',
   MIGRATE_BUSY: 'migrate-busy',
   MIGRATE_FAILED: 'migrate-failed',
+  MIGRATE_DISABLED: 'migrate-disabled',
   MODEL_UNAVAILABLE: 'model-unavailable',
   MODEL_SELECT_FAILED: 'model-select-failed',
   CATALOG_UNAVAILABLE: 'catalog-unavailable',
 });
+
+/**
+ * Host core version detection (0.25.1): the migrate clone route
+ * (sessions.create + flush) is only valid on host core < 0.1.5. On
+ * >= 0.1.5-rc.1 the upstream sessions.flush silently no-ops for
+ * plugin-created sessions (the clone "succeeds" in-process then vanishes on
+ * restart) and readSession throws on seeded/forked sessions — see
+ * research/host-upgrade-drift-0.1.2-0.1.5.md face 1 P0/P1. The guard reads
+ * @deepseek-ai/dsh-session's package.json version (resolved from the plugin's
+ * own location via createRequire — the plugin runs inside the host process,
+ * so the peer package always resolves), compares the numeric major.minor.patch
+ * tuple, and refuses migrate on >= 0.1.5. A failed probe returns null and
+ * fail-opens (pre-0.25.1 behavior) with a single warning.
+ */
+
+const MIGRATE_GUARD_MIN = [0, 1, 5];
+
+let cachedHostCoreVersion;
+let hostCoreVersionSettled = false;
+
+/**
+ * Parse a `major.minor.patch[-prerelease]` string into a numeric triple.
+ * Returns null for anything that is not a plain three-segment version
+ * (missing/blank/non-string/leading garbage all fail open).
+ * @param {string|null|undefined} version
+ * @returns {[number, number, number]|null}
+ */
+export function parseCoreVersion(version) {
+  if (typeof version !== 'string' || version.trim().length === 0) return null;
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version.trim());
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+/**
+ * Host-core guard decision (0.25.1). True = refuse migrate. Comparison is
+ * numeric major.minor.patch only: prerelease identifiers are ignored, so
+ * 0.1.5-rc.1 and 0.1.5-0 both count as the new core (>= 0.1.5). null /
+ * unparseable / missing all fail open (false — keep the pre-0.25.1 behavior).
+ * @param {string|null|undefined} coreVersion - the resolved @deepseek-ai/dsh-session version
+ * @returns {boolean}
+ */
+export function shouldGuardMigrate(coreVersion) {
+  const triple = parseCoreVersion(coreVersion);
+  if (!triple) return false;
+  for (let i = 0; i < 3; i += 1) {
+    if (triple[i] > MIGRATE_GUARD_MIN[i]) return true;
+    if (triple[i] < MIGRATE_GUARD_MIN[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * Lazily resolve the host core version (module-level cache; settled once per
+ * process). A failed resolution — the peer package does not resolve, or its
+ * version field is absent/unparsable — returns null (fail-open) and warns
+ * exactly once. Exported so verify-installed.mjs can assert the REAL host
+ * (0.1.2-rc.1) resolves and does not trigger the guard.
+ * @param {{ warn?: (message: string) => void }|undefined} logger
+ * @returns {string|null}
+ */
+export function detectHostCoreVersion(logger) {
+  if (hostCoreVersionSettled) return cachedHostCoreVersion;
+  hostCoreVersionSettled = true;
+  let failure;
+  try {
+    const require = createRequire(import.meta.url);
+    const pkgPath = require.resolve('@deepseek-ai/dsh-session/package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+    const version = typeof pkg?.version === 'string' && pkg.version.trim().length > 0 ? pkg.version.trim() : null;
+    cachedHostCoreVersion = parseCoreVersion(version) ? version : null;
+    if (cachedHostCoreVersion === null) failure = 'unreadable or unparsable @deepseek-ai/dsh-session version';
+  } catch (error) {
+    cachedHostCoreVersion = null;
+    failure = error?.message ?? error;
+  }
+  if (cachedHostCoreVersion === null && failure) {
+    try {
+      logger?.warn?.(`task-coordinator: host core version probe failed (${failure}); migrate guard fail-open — keeping the pre-0.25.1 migrate behavior`);
+    } catch {
+      // a failing logger must never break the op
+    }
+  }
+  return cachedHostCoreVersion;
+}
 
 /**
  * Resolve the workspace a spawn should attach to: the workspace (if any)
@@ -277,7 +365,7 @@ export async function describeModelRoutes(provider, listProviders, listModels) {
  * @returns {TaskOps}
  */
 export function createOps(deps) {
-  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser, listWorkspaces, getWorkspace, resolveModelConfig, listModelProviders, listProviderModels, readUiLocale, readSpawnDefaults, readSessionSnapshot, createSeededSession, archiveSession, probeWorktree } = deps;
+  const { sessionController, agents, createUserMessage, config, limiter, registry, uuid, askUser, listWorkspaces, getWorkspace, resolveModelConfig, listModelProviders, listProviderModels, readUiLocale, readSpawnDefaults, readSessionSnapshot, createSeededSession, archiveSession, probeWorktree, logger } = deps;
 
   const fail = (code, message) => ({ ok: false, code, error: message });
   const failDeny = (denial) => fail(denial.code, denial.message);
@@ -1163,6 +1251,15 @@ export function createOps(deps) {
         return fail(OP_CODES.WORKSPACE_NOT_FOUND, 'no workspace matched: pass workspaceId (see action list) or an exact workspacePath');
       }
       if (mode === 'migrate') {
+        // (0.25.1) Host-upgrade guard: refuse migrate on host core >= 0.1.5,
+        // where the clone route is broken (upstream sessions.flush silently
+        // drops plugin-created sessions — the clone "succeeds" in-process then
+        // vanishes on restart; readSession throws on seeded/forked sessions —
+        // see research/host-upgrade-drift-0.1.2-0.1.5.md face 1 P0/P1). A
+        // failed probe returns null and fail-opens (pre-0.25.1 behavior).
+        if (shouldGuardMigrate(detectHostCoreVersion(logger))) {
+          return fail(OP_CODES.MIGRATE_DISABLED, 'host core >=0.1.5: task_workspace migrate is guard-disabled — upstream sessions.flush no longer persists plugin-created sessions (the clone would "succeed" in-process but vanish on restart) and readSession throws on seeded/forked sessions (upstream regression, unfixed through rc.2); see research/host-upgrade-drift-0.1.2-0.1.5.md face 1 P0/P1. Alternatives: attach/detach still work; cross-workspace migration returns in v0.26 wired to the sessionPersistence.create(header) write-handle seam, or once the host fixes the upstream regression');
+        }
         // (0.16.0) True cross-workspace move. The host never rewrites a
         // session's stored cwd — attach validates against it — so a move is a
         // clone: read the complete log (sessionQuery.readSession), seed a NEW

@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 
 import { resolveConfig, DEFAULTS, WORKSPACE_POLICIES } from '../config.mjs';
 import { checkCaller, checkTarget, SendLimiter, excerpt, blocksToText } from '../safety.mjs';
-import { createOps } from '../ops.mjs';
+import { createOps, parseCoreVersion, shouldGuardMigrate } from '../ops.mjs';
 import { registerTools } from '../tools.mjs';
 import { buildSpawnTitle, mmdd, truncateTopic, firstLine, resolveTitleType, DEFAULT_TITLE_TYPES } from '../title.mjs';
 import { buildSkillsConfig, SKILL_PROVIDER_NAME, SKILLS_DIR } from '../skills.mjs';
@@ -468,6 +468,49 @@ function addLiveAgent(harness, sessionId, { status = 'running', events = [], nex
 }
 
 const SUPERVISOR = { sessionId: 'session-super', cwd: '/work' };
+
+/* ------------------------------------------------------------------ */
+/* host core version guard (0.25.1)                                    */
+/* ------------------------------------------------------------------ */
+
+test('guard: parseCoreVersion — stable + prerelease, garbage null', () => {
+  assert.deepEqual(parseCoreVersion('0.1.2-rc.1'), [0, 1, 2]);
+  assert.deepEqual(parseCoreVersion('0.1.5-rc.1'), [0, 1, 5]);
+  assert.deepEqual(parseCoreVersion('0.1.5-0'), [0, 1, 5]);
+  assert.deepEqual(parseCoreVersion('0.1.5'), [0, 1, 5]);
+  assert.deepEqual(parseCoreVersion('0.2.0'), [0, 2, 0]);
+  assert.deepEqual(parseCoreVersion('10.20.30+build.7'), [10, 20, 30]);
+  assert.equal(parseCoreVersion(''), null);
+  assert.equal(parseCoreVersion('  '), null);
+  assert.equal(parseCoreVersion('not-a-version'), null);
+  assert.equal(parseCoreVersion('v0.1.5'), null);
+  assert.equal(parseCoreVersion(undefined), null);
+  assert.equal(parseCoreVersion(null), null);
+});
+
+test('guard: shouldGuardMigrate three-state (0.25.1)', () => {
+  assert.equal(shouldGuardMigrate('0.1.2-rc.1'), false, '0.1.2 系放行');
+  assert.equal(shouldGuardMigrate('0.1.5-rc.1'), true, '0.1.5 预发布视为新核');
+  assert.equal(shouldGuardMigrate(null), false, 'null fail-open');
+});
+
+test('guard: shouldGuardMigrate boundary (0.25.1)', () => {
+  assert.equal(shouldGuardMigrate('0.1.4'), false);
+  assert.equal(shouldGuardMigrate('0.1.4-rc.9'), false);
+  assert.equal(shouldGuardMigrate('0.1.5'), true);
+  assert.equal(shouldGuardMigrate('0.1.5-0'), true, '0.1.5-0 视为新核');
+  assert.equal(shouldGuardMigrate('0.1.5-rc.2'), true);
+  assert.equal(shouldGuardMigrate('0.1.6'), true);
+  assert.equal(shouldGuardMigrate('0.2.0'), true);
+});
+
+test('guard: shouldGuardMigrate fail-open (0.25.1)', () => {
+  assert.equal(shouldGuardMigrate(undefined), false);
+  assert.equal(shouldGuardMigrate(''), false);
+  assert.equal(shouldGuardMigrate('   '), false);
+  assert.equal(shouldGuardMigrate('garbage'), false);
+  assert.equal(shouldGuardMigrate('0.1'), false, 'two-segment version fails open');
+});
 
 /* ------------------------------------------------------------------ */
 /* ops                                                                 */

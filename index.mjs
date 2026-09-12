@@ -55,7 +55,7 @@ export function apply(ctx, input = {}) {
   // signal bridge consumers map to 503; enabled provides the full payload
   // after createOps below (the instance only exists on that path).
   if (!config.enabled) {
-    ctx.provide('taskCoordinator', { config, version: '0.25.0' });
+    ctx.provide('taskCoordinator', { config, version: '0.25.1' });
     ctx.logger?.info('task-coordinator: disabled by config; no tools registered');
     return;
   }
@@ -291,6 +291,7 @@ export function apply(ctx, input = {}) {
     createSeededSession,
     archiveSession,
     probeWorktree,
+    logger: ctx.logger,
   });
   // 0.24.0 service seam: expose THE ops instance through the provide payload
   // so future bridge plugins (dsh-plugin-task-bridge) reuse this exact
@@ -298,7 +299,7 @@ export function apply(ctx, input = {}) {
   // contract (docs/PROTOCOL.md §17): consumers call members, never replace
   // or wrap them. This is the enabled-branch provide; the disabled early
   // return above provided the reduced payload.
-  ctx.provide('taskCoordinator', { config, version: '0.25.0', ops });
+  ctx.provide('taskCoordinator', { config, version: '0.25.1', ops });
   const dispose = registerTools(ctx, ops, { defineTool }, config);
   const disposeCommands = registerCommands(ctx, ops, uiStrings(readUiLocale()));
   ctx.effect(() => () => {

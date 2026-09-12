@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-09-12
+
+### Changed
+
+- **宿主升级条件守卫：`task_workspace migrate` 在 core ≥0.1.5 期间守卫停用**（漂移预检 `research/host-upgrade-drift-0.1.2-0.1.5.md` 面 1 两条破坏命中的最小外科响应；旧核 0.1.2 系功能零改动）：
+  - **P0/P1 缘由**：宿主升 0.1.5-rc.1 后 ①P0 `sessions.flush` 对插件直建会话（不经 agent-loop 写句柄生命周期）静默不落盘——migrate 克隆假成功、flush 仍返回 true、重启即失；②P1 `readSession` 对 seeded/forked 会话必抛（上游回归，rc.2 未修）。二者叠加使 migrate 的「克隆 + 归档」链在 0.1.5 上不可信。
+  - **条件守卫**：`ops.mjs` 新增模块级惰性宿主核心版本探测（经 `createRequire` 从插件自身解析 `@deepseek-ai/dsh-session/package.json` 的 version）；纯函数 `parseCoreVersion`（数值段解析，忽略预发布标识）+ `shouldGuardMigrate(coreVersion)`（≥0.1.5 含预发布 → 拒绝）判三态：`0.1.2-rc.1→false` / `0.1.5-rc.1→true` / `null→false`。
+  - **fail-open 语义**：解析失败（peer 包不可解析 / version 缺失或畸形）→ 返回 null 并按旧行为放行，仅 logger 警告一次——绝不因探测失败误伤旧核 migrate。
+  - **替代与正修指向**：拒绝报 `migrate-disabled`，文案含两条原因 + 替代路径（attach/detach 仍可用）+ 正修指向（v0.26 改接 `sessionPersistence.create(header)` 新写句柄 seam，或等宿主修复上游回归）。
+- **peerDeps 扩段（文档性防线）**：三条 `@deepseek-ai/*` peer 范围各追加 `|| >=0.1.5-rc.1 <0.1.6`——node-semver 预发布规则要求同 tuple 显式比较器，否则 0.1.5-rc.x 宿主装机 ERESOLVE（copy 部署不跑 npm 解析，此线为文档性防线，对齐 bridge v0.2.0 先例）。
+
+### Tests
+
+- smoke 115→119（+4 块）：`parseCoreVersion` 稳定/预发布/畸形三态、`shouldGuardMigrate` 三态（0.1.2-rc.1→false / 0.1.5-rc.1→true / null→false）、边界（0.1.4→false / 0.1.5→true / 0.1.5-0→true / 0.1.5-rc.2→true / 0.1.6→true / 0.2.0→true）、fail-open（undefined/空串/垃圾 → false）。verify-installed：`detectHostCoreVersion()` 解析真实宿主 0.1.2-rc.1 且不触发守卫 + migrate 旧核放行五步链保持 + `shouldGuardMigrate` 纯函数三态复测。junction 仿真安装位 ALL PASSED；真实安装位复检与活体留总控（红线：本波次不部署）。
+
 ## [0.25.0] - 2026-09-10
 
 ### Added
