@@ -808,6 +808,7 @@ const clientEntry = clientRegistrations[0];
 assert.equal(clientEntry.id, pkg.name, 'client module id must match package name');
 
 const fakeReact = {
+  useRef: (initial) => ({ current: initial }),
   createElement: (type, props, ...children) => ({ type, props, children }),
   // 0.20.0: lazy initializers are real React semantics the orchestration view
   // relies on (useState(() => Date.now())) — invoke them like the host would.
@@ -1034,7 +1035,7 @@ const orchByText = (root, pattern) => {
     revision: 1,
   };
   // 0.20.0: the sessions service stands in behind the gate — the view's
-  // child-card click must sight it through ctx.get() and call open(id);
+  // explicit open action must sight it through ctx.get() and call open(id);
   // 0.21.1 (kept in 0.22.0): binding(id).session.loadOlder() is the
   // history-paging face for long-session window truncation.
   const gatedOpened = [];
@@ -1096,7 +1097,7 @@ const orchByText = (root, pattern) => {
   assert.equal(gatedTabTree.type, 'div', 'settings section renders through the gated ctx with live services');
   // 0.20.0 orchestration view through the gate: the third slot registers with
   // the contract shape (id/order/label), renders the synthetic topology, and
-  // the child-card click sights the sessions service through ctx.get() — the
+  // the explicit open action sights the sessions service through ctx.get() — the
   // sidebar's authoritative navigation primitive (research Q3), unreachable
   // via a direct hostCtx.sessions read under the runner gate.
   assert.equal(gatedSlotInjections[2].name, 'conversation.view');
@@ -1110,7 +1111,9 @@ const orchByText = (root, pattern) => {
   const gatedChildCards = orchCollect(gatedOrchTree, (el) => el.props && String(el.props.className || '').includes('orchViewNode') && el.props['data-role'] === 'child');
   assert.equal(gatedChildCards.length, 2, 'both synthetic children render through the gated ctx');
   gatedChildCards[0].props.onClick();
-  assert.deepEqual(gatedOpened, ['session-alpha'], 'child-card click must navigate via ctx.get("sessions").open');
+  assert.deepEqual(gatedOpened, [], 'selection must not navigate');
+  orchCollect(gatedOrchTree, el => el.props?.className === 'orchViewPrimary')[0].props.onClick();
+  assert.deepEqual(gatedOpened, ['session-alpha'], 'explicit open navigates via ctx.get("sessions").open');
   // 0.21.1 (kept): hasMore seat → history button → loadOlder through the gated face.
   const gatedHistoryBtn = orchCollect(gatedOrchTree, (el) => el.type === 'button' && Array.isArray(el.children) && el.children.some((text) => typeof text === 'string' && /载入更早记录|Load older/.test(text)))[0];
   assert.ok(gatedHistoryBtn, 'the hasMore seat surfaces the load-older button');
@@ -1195,12 +1198,12 @@ assert.deepEqual(orchApi.extractOrchestration({}).children, []);
 assert.deepEqual(orchApi.extractOrchestration({ order: 'not-an-array', nodes: null }).children, []);
 
 // 8c. layout determinism: same extraction → identical layout; teams in
-// code-point order with the ungrouped row LAST; the supervisor sits on top.
+// first-dispatch order with the ungrouped row LAST; the supervisor sits on top.
 const orchLayoutA = orchApi.layoutTopology(orchExtraction);
 const orchLayoutB = orchApi.layoutTopology(orchExtraction);
 assert.equal(JSON.stringify(orchLayoutA), JSON.stringify(orchLayoutB), 'layoutTopology must be deterministic');
-// UTF-16 code-unit order: '乙' (U+4E59) sorts BEFORE '甲' (U+7532).
-assert.deepEqual(orchLayoutA.rows.map((row) => row.team), ['编组乙', '编组甲']);
+// Team A was dispatched first, so it leads even though its name sorts later.
+assert.deepEqual(orchLayoutA.rows.map((row) => row.team), ['编组甲', '编组乙']);
 assert.ok(orchLayoutA.nodes.coordinator, 'the supervisor node always exists');
 assert.equal(orchLayoutA.nodes.coordinator.y, orchApi.ORCH_LAYOUT.padTop, 'supervisor on the top row');
 assert.ok(orchLayoutA.rows.every((row) => row.y > orchLayoutA.nodes.coordinator.y), 'team rows sit below the supervisor');
@@ -1239,27 +1242,27 @@ assert.deepEqual(orchChildCards.map((card) => card.props['data-state']).sort(), 
 const orchCoordCards = orchCollect(orchTree, (el) => el.props && el.props['data-role'] === 'coordinator');
 assert.equal(orchCoordCards.length, 1, 'exactly one supervisor card');
 assert.equal(orchCoordCards[0].props['data-state'], 'running', 'the supervisor state comes from the same sessions source');
-const orchEdgeEls = orchCollect(orchTree, (el) => el.type === 'path' && el.props && String(el.props.className || '').includes('orchViewEdge'));
+const orchEdgeEls = orchCollect(orchTree, (el) => el.type === 'path' && el.props && el.props['data-relation'] === true);
 assert.equal(orchEdgeEls.length, 5, '2 spawn + 1 send + 2 report edges render');
-assert.equal(orchEdgeEls.filter((el) => String(el.props.className).includes('orchViewFlow')).length, 1, 'exactly the RECENT_MS report edge gets the dash-flow shimmer');
+assert.equal(orchEdgeEls.filter((el) => String(el.props.className).includes('orchViewFlow')).length, 0, 'unselected groups do not animate');
 assert.ok(orchByText(orchTree, /steer/), 'the send edge carries its mode label');
 assert.ok(orchByText(orchTree, /1\/3/), 'the todos chip joins n/m from the sessions projection');
 assert.ok(orchByText(orchTree, /编组甲/), 'team names render (chip and/or row label)');
 const orchEmptyTree = orchOccupation.component({ sessionId: 'session-plain' });
 assert.equal(orchEmptyTree.type, 'div');
-assert.ok(orchByText(orchEmptyTree, /未派发子任务|No tasks dispatched/), 'missing seats render the empty-state card');
+assert.ok(orchByText(orchEmptyTree, /暂时无法读取任务关系|Task relationships are unavailable/), 'missing seats render the empty-state card');
 assert.ok(orchCollect(orchEmptyTree, (el) => el.props && el.props['data-kind'] === 'error').length >= 1, 'missing seats render a diagnostics line');
 // 0.21.1 (kept in 0.22.0): a chat window WITHOUT spawn records reports its
 // scanned size — the window-truncation diagnostic behind the empty state.
 const orchWindowTree = orchOccupation.component({ sessionId: 'session-superview', useChat: (selector) => selector({ order: ['n1'], nodes: { get: () => ({ kind: 'text', data: {} }) } }) });
-assert.ok(orchByText(orchWindowTree, /已扫描当前转录窗口 1 条|Scanned 1 nodes/), 'the empty state reports the scanned window size');
+assert.ok(orchByText(orchWindowTree, /已查看 1 条记录|Checked 1 records/), 'the empty state reports the scanned window size');
 const orchBrokenTree = orchOccupation.component({ sessionId: 'session-superview', useChat: () => { throw new Error('chat seat boom'); }, useSessions: orchSessionsSeat });
 assert.ok(orchByText(orchBrokenTree, /chat seat boom/), 'a throwing seat surfaces its reason in a diagnostics line');
 
 // 8f. degraded navigation: without a sessions service in sight (this slotCtx
-// exposes no ctx.get) the child click falls back to copying the session id.
+// exposes no ctx.get) the explicit open action falls back to copying the session id.
 Object.defineProperty(globalThis, 'navigator', { value: { clipboard: { writeText: async (text) => { wrote.push(text); } } }, configurable: true });
-orchChildCards[0].props.onClick();
+orchCollect(orchTree, el => el.props?.className === 'orchViewPrimary')[0].props.onClick();
 await new Promise((resolve) => setImmediate(resolve));
 assert.deepEqual(wrote.slice(-1), ['session-alpha'], 'degraded click copies the session id');
 if (navDesc) Object.defineProperty(globalThis, 'navigator', navDesc);

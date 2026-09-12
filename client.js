@@ -1,6 +1,9 @@
 /**
  * dsh-plugin-task-coordinator — client module (0.25.2)
  *
+ * Current UI: responsive grouped topology with selection, a read-only inspector,
+ * aggregated relations, and explicit navigation. No host writes or new services.
+ *
  * 0.22.0: the card topology is BACK as the orchestration view's form (user
  * verdict after living with the 0.21.x lane timeline: cards + directional
  * SVG edges read better for supervision than abstract lanes). Kept from
@@ -192,16 +195,47 @@ window.__ModuleLoader__.load({
 				"save.rejected": "保存未生效：宿主拒绝了本次写入（已回读核对）。请重试；若持续失败请检查宿主日志。",
 				"action.retry": "重试",
 				// 0.20.0 orchestration view (conversation.view slot, id 'orchestration')
+				"orch.empty.partial": "当前记录中未找到子任务",
+				"orch.empty.unavailable": "暂时无法读取任务关系",
+				"orch.empty.unavailableHint": "会话记录暂不可用。请稍后刷新，或切回对话检查会话是否正常加载。",
+				"orch.service.missing": "会话记录服务不可用",
+				"orch.summary": "{n} 个任务 · {running} 运行中 · {completed} 已完成",
+				"orch.supervising": "监督 {n} 个子任务",
+				"orch.todos.none": "待办未提供",
+				"orch.topology": "任务关系图",
+				"orch.detail": "任务详情",
+				"orch.detail.todos": "待办",
+				"orch.detail.updated": "最近更新",
+				"orch.detail.model": "派发时模型",
+				"orch.detail.goal": "目标阶段",
+				"orch.detail.id": "会话 ID",
+				"orch.detail.unknown": "当前无法读取此会话的实时状态，任务关系来自已加载记录。",
+				"orch.detail.relations": "关系记录",
+				"orch.detail.scope": "本总控已加载的往来记录",
+				"orch.detail.recent": "显示最近 20 条记录",
+				"orch.open": "打开会话",
+				"orch.history.partial": "仅显示已加载记录",
+				"orch.history.loaded": "历史记录已载入",
+				"orch.event.spawn": "已派发",
+				"orch.event.send": "已发送指令",
+				"orch.event.report": "已收到汇报",
+				"orch.event.failed": "指令未送达",
+				"orch.event.unconfirmed": "指令状态未确认",
+				"orch.event.spawnHint": "总控派发了此子任务。",
+				"orch.event.reportHint": "此任务向总控发送了汇报。",
+				"orch.event.steerHint": "总控发送了插入执行指令（steer）。",
+				"orch.event.queueHint": "总控发送了后续执行指令（queue）。",
+				"orch.event.failedHint": "此次指令投递失败，未计入成功连线。",
 				"view.tab": "编排",
-				"orch.empty.title": "本会话未派发子任务",
-				"orch.empty.hint": "用 task_spawn / task_spawn_batch 派发子任务后，这里会实时呈现以本会话为总控的编排拓扑。",
+				"orch.empty.title": "本会话尚未派发子任务",
+				"orch.empty.hint": "在对话中让总控拆分并派发任务后，即可在这里查看任务关系与进展。",
 				"orch.empty.suffix": "在子会话或普通会话中打开本页时同样显示此空态——编排视图以当前会话为总控。",
 				"orch.coordinator": "总控",
 				"orch.ungrouped": "未编组",
 				"orch.status.running": "运行中",
 				"orch.status.idle": "空闲",
 				"orch.status.completed": "已完成",
-				"orch.status.unknown": "离线",
+				"orch.status.unknown": "状态未知",
 				"orch.todos": "待办 {done}/{total}",
 				"orch.goal": "阶段 {phase}",
 				"orch.refresh": "刷新",
@@ -224,12 +258,12 @@ window.__ModuleLoader__.load({
 				"orch.legend.spawn": "派发",
 				"orch.legend.send": "指令",
 				"orch.legend.report": "汇报",
-				"orch.legend.recent": "2 分钟内有活动",
+				"orch.legend.recent": "流动连线 · 组内最近 2 分钟有往来",
 				"orch.history.more": "载入更早记录",
 				"orch.history.loading": "正在加载更早记录…",
 				"orch.history.failed": "载入更早记录失败：{message}",
-				"orch.empty.scanned": "已扫描当前转录窗口 {n} 条节点，未发现派发记录。",
-				"orch.empty.windowHint": "长会话的早期派发可能在尚未加载的历史窗口里——点「载入更早记录」逐页回溯后自动重提取。"
+				"orch.empty.scanned": "已查看 {n} 条记录，未发现派发记录。",
+				"orch.empty.windowHint": "早期派发可能尚未加载。载入更早记录后，任务关系会自动补充。"
 			},
 			en: {
 				"header.action": "Copy Session ID",
@@ -266,16 +300,47 @@ window.__ModuleLoader__.load({
 				"save.rejected": "Save did not take effect: the host rejected the write (verified by read-back). Retry; if it keeps failing, check the host log.",
 				"action.retry": "Retry",
 				// 0.20.0 orchestration view (conversation.view slot, id 'orchestration')
+				"orch.empty.partial": "No child tasks in the loaded records",
+				"orch.empty.unavailable": "Task relationships are unavailable",
+				"orch.empty.unavailableHint": "Session records are unavailable. Refresh later or check that the conversation has loaded.",
+				"orch.service.missing": "Session records service unavailable",
+				"orch.summary": "{n} tasks · {running} running · {completed} completed",
+				"orch.supervising": "Supervising {n} child tasks",
+				"orch.todos.none": "No to-do data",
+				"orch.topology": "Task relationships",
+				"orch.detail": "Task details",
+				"orch.detail.todos": "To-dos",
+				"orch.detail.updated": "Last updated",
+				"orch.detail.model": "Model at dispatch",
+				"orch.detail.goal": "Goal phase",
+				"orch.detail.id": "Session ID",
+				"orch.detail.unknown": "Live status is unavailable. Relationships come from the loaded records.",
+				"orch.detail.relations": "Relation history",
+				"orch.detail.scope": "Exchanges loaded in this supervisor session",
+				"orch.detail.recent": "Showing the latest 20 records",
+				"orch.open": "Open conversation",
+				"orch.history.partial": "Loaded records only",
+				"orch.history.loaded": "History loaded",
+				"orch.event.spawn": "Dispatched",
+				"orch.event.send": "Instruction sent",
+				"orch.event.report": "Report received",
+				"orch.event.failed": "Instruction not delivered",
+				"orch.event.unconfirmed": "Delivery unconfirmed",
+				"orch.event.spawnHint": "The supervisor dispatched this task.",
+				"orch.event.reportHint": "This task sent a report to the supervisor.",
+				"orch.event.steerHint": "The supervisor sent a mid-run instruction (steer).",
+				"orch.event.queueHint": "The supervisor sent a follow-up instruction (queue).",
+				"orch.event.failedHint": "Delivery failed and is excluded from successful links.",
 				"view.tab": "Orchestration",
-				"orch.empty.title": "No tasks dispatched from this session",
-				"orch.empty.hint": "Dispatch sub-tasks with task_spawn / task_spawn_batch and this tab renders the live topology with this session as the supervisor.",
+				"orch.empty.title": "No tasks dispatched in this session",
+				"orch.empty.hint": "Ask the supervisor to split and dispatch tasks in the conversation. Their relationships and progress will appear here.",
 				"orch.empty.suffix": "Opening this tab inside a child session or a plain session shows the same empty state — the view always anchors on the current session.",
 				"orch.coordinator": "Supervisor",
 				"orch.ungrouped": "Ungrouped",
 				"orch.status.running": "Running",
 				"orch.status.idle": "Idle",
 				"orch.status.completed": "Completed",
-				"orch.status.unknown": "Offline",
+				"orch.status.unknown": "Unknown",
 				"orch.todos": "Todos {done}/{total}",
 				"orch.goal": "Phase {phase}",
 				"orch.refresh": "Refresh",
@@ -298,12 +363,12 @@ window.__ModuleLoader__.load({
 				"orch.legend.spawn": "spawn",
 				"orch.legend.send": "message",
 				"orch.legend.report": "report",
-				"orch.legend.recent": "active within 2 min",
+				"orch.legend.recent": "Flow: activity in the selected group within 2 minutes",
 				"orch.history.more": "Load older records",
 				"orch.history.loading": "Loading older records…",
 				"orch.history.failed": "Loading older records failed: {message}",
-				"orch.empty.scanned": "Scanned {n} nodes in the loaded transcript window; no dispatch records found.",
-				"orch.empty.windowHint": "In long sessions the early spawns may sit in the not-yet-loaded history window — page back with Load older records; the view re-extracts automatically."
+				"orch.empty.scanned": "Checked {n} records; no dispatches found.",
+				"orch.empty.windowHint": "Earlier dispatches may not be loaded yet. Load older records to extend the task overview."
 			}
 		};
 		/** Live LocaleRuntime (register/translate/getSnapshot/subscribe) when present. */
@@ -851,53 +916,140 @@ window.__ModuleLoader__.load({
 		// --- orchestration view (0.20.0) ---------------------------------------
 		/** Style element id for the orchestration view (deduped per document). */
 		const STYLE_ID_ORCH = "dsh-plugin-task-coordinator/orchestration-view";
-		const ORCH_CSS = [
-			".orchViewRoot{max-width:calc(var(--dsh-chat-content-width,920px) + 32px);width:100%;margin:0 auto;padding:24px 16px 48px;box-sizing:border-box;display:flex;flex-direction:column;gap:12px;min-height:100%;font-family:var(--dsw-font-family,inherit)}",
-			".orchViewToolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}",
-			".orchViewTitle{margin:0;font-size:16px;font-weight:600;color:var(--dsw-alias-label-primary,#0f1115)}",
-			".orchViewMeta{font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary,#5b616e)}",
-			".orchViewFlash{margin:0;font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary,#5b616e)}",
-			".orchViewFlash[data-kind='error']{color:var(--dsw-alias-danger,#c0392b)}",
-			".orchViewBtn{height:28px;padding:0 12px;border-radius:14px;border:1px solid var(--dsw-alias-border-l2,#0000001f);background:transparent;color:var(--dsw-alias-label-secondary,#5b616e);cursor:pointer;font-size:12px;font-family:var(--dsh-font-family,inherit)}",
-			".orchViewBtn:hover{color:var(--dsw-alias-label-primary,#0f1115)}",
-			".orchViewCanvas{position:relative;overflow:auto;border:1px solid var(--dsw-alias-border-l2,#00000014);border-radius:12px;background:var(--dsw-alias-bg-module-platform,#fafbfc)}",
-			".orchViewLayer{position:relative;margin:0 auto}",
-			".orchViewSvg{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}",
-			".orchViewRowLabel{position:absolute;font-size:12px;line-height:22px;color:var(--dsw-alias-label-secondary,#5b616e);white-space:nowrap}",
-			".orchViewNode{position:absolute;box-sizing:border-box;width:240px;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2,#0000001f);border-radius:10px;background:var(--dsw-alias-bg-module-platform,#fff);color:var(--dsw-alias-label-primary,#0f1115);cursor:pointer;text-align:left;font-family:var(--dsw-font-family,inherit)}",
-			".orchViewNode:hover{border-color:var(--dsw-alias-label-secondary,#5b616e)}",
-			".orchViewNode[data-role='coordinator']{border-width:2px;cursor:default}",
-			".orchViewNodeTitle{font-size:13px;font-weight:600;line-height:18px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}",
-			".orchViewNodeMeta{display:flex;gap:8px;align-items:baseline;margin-top:2px;min-width:0}",
-			".orchViewId{font-size:11px;color:var(--dsw-alias-label-secondary,#5b616e);font-family:ui-monospace,SFMono-Regular,Consolas,monospace}",
-			".orchViewModel{font-size:11px;color:var(--dsw-alias-label-secondary,#5b616e);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-			".orchViewChips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}",
-			".orchViewChip{font-size:11px;line-height:18px;padding:0 8px;border-radius:9px;background:var(--dsw-alias-bg-module-embed,#f0f1f3);color:var(--dsw-alias-label-secondary,#5b616e);white-space:nowrap}",
-			".orchViewChip[data-kind='team']{color:var(--dsw-alias-label-primary,#0f1115)}",
-			".orchViewChip[data-kind='status'][data-state='running']{color:var(--dsw-alias-accent,#2563eb);background:rgba(37,99,235,.12)}",
-			".orchViewChip[data-kind='status'][data-state='completed']{color:var(--dsw-alias-success,#16a34a);background:rgba(22,163,74,.12)}",
-			".orchViewChip[data-kind='status'][data-state='unknown']{opacity:.7}",
-			".orchViewNodeTime{margin-top:4px;font-size:11px;color:var(--dsw-alias-label-secondary,#5b616e)}",
-			".orchViewBreath{animation:orchViewBreathKf 2s ease-in-out infinite}",
-			"@keyframes orchViewBreathKf{0%,100%{box-shadow:0 0 0 0 rgba(37,99,235,.3)}50%{box-shadow:0 0 0 7px rgba(37,99,235,0)}}",
-			".orchViewEdge{fill:none;stroke-width:1.5}",
-			".orchViewEdgeSpawn{stroke:var(--dsw-alias-border-l2,#c9ced6)}",
-			".orchViewEdgeSend{stroke:var(--dsw-alias-accent,#2563eb)}",
-			".orchViewEdgeReport{stroke:var(--dsw-alias-label-secondary,#8a919e);stroke-dasharray:6 4}",
-			".orchViewFlow{stroke-dasharray:8 6;animation:orchViewFlowKf 1.1s linear infinite}",
-			"@keyframes orchViewFlowKf{to{stroke-dashoffset:-28}}",
-			".orchViewEdgeLabel{font-size:10px;fill:var(--dsw-alias-label-secondary,#5b616e)}",
-			".orchViewLegend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--dsw-alias-label-secondary,#5b616e);align-items:center}",
-			".orchViewLegendKey{display:inline-block;width:18px;height:0;border-top:2px solid var(--dsw-alias-border-l2,#c9ced6);vertical-align:middle;margin-right:4px}",
-			".orchViewLegendKey[data-kind='send']{border-top-color:var(--dsw-alias-accent,#2563eb)}",
-			".orchViewLegendKey[data-kind='report']{border-top-style:dashed;border-top-color:var(--dsw-alias-label-secondary,#8a919e)}",
-			".orchViewEmpty{display:flex;flex-direction:column;gap:8px;padding:32px 24px;border:1px dashed var(--dsw-alias-border-l2,#0000001f);border-radius:12px;max-width:560px;margin:24px auto 0;text-align:center}",
-			".orchViewEmptyTitle{margin:0;font-size:15px;font-weight:600;color:var(--dsw-alias-label-primary,#0f1115)}",
-			".orchViewEmptyText{margin:0;font-size:13px;line-height:21px;color:var(--dsw-alias-label-secondary,#5b616e)}",
-			"@media (prefers-reduced-motion: reduce){.orchViewBreath{animation:none}.orchViewFlow{animation:none}}"
-		].join("\n");
+		const ORCH_CSS = `
+.orchViewRoot{--orch-ink:var(--dsw-alias-label-primary,#161b26);--orch-muted:var(--dsw-alias-label-secondary,#687284);--orch-line:var(--dsw-alias-border-l2,#e3e7ee);--orch-surface:var(--dsw-alias-bg-base,#fff);--orch-soft:var(--dsw-alias-bg-module-platform,#f5f6f9);--orch-accent:var(--dsw-alias-state-business-primary,#4176e6);--orch-green:color-mix(in srgb,var(--dsw-alias-state-success-primary,#22c55e) 65%,var(--orch-ink));max-width:1440px;width:100%;min-width:0;align-self:center;margin:0 auto;min-height:100%;box-sizing:border-box;color:var(--orch-ink);font-family:var(--dsw-font-family,inherit);container:orch / inline-size;font-size:14px;line-height:1.5}
+.orchViewRoot *{box-sizing:border-box}
+.orchViewRoot{padding-bottom:calc(var(--dsh-composer-height,0px) + 24px)}
+.orchViewRoot ::selection{background:color-mix(in srgb,var(--orch-accent) 20%,transparent)}
+.orchViewRoot button{font:inherit;cursor:pointer}
+.orchViewRoot button:focus-visible{outline:2px solid var(--orch-accent);outline-offset:4px}
+.orchViewRoot button:disabled{cursor:wait;opacity:.5}
+.orchViewWorkspace{display:grid;grid-template-columns:minmax(0,1fr) 350px;align-items:start;min-height:600px}
+.orchViewMain{min-width:0;padding:30px 24px 26px;display:flex;flex-direction:column;min-height:600px}
+.orchViewToolbar{display:flex;gap:18px;align-items:start;justify-content:space-between;flex-wrap:wrap;margin-bottom:30px}
+.orchViewHeading{min-width:0;flex:1 1 260px}
+.orchViewHeadingLine{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.orchViewTitle{margin:0;font-size:23px;line-height:1.4;font-weight:650;overflow-wrap:anywhere}
+.orchViewMeta{margin:10px 0 0;color:var(--orch-muted);font-size:13px;line-height:22px}
+.orchViewHistory{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--orch-muted);padding-top:6px}
+.orchViewBtn{display:inline-flex;gap:6px;align-items:center;justify-content:center;min-height:32px;border:1px solid var(--orch-line);padding:4px 10px;border-radius:7px;background:transparent;color:var(--orch-muted);white-space:nowrap}
+.orchViewBtn:hover{background:var(--orch-soft);color:var(--orch-ink)}
+.orchViewLink{border:0;padding:4px;color:var(--orch-accent);background:none;font-size:12px!important;min-height:32px}
+.orchViewFlash{font-size:13px;color:var(--orch-muted);margin:0 24px 12px;overflow-wrap:anywhere}
+.orchViewFlash[data-kind='error']{color:var(--dsw-alias-danger,#bd3333)}
+.orchViewCanvas{position:relative;min-width:0;overflow:auto;scrollbar-width:thin;scrollbar-color:var(--orch-line) transparent}
+.orchViewLayer{position:relative;margin:0 auto;max-width:100%}
+.orchViewSvg{position:absolute;inset:0;pointer-events:none;overflow:visible}
+.orchViewGroup{position:absolute;border:1px solid var(--orch-line);border-radius:10px;background:var(--orch-surface)}
+.orchViewGroupHeading{display:flex;gap:8px;align-items:center;height:48px;padding:0 12px;background:color-mix(in srgb,var(--orch-soft) 64%,transparent);border-radius:9px 9px 0 0;min-width:0}
+.orchViewGroupHeading h3{margin:0;min-width:0;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.orchViewCount{font-size:12px;color:var(--orch-muted);font-variant-numeric:tabular-nums}
+.orchViewNode{position:absolute;padding:13px 10px;border:1px solid var(--orch-line);border-radius:9px;background:var(--orch-surface);color:var(--orch-ink);text-align:left;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:8px;transition:border-color 140ms,background-color 140ms}
+.orchViewNode:hover{border-color:color-mix(in srgb,var(--orch-accent) 50%,var(--orch-line))}
+.orchViewNode[aria-pressed='true']{border-color:var(--orch-accent);background:color-mix(in srgb,var(--orch-accent) 4%,var(--orch-surface));box-shadow:0 0 0 1px var(--orch-accent) inset}
+.orchViewNode[data-role='coordinator']{border-color:color-mix(in srgb,var(--orch-accent) 60%,var(--orch-line));background:color-mix(in srgb,var(--orch-accent) 4%,var(--orch-surface));flex-direction:row;align-items:flex-start;padding:18px;gap:12px;cursor:default}
+.orchViewNodeTitle{font-size:14px;line-height:21px;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;max-width:100%}
+.orchViewCoordinatorCopy{min-width:0;display:flex;flex-direction:column;gap:6px}
+.orchViewNodeChips{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.orchViewChip{display:inline-flex;align-items:center;gap:6px;font-size:13px;line-height:19px;white-space:nowrap;color:var(--orch-muted)}
+.orchViewChip[data-kind='status']::before{content:'';width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+.orchViewChip[data-state='running']{color:var(--orch-accent)}
+.orchViewChip[data-state='completed']{color:var(--orch-green)}
+.orchViewChip[data-state='unknown']{color:var(--orch-muted)}
+.orchViewRole{font-size:12px;color:var(--orch-muted);background:var(--orch-soft);padding:2px 8px;border-radius:6px}
+.orchViewNodeTodo{font-size:13px;color:var(--orch-muted);font-variant-numeric:tabular-nums}
+.orchViewId{font-size:11px;color:var(--orch-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;margin-top:auto}
+.orchViewModel{font-size:12px;color:var(--orch-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.orchViewIconTile{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:8px;background:var(--orch-soft);color:var(--orch-muted);flex:none}
+.orchViewNode[aria-pressed='true'] .orchViewIconTile,.orchViewNode[data-role='coordinator'] .orchViewIconTile{background:color-mix(in srgb,var(--orch-accent) 10%,transparent);color:var(--orch-accent)}
+.orchViewIcon{display:inline-block;width:19px;height:19px;flex:none;background:currentColor;mask:var(--orch-icon) center/contain no-repeat}
+.orchViewEdge{fill:none;stroke:var(--orch-line);stroke-width:1.35}
+.orchViewEdgeSend{stroke:var(--orch-accent);stroke-width:1.7}
+.orchViewEdgeReport{stroke:var(--orch-muted);stroke-dasharray:5 4;opacity:.55}
+.orchViewEdge[data-selected='false']{stroke:var(--orch-line);opacity:.8}
+.orchViewFlow{stroke-dasharray:6 5;animation:orchViewFlowKf 1.5s linear infinite}
+.orchViewEdgeReport.orchViewFlow{animation-direction:reverse}
+@keyframes orchViewFlowKf{to{stroke-dashoffset:-22}}
+.orchViewEdgeLabel{font-size:11px;fill:var(--orch-muted)}
+.orchViewLegend{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:auto;padding-top:32px;font-size:11px;color:var(--orch-muted)}
+.orchViewLegend span{display:inline-flex;gap:6px;align-items:center}
+.orchViewLegendKey{width:23px;border-top:1.5px solid var(--orch-line)}
+.orchViewLegendKey[data-kind='send']{border-color:var(--orch-accent)}
+.orchViewLegendKey[data-kind='report']{border-color:var(--orch-muted);border-top-style:dashed}
+.orchViewInspector{border-left:1px solid var(--orch-line);padding:30px 24px;min-width:0;align-self:stretch;overflow-wrap:anywhere}
+.orchViewInspectorTop{display:flex;gap:10px;align-items:start;justify-content:space-between}
+.orchViewInspector h2{font-size:21px;line-height:1.4;margin:0;font-weight:650}
+.orchViewInspectorStatus{display:flex;gap:12px;align-items:center;margin:16px 0 12px}
+.orchViewBreadcrumb{font-size:12px;color:var(--orch-muted);margin:0 0 26px;overflow-wrap:anywhere}
+.orchViewFacts{display:grid;grid-template-columns:72px 72px minmax(0,1fr);gap:16px 12px;margin:0 0 24px}
+.orchViewFacts div{min-width:0}
+.orchViewFacts dt{font-size:12px;color:var(--orch-muted);margin-bottom:4px}
+.orchViewFacts dd{margin:0;font-size:14px;overflow-wrap:anywhere}
+.orchViewFacts .orchViewTodoValue{font-size:25px;font-weight:600;line-height:1.25;font-variant-numeric:tabular-nums}
+.orchViewFactModel{grid-column:auto}
+.orchViewPrimary{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:38px;border:0;border-radius:7px;background:var(--orch-ink);color:var(--orch-surface);font-size:13px!important}
+.orchViewPrimary:hover{opacity:.88}
+.orchViewRelations{border-top:1px solid var(--orch-line);margin-top:28px;padding-top:24px}
+.orchViewRelations h3{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:14px;font-weight:600}
+.orchViewRelationHint{font-size:11px;color:var(--orch-muted);margin:0 0 20px}
+.orchViewEvents{list-style:none;padding:0;margin:0}
+.orchViewEvent{position:relative;padding:0 0 25px 21px;border-left:1px solid var(--orch-line);margin-left:5px}
+.orchViewEvent:last-child{border-left-color:transparent;padding-bottom:0}
+.orchViewEvent::before{content:'';position:absolute;left:-5px;top:5px;width:9px;height:9px;border-radius:50%;background:var(--orch-muted);box-shadow:0 0 0 4px var(--orch-surface)}
+.orchViewEvent[data-kind='send']::before{background:var(--orch-accent)}
+.orchViewEvent[data-failed='true']::before{background:var(--dsw-alias-danger,#bd3333)}
+.orchViewEventHeading{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.orchViewEventHeading strong{font-size:13px;font-weight:600}
+.orchViewEventHeading time{font-size:11px;color:var(--orch-muted);white-space:nowrap}
+.orchViewEvent p{font-size:12px;color:var(--orch-muted);margin:5px 0 0;line-height:1.65}
+.orchViewEmpty{padding:70px 24px;max-width:480px;margin:0 auto;text-align:center}
+.orchViewEmpty h2{font-size:20px;margin:16px 0 10px}
+.orchViewEmpty p{font-size:13px;line-height:1.8;color:var(--orch-muted);margin:8px 0 20px}
+.orchViewEmpty .orchViewIconTile{width:48px;height:48px;margin:0 auto}
+@container orch (max-width:900px){.orchViewWorkspace{grid-template-columns:minmax(0,1fr);min-height:0}.orchViewMain{min-height:0}.orchViewInspector{border-left:0;border-top:1px solid var(--orch-line)}.orchViewFacts{grid-template-columns:1fr 1fr 2fr}.orchViewFactModel{grid-column:auto}.orchViewInspector .orchViewPrimary{max-width:300px}.orchViewLegend{margin-top:0}.orchViewToolbar{margin-bottom:20px}}
+@container orch (max-width:460px){.orchViewMain,.orchViewInspector{padding:20px 12px}.orchViewTitle{font-size:20px}.orchViewFacts{grid-template-columns:1fr 1fr}.orchViewFactModel{grid-column:auto}.orchViewHistory{padding:0}.orchViewNode{padding:12px 8px}.orchViewNodeTitle{font-size:13px}.orchViewLegend{gap:12px}}
+@media(prefers-reduced-motion:reduce){.orchViewFlow{animation:none}.orchViewNode{transition:none}}
+`;
+
+		/* Tabler Icons 3.44.0, bundled SVG sources (https://tabler.io/icons).
+ * MIT License
+ *
+ * Copyright (c) 2020-2026 Paweł Kuna
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+		const ORCH_ICONS = {
+  "task": "<svg\n  xmlns=\"http://www.w3.org/2000/svg\"\n  width=\"24\"\n  height=\"24\"\n  viewBox=\"0 0 24 24\"\n  fill=\"none\"\n  stroke=\"currentColor\"\n  stroke-width=\"2\"\n  stroke-linecap=\"round\"\n  stroke-linejoin=\"round\"\n  class=\"icon icon-tabler icons-tabler-outline icon-tabler-layout-navbar\"\n>\n  <path stroke=\"none\" d=\"M0 0h24v24H0z\" fill=\"none\" />\n  <path d=\"M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2l0 -12\" />\n  <path d=\"M4 9l16 0\" />\n</svg>",
+  "supervisor": "<svg\n  xmlns=\"http://www.w3.org/2000/svg\"\n  width=\"24\"\n  height=\"24\"\n  viewBox=\"0 0 24 24\"\n  fill=\"none\"\n  stroke=\"currentColor\"\n  stroke-width=\"2\"\n  stroke-linecap=\"round\"\n  stroke-linejoin=\"round\"\n  class=\"icon icon-tabler icons-tabler-outline icon-tabler-user\"\n>\n  <path stroke=\"none\" d=\"M0 0h24v24H0z\" fill=\"none\" />\n  <path d=\"M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0\" />\n  <path d=\"M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2\" />\n</svg>",
+  "group": "<svg\n  xmlns=\"http://www.w3.org/2000/svg\"\n  width=\"24\"\n  height=\"24\"\n  viewBox=\"0 0 24 24\"\n  fill=\"none\"\n  stroke=\"currentColor\"\n  stroke-width=\"2\"\n  stroke-linecap=\"round\"\n  stroke-linejoin=\"round\"\n  class=\"icon icon-tabler icons-tabler-outline icon-tabler-subtask\"\n>\n  <path stroke=\"none\" d=\"M0 0h24v24H0z\" fill=\"none\" />\n  <path d=\"M6 9l6 0\" />\n  <path d=\"M4 5l4 0\" />\n  <path d=\"M6 5v11a1 1 0 0 0 1 1h5\" />\n  <path d=\"M12 8a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-6a1 1 0 0 1 -1 -1l0 -2\" />\n  <path d=\"M12 16a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-6a1 1 0 0 1 -1 -1l0 -2\" />\n</svg>",
+  "done": "<svg\n  xmlns=\"http://www.w3.org/2000/svg\"\n  width=\"24\"\n  height=\"24\"\n  viewBox=\"0 0 24 24\"\n  fill=\"none\"\n  stroke=\"currentColor\"\n  stroke-width=\"2\"\n  stroke-linecap=\"round\"\n  stroke-linejoin=\"round\"\n  class=\"icon icon-tabler icons-tabler-outline icon-tabler-circle-check\"\n>\n  <path stroke=\"none\" d=\"M0 0h24v24H0z\" fill=\"none\" />\n  <path d=\"M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0\" />\n  <path d=\"M9 12l2 2l4 -4\" />\n</svg>",
+  "unknown": "<svg\n  xmlns=\"http://www.w3.org/2000/svg\"\n  width=\"24\"\n  height=\"24\"\n  viewBox=\"0 0 24 24\"\n  fill=\"none\"\n  stroke=\"currentColor\"\n  stroke-width=\"2\"\n  stroke-linecap=\"round\"\n  stroke-linejoin=\"round\"\n  class=\"icon icon-tabler icons-tabler-outline icon-tabler-help-circle\"\n>\n  <path stroke=\"none\" d=\"M0 0h24v24H0z\" fill=\"none\" />\n  <path d=\"M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0\" />\n  <path d=\"M12 16v.01\" />\n  <path d=\"M12 13a2 2 0 0 0 .914 -3.782a1.98 1.98 0 0 0 -2.414 .483\" />\n</svg>",
+  "external": "<svg\n  xmlns=\"http://www.w3.org/2000/svg\"\n  width=\"24\"\n  height=\"24\"\n  viewBox=\"0 0 24 24\"\n  fill=\"none\"\n  stroke=\"currentColor\"\n  stroke-width=\"2\"\n  stroke-linecap=\"round\"\n  stroke-linejoin=\"round\"\n  class=\"icon icon-tabler icons-tabler-outline icon-tabler-external-link\"\n>\n  <path stroke=\"none\" d=\"M0 0h24v24H0z\" fill=\"none\" />\n  <path d=\"M12 6h-6a2 2 0 0 0 -2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-6\" />\n  <path d=\"M11 13l9 -9\" />\n  <path d=\"M15 4h5v5\" />\n</svg>",
+  "refresh": "<svg\n  xmlns=\"http://www.w3.org/2000/svg\"\n  width=\"24\"\n  height=\"24\"\n  viewBox=\"0 0 24 24\"\n  fill=\"none\"\n  stroke=\"currentColor\"\n  stroke-width=\"2\"\n  stroke-linecap=\"round\"\n  stroke-linejoin=\"round\"\n  class=\"icon icon-tabler icons-tabler-outline icon-tabler-refresh\"\n>\n  <path stroke=\"none\" d=\"M0 0h24v24H0z\" fill=\"none\" />\n  <path d=\"M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4\" />\n  <path d=\"M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4\" />\n</svg>"
+};
 		function installOrchStyles() {
-			if (document.querySelector(`style[data-plugin="${STYLE_ID_ORCH}"]`) !== null) return () => {};
+			const existing = document.querySelector(`style[data-plugin="${STYLE_ID_ORCH}"]`);
+			if (existing !== null) {
+				// A client-module remount can retain the document's old style tag.
+				if (existing.textContent !== ORCH_CSS) existing.textContent = ORCH_CSS;
+				return () => {};
+			}
 			const style = document.createElement("style");
 			style.dataset.plugin = STYLE_ID_ORCH;
 			style.textContent = ORCH_CSS;
@@ -909,7 +1061,7 @@ window.__ModuleLoader__.load({
 		/** Sentinel node id for the supervisor (the CURRENT session anchors the view). */
 		const ORCH_COORD = "coordinator";
 		/** Deterministic layered-layout metrics (px). */
-		const ORCH_LAYOUT = { nodeW: 240, nodeH: 108, gapX: 24, rowGap: 56, labelH: 22, padX: 16, padTop: 16, padBottom: 16 };
+		const ORCH_LAYOUT = { nodeW: 156, nodeH: 188, gapX: 24, padTop: 16 };
 
 		/** Best-effort JSON object parse: malformed / streaming-incomplete text → null. */
 		function orchParseJson(text) {
@@ -1011,7 +1163,7 @@ window.__ModuleLoader__.load({
 					kind: "send", from: ORCH_COORD, to: target, time, mode,
 					messageId: typeof record.messageId === "string" ? record.messageId : undefined,
 					reference: typeof args?.reference === "string" ? args.reference : undefined,
-					delivered: result ? record.delivered !== false : undefined
+					delivered: result ? record.ok !== false && record.delivered !== false : undefined
 				});
 				return;
 			}
@@ -1078,55 +1230,96 @@ window.__ModuleLoader__.load({
 		}
 		/**
 		 * PURE deterministic layered layout (no physics, no randomness): the
-		 * supervisor node centered on top; one row per team below (teams in
-		 * code-point order, the ungrouped row LAST); children inside a row in
+		 * supervisor node centered on top; compact teams below (teams in
+		 * first-dispatch order, the ungrouped row LAST); children inside a team in
 		 * extraction order (spawn time, then session id). Same input → same
 		 * output on every call and every machine.
 		 * @returns {{ nodes: Record<string, {x:number,y:number}>, rows: {team:string,y:number,ids:string[]}[], size: {width:number,height:number} }}
 		 */
-		function layoutTopology(extraction) {
+		/** Pack teams by their actual card counts rather than equal-width slots.
+		 * Large teams wrap internally; later bands route through the outer gutter. */
+		function layoutTopology(extraction, availableWidth = 800) {
 			const L = ORCH_LAYOUT;
-			const children = extraction && Array.isArray(extraction.children) ? extraction.children : [];
+			const width = Math.max(216, Number.isFinite(availableWidth) ? Math.floor(availableWidth) : 800);
 			const groups = new Map();
-			for (const child of children) {
+			for (const child of extraction?.children || []) {
 				if (!child || typeof child.sessionId !== "string") continue;
-				const team = typeof child.team === "string" && child.team.length > 0 ? child.team : "";
-				const bucket = groups.get(team);
-				if (bucket) bucket.push(child);
-				else groups.set(team, [child]);
+				const team = typeof child.team === "string" ? child.team : "";
+				if (!groups.has(team)) groups.set(team, []);
+				groups.get(team).push(child);
 			}
-			const grouped = [...groups.keys()].filter((team) => team !== "").sort((left, right) => (left < right ? -1 : 1));
-			const ordered = groups.has("") ? [...grouped, ""] : grouped;
-			const rows = ordered.map((team, index) => {
-				// In-row order is the extraction's (spawn time, then session id) —
-				// re-sorted here so the pure layout stays deterministic even when
-				// fed unsorted children directly.
-				const bucket = groups.get(team).slice()
-					.sort((left, right) => ((left.time ?? 0) - (right.time ?? 0)) || (left.sessionId < right.sessionId ? -1 : 1));
-				return {
-					team,
-					y: L.padTop + L.nodeH + L.rowGap + L.labelH + index * (L.labelH + L.nodeH + L.rowGap),
-					ids: bucket.map((child) => child.sessionId),
-					width: bucket.length * L.nodeW + (bucket.length - 1) * L.gapX
-				};
+			const firstDispatch = team => groups.get(team).reduce((first, child) => Math.min(first, child.time || 0), Infinity);
+			const teams = [...groups.keys()].filter(Boolean).sort((a,b) => firstDispatch(a) - firstDispatch(b) || (a < b ? -1 : 1));
+			if (groups.has("")) teams.push("");
+			const innerWidth = width - 24;
+			const maxColumns = Math.max(1, Math.min(3, Math.floor((innerWidth - 12) / 122)));
+			const minCardWidth = Math.min(110, innerWidth - 24);
+			const specifications = teams.map(team => {
+				const bucket = groups.get(team).slice().sort((a,b) => ((a.time ?? 0) - (b.time ?? 0)) || (a.sessionId < b.sessionId ? -1 : 1));
+				const columns = Math.min(maxColumns, bucket.length);
+				return { team, bucket, columns, minWidth: 24 + columns * minCardWidth + (columns - 1) * 12 };
 			});
-			const contentWidth = Math.max(L.nodeW, ...rows.map((row) => row.width));
-			const nodes = {};
-			nodes[ORCH_COORD] = { x: (contentWidth - L.nodeW) / 2, y: L.padTop };
-			for (const row of rows) {
-				row.ids.forEach((id, column) => {
-					nodes[id] = { x: (contentWidth - row.width) / 2 + column * (L.nodeW + L.gapX), y: row.y + L.labelH };
-				});
-			}
-			const lastRow = rows.length > 0 ? rows[rows.length - 1] : null;
-			return {
-				nodes,
-				rows,
-				size: {
-					width: contentWidth + L.padX * 2,
-					height: lastRow ? lastRow.y + L.labelH + L.nodeH + L.padBottom : L.padTop + L.nodeH + L.padBottom
+			const bands = [];
+			let band = [], usedWidth = 0;
+			for (const spec of specifications) {
+				const nextWidth = usedWidth + (band.length ? L.gapX : 0) + spec.minWidth;
+				if (band.length && (band.length === 3 || nextWidth > innerWidth)) {
+					bands.push(band); band = []; usedWidth = 0;
 				}
-			};
+				usedWidth += (band.length ? L.gapX : 0) + spec.minWidth;
+				band.push(spec);
+			}
+			if (band.length) bands.push(band);
+			const nodes = Object.create(null);
+			const coordWidth = Math.min(258, width - 24);
+			nodes[ORCH_COORD] = { x: (width - coordWidth) / 2, y: L.padTop, width: coordWidth, height: 132 };
+			const rows = [];
+			let y = L.padTop + 132 + 88;
+			bands.forEach((members, bandIndex) => {
+				const cardColumns = members.reduce((sum,spec) => sum + spec.columns, 0);
+				const fixedWidth = members.reduce((sum,spec) => sum + 24 + (spec.columns - 1) * 12, 0) + (members.length - 1) * L.gapX;
+				const nodeWidth = Math.min(L.nodeW, Math.floor((innerWidth - fixedWidth) / cardColumns));
+				const bandWidth = fixedWidth + cardColumns * nodeWidth;
+				let x = (width - bandWidth) / 2;
+				let bandHeight = 0;
+				for (const {team, bucket, columns} of members) {
+					const groupWidth = 24 + columns * nodeWidth + (columns - 1) * 12;
+					const height = 64 + Math.ceil(bucket.length / columns) * (L.nodeH + 12);
+					const row = { team, x, y, width: groupWidth, height, band: bandIndex, ids: bucket.map(c => c.sessionId) };
+					rows.push(row);
+					bucket.forEach((child, i) => {
+						nodes[child.sessionId] = { x: x + 12 + (i % columns) * (nodeWidth + 12), y: y + 64 + Math.floor(i / columns) * (L.nodeH + 12), width: nodeWidth, height: L.nodeH };
+					});
+					bandHeight = Math.max(bandHeight, height);
+					x += groupWidth + L.gapX;
+				}
+				y += bandHeight + 56;
+			});
+			return { nodes, rows, groupColumns: Math.max(1, ...bands.map(members => members.length)), size: { width, height: rows.length ? y - 32 : 168 } };
+		}
+		/** One visual edge per relation and team, while the inspector retains
+		 * individual events. Rejected sends never become successful graph edges. */
+		function orchGroupRelations(extraction) {
+			const teams = new Map(extraction.children.map(child => [child.sessionId, child.team || ""]));
+			const grouped = new Map();
+			for (const edge of extraction.edges) {
+				const id = edge.kind === "report" ? edge.from : edge.to;
+				if (!teams.has(id) || edge.delivered === false) continue;
+				const team = teams.get(id);
+				const key = JSON.stringify([team, edge.kind]);
+				if (!grouped.has(key)) grouped.set(key, { team, kind: edge.kind, count: 0, time: 0, ids: new Set() });
+				const row = grouped.get(key);
+				row.count++;
+				row.time = Math.max(row.time, edge.time || 0);
+				row.ids.add(id);
+			}
+			return [...grouped.values()];
+		}
+		function orchTaskTitle(title) {
+			return String(title || "").replace(/^\d{4}[｜|][^｜|]+[｜|]/u, "").trim();
+		}
+		function orchSelectedChild(children, selection, owner) {
+			return children.find(child => selection?.owner === owner && child.sessionId === selection.id) || children[0] || null;
 		}
 		/** Live SessionSummary projection for one session id (pure; missing → null). */
 		function orchSessionInfo(byId, sessionId) {
@@ -1203,6 +1396,31 @@ window.__ModuleLoader__.load({
 				return params ? value.replace(/\{(\w+)\}/g, (whole, name) => (params[name] !== undefined ? String(params[name]) : whole)) : value;
 			};
 			const [refreshNonce, setRefreshNonce] = react.useState(0);
+			const [selection, setSelection] = react.useState(null);
+			const [viewWidth, setViewWidth] = react.useState(1180);
+			const rootRef = react.useRef(null);
+			const inspectorRef = react.useRef(null);
+			react.useEffect(() => {
+				let observer;
+				const measure = () => {
+					try {
+						const width = rootRef.current?.getBoundingClientRect().width;
+						if (width > 0) setViewWidth(Math.round(width));
+					} catch { /* keep last measured layout */ }
+				};
+				try {
+					measure();
+					if (typeof ResizeObserver === "function" && rootRef.current) {
+						observer = new ResizeObserver(measure);
+						observer.observe(rootRef.current);
+					}
+					window.addEventListener?.("resize", measure);
+				} catch { /* old hosts retain the bounded initial layout */ }
+				return () => {
+					try { observer?.disconnect(); window.removeEventListener?.("resize", measure); } catch { /* disposed */ }
+				};
+			}, [props.sessionId]);
+
 			const [nowTick, setNowTick] = react.useState(() => Date.now());
 			const [flash, setFlash] = react.useState(null);
 			// 0.21.1 (kept in 0.22.0): manual history paging — the transcript is
@@ -1240,7 +1458,7 @@ window.__ModuleLoader__.load({
 			const coordinatorId = typeof props.sessionId === "string" && props.sessionId.length > 0 ? props.sessionId : "";
 			const extraction = chat !== null ? safeExtractOrchestration(chat) : { ok: true, children: [], edges: [], notes: [] };
 			const children = extraction.children;
-			const layout = layoutTopology(extraction);
+			const layout = layoutTopology(extraction, viewWidth - (viewWidth > 900 ? 350 : 0) - (viewWidth <= 460 ? 24 : 48));
 			const byId = sessionsList && sessionsList.byId && typeof sessionsList.byId === "object" ? sessionsList.byId : null;
 			const coordinatorLive = orchSessionInfo(byId, coordinatorId);
 			const now = nowTick;
@@ -1315,153 +1533,139 @@ window.__ModuleLoader__.load({
 			const historyButton = hasMore === true
 				? h("button", {
 					type: "button",
-					className: "orchViewBtn",
+					className: "orchViewLink",
 					disabled: loadingOlder,
 					onClick: loadOlderHistory
 				}, loadingOlder ? t("orch.history.loading") : t("orch.history.more"))
 				: null;
 			const L = ORCH_LAYOUT;
-			const statusChip = (state) => h("span", { className: "orchViewChip", "data-kind": "status", "data-state": state },
-				t(state === "running" ? "orch.status.running" : state === "completed" ? "orch.status.completed" : state === "idle" ? "orch.status.idle" : "orch.status.unknown"));
-			const liveState = (live) => (live ? (live.running ? "running" : live.completed ? "completed" : "idle") : "unknown");
-			const chipsFor = (live) => [
-				live && live.todos ? h("span", { key: "todos", className: "orchViewChip", "data-kind": "todos" }, t("orch.todos", { done: live.todos.done, total: live.todos.total })) : null,
-				live && live.goalPhase ? h("span", { key: "goal", className: "orchViewChip", "data-kind": "goal" }, t("orch.goal", { phase: live.goalPhase })) : null
-			];
-			// NOTE (phase B placeholder): a child that itself spawned grandchildren
-			// should render a nested-supervisor badge here (its own task_spawn
-			// records live in ITS transcript — a second-window lookup, deferred).
-			const childCard = (child) => {
+			const icon = (name, tile = false) => {
+				const glyph = h("span", { className: "orchViewIcon", "aria-hidden": true, style: { "--orch-icon": `url("data:image/svg+xml,${encodeURIComponent(ORCH_ICONS[name] || ORCH_ICONS.task)}")` } });
+				return tile ? h("span", { className: "orchViewIconTile", "aria-hidden": true }, glyph) : glyph;
+			};
+			const statusChip = (state) => h("span", { className: "orchViewChip", "data-kind": "status", "data-state": state }, t(`orch.status.${state}`));
+			const liveState = live => live ? (live.running ? "running" : live.completed ? "completed" : "idle") : "unknown";
+			const selected = orchSelectedChild(children, selection, coordinatorId);
+			const selectedId = selected?.sessionId;
+			const selectedLive = selected ? orchSessionInfo(byId, selectedId) : null;
+			const fullTitle = child => orchSessionInfo(byId, child.sessionId)?.title || child.title || child.sessionId;
+			const titleFor = child => orchTaskTitle(fullTitle(child));
+			const coordinatorTitle = orchTaskTitle(coordinatorLive?.title || t("orch.coordinator"));
+			const todoText = live => live?.todos ? t("orch.todos", live.todos) : t("orch.todos.none");
+			const childCard = child => {
 				const pos = layout.nodes[child.sessionId];
 				if (!pos) return null;
 				const live = orchSessionInfo(byId, child.sessionId);
 				const state = liveState(live);
 				return h("button", {
-					type: "button",
-					key: child.sessionId,
-					className: `orchViewNode${state === "running" ? " orchViewBreath" : ""}`,
-					"data-role": "child",
-					"data-state": state,
-					style: { left: `${pos.x}px`, top: `${pos.y}px`, width: `${L.nodeW}px` },
-					onClick: () => openChild(child),
-					title: child.sessionId
-				},
-					h("div", { className: "orchViewNodeTitle" }, (live && live.title) || child.title || child.sessionId),
-					h("div", { className: "orchViewNodeMeta" },
-						h("span", { className: "orchViewId" }, child.shortId || child.sessionId.slice(-8)),
-						child.model && typeof child.model.model === "string" && child.model.model.length > 0
-							? h("span", { className: "orchViewModel" }, child.model.model) : null
-					),
-					h("div", { className: "orchViewChips" },
-						child.team ? h("span", { className: "orchViewChip", "data-kind": "team" }, child.team) : null,
-						statusChip(state),
-						...chipsFor(live)
-					),
-					h("div", { className: "orchViewNodeTime" }, orchAgoText(live && live.updatedAt ? live.updatedAt : child.time, now, t))
-				);
+					type: "button", key: child.sessionId, className: "orchViewNode", "data-role": "child", "data-state": state,
+					"aria-pressed": child.sessionId === selectedId,
+					"aria-label": `${titleFor(child)} · ${t(`orch.status.${state}`)} · ${todoText(live)}`,
+					style: { left: pos.x, top: pos.y, width: pos.width, height: pos.height },
+					title: fullTitle(child),
+					onClick: () => {
+						setSelection({ owner: coordinatorId, id: child.sessionId });
+						if (viewWidth <= 900) {
+							try { inspectorRef.current?.scrollIntoView({ block: "start", behavior: "instant" }); } catch { /* selection still works */ }
+						}
+					}
+				}, icon(state === "completed" ? "done" : state === "unknown" ? "unknown" : "task", true),
+					h("span", { className: "orchViewNodeTitle" }, titleFor(child)),
+					statusChip(state),
+					h("span", { className: "orchViewNodeTodo" }, todoText(live)),
+					h("span", { className: "orchViewId", title: child.sessionId }, child.shortId || child.sessionId.slice(-8)));
 			};
-			const coordPos = layout.nodes[ORCH_COORD] || { x: 0, y: L.padTop };
-			const coordinatorState = liveState(coordinatorLive);
-			const coordinatorCard = h("div", {
-				className: `orchViewNode${coordinatorState === "running" ? " orchViewBreath" : ""}`,
-				"data-role": "coordinator",
-				"data-state": coordinatorState,
-				style: { left: `${coordPos.x}px`, top: `${coordPos.y}px`, width: `${L.nodeW}px` }
-			},
-				h("div", { className: "orchViewNodeTitle" }, (coordinatorLive && coordinatorLive.title) || coordinatorId || t("orch.coordinator")),
-				h("div", { className: "orchViewChips" },
-					h("span", { className: "orchViewChip", "data-kind": "team" }, t("orch.coordinator")),
-					statusChip(coordinatorState),
-					...chipsFor(coordinatorLive)
-				),
-				h("div", { className: "orchViewNodeTime" }, orchAgoText(coordinatorLive && coordinatorLive.updatedAt, now, t))
-			);
-			// Edges: spawn (solid, downward), send (accent, downward, mode label),
-			// report (dashed, upward from the child to the supervisor). Edges with
-			// activity inside RECENT_MS get the dash-flow shimmer.
+			const cp = layout.nodes[ORCH_COORD];
+			const coordinatorCard = h("div", { className: "orchViewNode", "data-role": "coordinator", "data-state": liveState(coordinatorLive), style: { left: cp.x, top: cp.y, width: cp.width, minHeight: cp.height }, title: coordinatorLive?.title },
+				icon("supervisor", true), h("div", { className: "orchViewCoordinatorCopy" },
+					h("div", { className: "orchViewNodeTitle" }, coordinatorTitle),
+					h("div", { className: "orchViewNodeChips" }, h("span", { className: "orchViewChip" }, t("orch.coordinator")), statusChip(liveState(coordinatorLive))),
+					h("div", { className: "orchViewModel" }, coordinatorLive?.goalPhase ? t("orch.goal", { phase: coordinatorLive.goalPhase }) : t("orch.supervising", { n: children.length }))));
+			// SVG is the actual topology geometry, not a replacement for icon art.
+			// Inline paths use per-element arrow geometry to avoid global marker-id
+			// collisions when two host conversation surfaces are mounted at once.
 			const edgeElements = [];
-			for (const edge of extraction.edges) {
-				if (edge.kind !== "spawn" && edge.kind !== "send" && edge.kind !== "report") continue;
-				const from = layout.nodes[edge.from];
-				const to = layout.nodes[edge.to];
-				if (!from || !to) continue; // e.g. a send aimed at a session this window never saw spawning
-				const recent = typeof edge.time === "number" && edge.time > 0 && now - edge.time < RECENT_MS;
-				const downward = edge.kind !== "report";
-				const x1 = from.x + L.nodeW / 2;
-				const y1 = downward ? from.y + L.nodeH : from.y;
-				const x2 = to.x + L.nodeW / 2;
-				const y2 = downward ? to.y : to.y + L.nodeH;
-				const className = `orchViewEdge orchViewEdge${edge.kind === "spawn" ? "Spawn" : edge.kind === "send" ? "Send" : "Report"}${recent ? " orchViewFlow" : ""}`;
-				const marker = edge.kind === "send" ? "url(#orchViewArrowSend)" : "url(#orchViewArrow)";
-				edgeElements.push(h("path", { key: `edge:${edge.kind}:${edge.to}:${edge.time ?? ""}:${edge.messageId ?? ""}:${edgeElements.length}`, d: orchEdgePath(x1, y1, x2, y2), className, markerEnd: marker }));
-				if (edge.kind === "send" && typeof edge.mode === "string") {
-					edgeElements.push(h("text", { key: `label:${edgeElements.length}`, className: "orchViewEdgeLabel", x: (x1 + x2) / 2, y: (y1 + y2) / 2 - 4, textAnchor: "middle" }, edge.mode));
-				}
+			for (const relation of orchGroupRelations(extraction)) {
+				const group = layout.rows.find(row => row.team === relation.team);
+				if (!group) continue;
+				const active = relation.ids.has(selectedId);
+				const report = relation.kind === "report";
+				const offset = relation.kind === "send" ? -6 : report ? 6 : 0;
+				const x1 = cp.x + cp.width / 2 + offset;
+				const y1 = cp.y + cp.height;
+				const x2 = group.x + group.width / 2 + offset;
+				const y2 = group.y;
+				const middleY = y2 - 50 + offset;
+				const recent = relation.time > 0 && now >= relation.time && now - relation.time < RECENT_MS;
+				const base = `orchViewEdge orchViewEdge${relation.kind === "send" ? "Send" : report ? "Report" : "Spawn"}`;
+				const isLowerBand = group.band > 0;
+				const railX = isLowerBand ? 6 + offset / 2 : x1;
+				const start = isLowerBand ? `M${x1},${y1} V${y1+18} H${railX}` : `M${x1},${y1}`;
+				const d = `${start} V${middleY - 6} Q${railX},${middleY} ${railX + Math.sign(x2-railX)*6},${middleY} H${x2-Math.sign(x2-railX)*6} Q${x2},${middleY} ${x2},${middleY+6} V${y2}`;
+				edgeElements.push(h("path", { key: `${relation.team}:${relation.kind}`, d, "data-relation": true, className: `${base}${recent && active ? " orchViewFlow" : ""}`, "data-selected": active },
+					h("title", null, `${t(`orch.legend.${relation.kind}`)} · ${relation.count}`)));
+				edgeElements.push(h("path", { key: `arrow:${relation.team}:${relation.kind}`, d: report ? `M${x1-3},${y1+5} L${x1},${y1} L${x1+3},${y1+5}` : `M${x2-3},${y2-5} L${x2},${y2} L${x2+3},${y2-5}`, className: base, "data-selected": active }));
 			}
-			const svg = h("svg", {
-				className: "orchViewSvg",
-				width: layout.size.width,
-				height: layout.size.height,
-				viewBox: `0 0 ${layout.size.width} ${layout.size.height}`
-			},
-				h("defs", null,
-					h("marker", { id: "orchViewArrow", markerWidth: 7, markerHeight: 7, refX: 6, refY: 3.5, orient: "auto", markerUnits: "userSpaceOnUse" },
-						h("path", { d: "M0,0 L7,3.5 L0,7 Z", fill: "var(--dsw-alias-border-l2,#c9ced6)" })),
-					h("marker", { id: "orchViewArrowSend", markerWidth: 7, markerHeight: 7, refX: 6, refY: 3.5, orient: "auto", markerUnits: "userSpaceOnUse" },
-						h("path", { d: "M0,0 L7,3.5 L0,7 Z", fill: "var(--dsw-alias-accent,#2563eb)" }))
-				),
-				...edgeElements
-			);
-			const rowLabels = layout.rows.map((row) => h("div", {
-				key: `row:${row.team}`,
-				className: "orchViewRowLabel",
-				style: { left: `${L.padX}px`, top: `${row.y}px` }
-			}, `${row.team === "" ? t("orch.ungrouped") : row.team} · ${row.ids.length}`));
+			// Group membership links stay inside the header-to-card gutter. The
+			// selected task gets a blue link without crossing another task's card.
+			const memberEdges = layout.rows.flatMap(group => group.ids.map(id => {
+				const pos = layout.nodes[id];
+				const x = pos.x + pos.width / 2;
+				return h("path", { key: `member:${id}`, d: `M${x},${pos.y-12} V${pos.y} m-3,-5 l3,5 l3,-5`, className: id === selectedId ? "orchViewEdge orchViewEdgeSend" : "orchViewEdge" });
+			}));
+			const groupElements = layout.rows.map(group => h("section", { key: group.team, className: "orchViewGroup", style: { left: group.x, top: group.y, width: group.width, height: group.height }, "aria-label": group.team || t("orch.ungrouped") },
+				h("div", { className: "orchViewGroupHeading" }, icon("group"), h("h3", null, group.team || t("orch.ungrouped")), h("span", { className: "orchViewCount" }, `· ${group.ids.length}`))));
+			const selectedEvents = selected ? extraction.edges.filter(edge => edge.to === selectedId || edge.from === selectedId).sort((a,b) => (a.time || 0) - (b.time || 0)) : [];
+			const eventList = selectedEvents.slice(-20);
+			const eventLabel = edge => t(edge.kind === "send" ? (edge.delivered === false ? "orch.event.failed" : edge.delivered === undefined ? "orch.event.unconfirmed" : "orch.event.send") : `orch.event.${edge.kind}`);
+			const eventDescription = edge => edge.kind === "send"
+				? t(edge.delivered === false ? "orch.event.failedHint" : edge.mode === "steer" ? "orch.event.steerHint" : "orch.event.queueHint")
+				: t(edge.kind === "report" ? "orch.event.reportHint" : "orch.event.spawnHint");
+			const inspector = selected ? h("aside", { className: "orchViewInspector", ref: inspectorRef, "aria-label": t("orch.detail") },
+				h("div", { className: "orchViewInspectorTop" }, h("h2", { title: fullTitle(selected) }, titleFor(selected))),
+				h("div", { className: "orchViewInspectorStatus" }, icon("task", true), statusChip(liveState(selectedLive))),
+				h("p", { className: "orchViewBreadcrumb" }, selected.team || t("orch.ungrouped")),
+				h("dl", { className: "orchViewFacts" },
+					h("div", null, h("dt", null, t("orch.detail.todos")), h("dd", { className: "orchViewTodoValue" }, selectedLive?.todos ? `${selectedLive.todos.done} / ${selectedLive.todos.total}` : "—")),
+					h("div", null, h("dt", null, t("orch.detail.updated")), h("dd", null, orchAgoText(selectedLive?.updatedAt, now, t))),
+					selected.model?.model ? h("div", { className: "orchViewFactModel" }, h("dt", null, t("orch.detail.model")), h("dd", null, selected.model.model)) : null,
+					selectedLive?.goalPhase ? h("div", { className: "orchViewFactModel" }, h("dt", null, t("orch.detail.goal")), h("dd", null, selectedLive.goalPhase)) : null),
+				h("button", { className: "orchViewPrimary", type: "button", onClick: () => openChild(selected) }, t("orch.open"), icon("external")),
+				h("p", { className: "orchViewMeta orchViewId", title: selectedId }, `${t("orch.detail.id")} · ${selectedId}`),
+				!selectedLive ? h("p", { className: "orchViewMeta" }, t("orch.detail.unknown")) : null,
+				h("section", { className: "orchViewRelations" },
+					h("h3", null, t("orch.detail.relations"), h("span", { className: "orchViewCount" }, String(selectedEvents.length))),
+					h("p", { className: "orchViewRelationHint" }, t("orch.detail.scope")),
+					selectedEvents.length > 20 ? h("p", { className: "orchViewRelationHint" }, t("orch.detail.recent")) : null,
+					h("ol", { className: "orchViewEvents" }, ...eventList.map((edge, i) => h("li", { className: "orchViewEvent", key: `${selectedId}:${i}:${edge.time}`, "data-kind": edge.kind, "data-failed": edge.delivered === false },
+						h("div", { className: "orchViewEventHeading" }, h("strong", null, eventLabel(edge)), h("time", { title: typeof edge.time === "number" && Number.isFinite(edge.time) ? new Date(edge.time).toLocaleString() : undefined }, orchAgoText(edge.time, now, t))),
+						h("p", null, eventDescription(edge))))))) : null;
 			const diagnostics = [];
-			if (chatError !== null) diagnostics.push(h("p", { key: "chat-err", className: "orchViewFlash", "data-kind": "error" }, t("orch.degraded.chat", { message: chatError })));
-			else if (chat === null) diagnostics.push(h("p", { key: "chat-missing", className: "orchViewFlash", "data-kind": "error" }, t("orch.degraded.chat", { message: "useChat seat unavailable" })));
-			if (sessionsError !== null) diagnostics.push(h("p", { key: "sess-err", className: "orchViewFlash", "data-kind": "error" }, t("orch.degraded.sessions", { message: sessionsError })));
-			else if (sessionsList === null) diagnostics.push(h("p", { key: "sess-missing", className: "orchViewFlash" }, t("orch.degraded.sessions")));
-			if (extraction.ok === false) {
-				diagnostics.push(h("p", { key: "extract-err", className: "orchViewFlash", "data-kind": "error" },
-					t("orch.error.extract", { message: extraction.error }),
-					" ",
-					h("button", { type: "button", className: "orchViewBtn", onClick: () => { try { setRefreshNonce((nonce) => nonce + 1); } catch { /* noop */ } } }, t("orch.retry"))));
-			}
-			const tree = h("div", { className: "orchViewRoot", key: `${refreshNonce}:${localeSnapshot && localeSnapshot.revision}` },
-				h("div", { className: "orchViewToolbar" },
-					h("h2", { className: "orchViewTitle" }, t("view.tab")),
-					h("span", { className: "orchViewMeta" }, t("orch.children", { n: children.length })),
-					notesMeta.length > 0 ? h("span", { className: "orchViewMeta" }, notesMeta.join(" · ")) : null,
-					historyButton,
-					h("button", { type: "button", className: "orchViewBtn", onClick: () => { try { setRefreshNonce((nonce) => nonce + 1); setNowTick(Date.now()); } catch { /* noop */ } } }, t("orch.refresh")),
-					h("span", { className: "orchViewLegend" },
-						h("span", null, h("i", { className: "orchViewLegendKey", "data-kind": "spawn" }), t("orch.legend.spawn")),
-						h("span", null, h("i", { className: "orchViewLegendKey", "data-kind": "send" }), t("orch.legend.send")),
-						h("span", null, h("i", { className: "orchViewLegendKey", "data-kind": "report" }), t("orch.legend.report")),
-						h("span", null, t("orch.legend.recent"))
-					)
-				),
-				flash ? h("p", { className: "orchViewFlash", "data-kind": flash.kind }, flash.text) : null,
+			if (chatError !== null || chat === null) diagnostics.push(h("p", { key: "chat", className: "orchViewFlash", "data-kind": "error" }, t("orch.degraded.chat", { message: chatError || t("orch.service.missing") })));
+			if (sessionsError !== null || sessionsList === null) diagnostics.push(h("p", { key: "sessions", className: "orchViewFlash" }, t("orch.degraded.sessions")));
+			if (extraction.ok === false) diagnostics.push(h("p", { key: "extract", className: "orchViewFlash", "data-kind": "error" }, t("orch.error.extract", { message: extraction.error })));
+			const emptyTitle = chat === null || extraction.ok === false ? "orch.empty.unavailable" : hasMore !== false ? "orch.empty.partial" : "orch.empty.title";
+			const emptyHint = chat === null || extraction.ok === false ? "orch.empty.unavailableHint" : hasMore !== false ? "orch.empty.windowHint" : "orch.empty.hint";
+			const runningCount = children.filter(child => liveState(orchSessionInfo(byId, child.sessionId)) === "running").length;
+			const completedCount = children.filter(child => liveState(orchSessionInfo(byId, child.sessionId)) === "completed").length;
+			const tree = h("div", { className: "orchViewRoot", ref: rootRef },
+				flash ? h("p", { className: "orchViewFlash", "data-kind": flash.kind, role: "status" }, flash.text) : null,
 				...diagnostics,
-				children.length === 0
-					? h("div", { className: "orchViewEmpty" },
-						h("p", { className: "orchViewEmptyTitle" }, t("orch.empty.title")),
-						h("p", { className: "orchViewEmptyText" }, t("orch.empty.hint")),
-						chat !== null && extraction.ok !== false
-							? h("p", { className: "orchViewEmptyText" }, t("orch.empty.scanned", { n: extraction.scanned ?? 0 })) : null,
-						hasMore === true
-							? h("p", { className: "orchViewEmptyText" }, t("orch.empty.windowHint")) : null,
-						historyButton,
-						h("p", { className: "orchViewEmptyText" }, t("orch.empty.suffix")))
-					: h("div", { className: "orchViewCanvas" },
-						h("div", { className: "orchViewLayer", style: { width: `${layout.size.width}px`, height: `${layout.size.height}px` } },
-							svg,
-							...rowLabels,
-							coordinatorCard,
-							...children.map(childCard)
-						))
-			);
+				h("div", { className: "orchViewWorkspace", style: children.length ? undefined : { gridTemplateColumns: "minmax(0,1fr)" } },
+					h("main", { className: "orchViewMain" },
+						h("div", { className: "orchViewToolbar" },
+							h("div", { className: "orchViewHeading" }, h("div", { className: "orchViewHeadingLine" }, h("h1", { className: "orchViewTitle" }, coordinatorTitle), statusChip(liveState(coordinatorLive)), h("span", { className: "orchViewRole" }, t("orch.coordinator"))),
+								h("p", { className: "orchViewMeta" }, t("orch.summary", { n: children.length, running: runningCount, completed: completedCount }))),
+							h("div", { className: "orchViewHistory" }, h("span", null, t(hasMore === false ? "orch.history.loaded" : "orch.history.partial")), historyButton,
+								h("button", { type: "button", className: "orchViewBtn", title: t("orch.refresh"), "aria-label": t("orch.refresh"), onClick: () => { setRefreshNonce(n => n+1); setNowTick(Date.now()); } }, icon("refresh")))),
+						children.length === 0 ? h("div", { className: "orchViewEmpty" }, icon("group", true), h("h2", null, t(emptyTitle)), h("p", null, t(emptyHint)),
+							chat !== null && extraction.ok !== false ? h("p", null, t("orch.empty.scanned", { n: extraction.scanned || 0 })) : null)
+						: h("div", { className: "orchViewCanvas", "aria-label": t("orch.topology") }, h("div", { className: "orchViewLayer", style: { width: layout.size.width, height: layout.size.height } },
+							...groupElements,
+							h("svg", { className: "orchViewSvg", width: layout.size.width, height: layout.size.height, viewBox: `0 0 ${layout.size.width} ${layout.size.height}`, "aria-hidden": true }, ...edgeElements, ...memberEdges),
+							coordinatorCard, ...children.map(childCard))),
+						children.length ? h("div", { className: "orchViewLegend" }, ...["send", "spawn", "report"].map(kind => h("span", { key: kind }, h("i", { className: "orchViewLegendKey", "data-kind": kind }), t(`orch.legend.${kind}`))), h("span", null, t("orch.legend.recent"))) : null),
+					inspector));
 			return tree;
 			} catch (error) {
 				// Last-resort net (0.18.2 discipline): render the failure ourselves —
@@ -1541,6 +1745,9 @@ window.__ModuleLoader__.load({
 		exports.__orchestration = {
 			extractOrchestration,
 			layoutTopology,
+			orchGroupRelations,
+			orchSelectedChild,
+			orchTaskTitle,
 			orchToolFacts,
 			orchParseJson,
 			orchSessionInfo,

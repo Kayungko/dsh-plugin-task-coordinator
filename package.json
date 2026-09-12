@@ -44,7 +44,7 @@
   },
   "scripts": {
     "check": "node --check index.mjs && node --check config.mjs && node --check safety.mjs && node --check title.mjs && node --check registry.mjs && node --check i18n.mjs && node --check settings.mjs && node --check ops.mjs && node --check tools.mjs && node --check commands.mjs && node --check skills.mjs && node --check client.js",
-    "test": "node --test test/smoke.test.mjs"
+    "test": "node --test test/*.test.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-llm": ">=0.1.2-0 <0.1.3 || >=0.1.3-0 <0.1.4 || >=0.1.4-0 <0.2.0 || >=0.1.5-rc.1 <0.1.6",
