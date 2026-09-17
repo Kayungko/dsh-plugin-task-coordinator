@@ -9,6 +9,7 @@
 - 本版本正式化 09-12「Codex 协作增量」波次三提交（e15bd01 编排拓扑重设计+任务详情面板 / acd4bdb 所属编排家族导航+两个宿主 Connection 鉴权只读查询路由 / a432cc2 外部分组投影+增量消息游标对账）——代码当时已部署并随 09-17 宿主重启在产运行，但未定版未打 tag（违「部署=已 tag 版本」纪律），现收编补齐。收编验证：136/136 测试复跑全绿 + check 通过 + 桥活体 models/list 200（2.0.10 宿主）。
 - **task_send × 宿主 send_message 消歧三件套**（0918 实战：子任务 7b63ba6a 误用 send_message 向登记父会话汇报被宿主正确拒绝、且总结误称 task_send）：task_send 工具描述 / reportBack 中英文案 / SKILL 投递语义表三处明示「task_spawn 会话汇报必须走 task_send；send_message 仅 subagent 树」。
 - 2.0.10 / core 0.1.5-rc.2 活体兼容确认：rc.2 实质 27 文件零命中本插件消费面（对照记录见 bridge 仓 ECOSYSTEM §9 矩阵）。
+- **宽度策略裁决（0918，用户，评审 P1-1 闭环）**：追认 09-12 波次的「实际会话面板宽度、上限 1440px」形态（选项 A）；0.22.3 的聊天列宽绑定（--dsh-chat-content-width）随之废止——编组并排布局需要宽度。README 双语同步修正（含已失效的「运行节点呼吸脉冲」描述清理）。客户端评审三路全过：五铁律合规、两条新路由防泄漏断言、无界循环核查通过；P2×3（fetch 消费面测试/asOfSeq 回退/listSize 防抖）与 P3 性能项入 0.26.1 挂账。
 - **三路多子代理评审收口（0918）**：宿主面/跨仓契约面均「有条件通过」零 P0。P1（本文件发布账目失真：已发布功能滞留 Unreleased、节序颠倒、部署状态自相矛盾）随本提交重构修复；feedbackPage 的 `progressTailMessages=0` 边界缺陷（契约面评审 P3-③：`slice(-0)` 全量泄漏 + `at(-1)` 崩溃，桥侧可触达）同修——limit 钳制 ≥1；`RECENT_SCAN_WINDOW` 收敛为 feedback.mjs 单源导出、ops.mjs 改 import（消除常量耦合，评审 P3-2）。
 
 ### 所属编排视图（随 0.26.0 发布，09-12 波次 acd4bdb）
