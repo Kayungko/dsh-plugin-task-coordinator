@@ -24,7 +24,7 @@ whenToUse: >
 |------|------|
 | `task_list` | 查找任务，取 sessionId；可按 `team` 过滤、可含子代理（默认不含）；`ungrouped: true`（0.19.0）只列**不属于任何工作区**的会话（未分组桶的补救视图）——配合 `task_workspace` attach/migrate 归置，注册表 `expectedWorkspace` 记着调用方当时的期望目录 |
 | `task_progress` | 深入读一个任务：状态、队列中的消息、对话尾部、todos、goal |
-| `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`），可用 `reference` 关联先前指令 |
+| `task_send` | 投递可见的后续提示词（`mode: queue` 或 `steer`），可用 `reference` 关联先前指令。**消歧（0918 实战教训）**：task_spawn 会话的汇报/通信一律用 task_send；宿主自带 `send_message` 仅限 subagent 树子代理，对登记父子会被拒（belongs to another parent），被拒后更不得在总结里误称 task_send |
 | `task_spawn` | 新建任务 + 命名 + 开场提示词，立即出现在会话列表；可用 `team` 编组；默认带回报约定（`reportBack`）；**工作区落位兜底链**（0.19.0，默认 `ancestor` 档）：显式/继承 cwd 与工作区路径精确匹配（大小写/分隔符/尾分隔符/`.` 段归一）→ 挂该工作区；cwd 在某工作区**目录树内** → 挂**最近祖先**工作区、会话工作目录归一为工作区根（回执 `placement:'ancestor-normalized'`，kickoff 会告知任务目标目录、要求文件/git 操作用显式路径）；git worktree（`.git` 为文件）→ **刻意保持未分组**保隔离、回执给强警告；其余未命中 → 未分组 + 警告（`task_workspace` 补救）。回执必带 `workspace`（{id,title} 或 null）与 `placement`；可选 `provider`+`model`（+`reasoningEffort`）指定子会话模型（0.13.0）——开场前安装、第一轮即生效，无效路线创建前即拒（注意：宿主语义会同步更新应用级默认模型）；省略 provider+model 时回退插件默认路线（设置 → 任务编排，0.18.0），再回退宿主默认 |
 | `task_confirm` | **派发前确认**：把拆分方案做成审批卡弹给用户，阻塞直到回答；批准返回 `confirmationId`（默认单次；`reusable: true` 铸**任务级复用凭证**——长线任务首次分析后确认一次即可，后续各里程碑批量复用同一凭证） |
 | `task_confirm_select` | **多选确认/部分派发**：任务清单渲染为多选卡（中性样式，非琥珀审批卡），用户勾选要派发哪些；批准返回 `selected` 子集 + `confirmationId`，批量只能派发被勾选的标题（精确匹配）；先在聊天里给出完整方案再调用 |
