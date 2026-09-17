@@ -21,4 +21,8 @@ coverage
 # Lockfiles (the plugin installs by file copy, no package manager step)
 package-lock.json
 pnpm-lock.yaml
+
+# Local verification output and backups
+/test-output.txt
+/backups/
 yarn.lock

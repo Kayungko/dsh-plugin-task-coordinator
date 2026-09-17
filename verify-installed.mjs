@@ -1172,6 +1172,12 @@ assert.equal(typeof orchApi.extractOrchestration, 'function');
 assert.equal(typeof orchApi.layoutTopology, 'function');
 assert.equal(typeof orchApi.orchSessionInfo, 'function');
 assert.equal(typeof orchApi.orchAgoText, 'function');
+assert.equal(typeof orchApi.orchReadFamily, 'function');
+assert.match(clientSrc, /orchViewInspectorClose/);
+assert.match(clientSrc, /data-open/);
+assert.match(clientSrc, /setDrawerClosed\(closing\)/);
+assert.match(clientSrc, /event\.key === "Escape"/);
+assert.match(clientSrc, /drawerClosed \? null/);
 assert.equal(orchApi.RECENT_MS, 120000);
 assert.equal(orchApi.ORCH_COORD, 'coordinator');
 
