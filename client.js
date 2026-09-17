@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.26.0)
+ * dsh-plugin-task-coordinator — client module (0.26.1)
  *
  * Current UI: responsive grouped topology with selection, a read-only inspector,
  * aggregated relations, explicit navigation, and authenticated read-only family queries.
@@ -204,6 +204,7 @@ window.__ModuleLoader__.load({
 				"orch.todos.none": "待办未提供",
 				"orch.topology": "任务关系图",
 				"orch.detail": "任务详情",
+				"orch.detail.close": "关闭任务详情",
 				"orch.detail.todos": "待办",
 				"orch.detail.updated": "最近更新",
 				"orch.detail.model": "派发时模型",
@@ -332,6 +333,7 @@ window.__ModuleLoader__.load({
 				"orch.todos.none": "No to-do data",
 				"orch.topology": "Task relationships",
 				"orch.detail": "Task details",
+				"orch.detail.close": "Close task details",
 				"orch.detail.todos": "To-dos",
 				"orch.detail.updated": "Last updated",
 				"orch.detail.model": "Model at dispatch",
@@ -977,7 +979,7 @@ window.__ModuleLoader__.load({
 .orchViewRoot button{font:inherit;cursor:pointer}
 .orchViewRoot button:focus-visible{outline:2px solid var(--orch-accent);outline-offset:4px}
 .orchViewRoot button:disabled{cursor:wait;opacity:.5}
-.orchViewWorkspace{display:grid;grid-template-columns:minmax(0,1fr) 350px;align-items:start;min-height:600px}
+.orchViewWorkspace{position:relative;display:block;min-height:600px}
 .orchViewMain{min-width:0;padding:30px 24px 26px;display:flex;flex-direction:column;min-height:600px}
 .orchViewToolbar{display:flex;gap:18px;align-items:start;justify-content:space-between;flex-wrap:wrap;margin-bottom:30px}
 .orchViewHeading{min-width:0;flex:1 1 260px}
@@ -1029,8 +1031,7 @@ window.__ModuleLoader__.load({
 .orchViewLegendKey{width:23px;border-top:1.5px solid var(--orch-line)}
 .orchViewLegendKey[data-kind='send']{border-color:var(--orch-accent)}
 .orchViewLegendKey[data-kind='report']{border-color:var(--orch-muted);border-top-style:dashed}
-.orchViewInspector{border-left:1px solid var(--orch-line);padding:30px 24px;min-width:0;align-self:stretch;overflow-wrap:anywhere}
-.orchViewInspector{position:sticky;top:0;align-self:start;max-height:calc(var(--dsh-conversation-viewport-height,100vh) - var(--dsh-composer-height,0px) - 24px);overflow-y:auto;scrollbar-width:thin}
+.orchViewInspector{position:absolute;z-index:4;top:0;right:0;width:min(380px,100%);height:calc(100% - 24px);border-left:1px solid var(--orch-line);padding:30px 24px;background:var(--orch-surface);box-shadow:-10px 0 24px color-mix(in srgb,var(--orch-ink) 10%,transparent);min-width:0;overflow-wrap:anywhere;overflow-y:auto;scrollbar-width:thin;transform:translateX(100%);transition:transform 180ms ease}.orchViewInspector[data-open='true']{transform:translateX(0)}.orchViewInspectorClose{border:0;background:transparent;color:var(--orch-muted);font-size:20px;line-height:1;padding:4px 6px;border-radius:6px}.orchViewInspectorClose:hover{background:var(--orch-soft);color:var(--orch-ink)}
 .orchViewInspectorTop{display:flex;gap:10px;align-items:start;justify-content:space-between}
 .orchViewInspector h2{font-size:21px;line-height:1.4;margin:0;font-weight:650}
 .orchViewInspectorStatus{display:flex;gap:12px;align-items:center;margin:16px 0 12px}
@@ -1464,6 +1465,8 @@ window.__ModuleLoader__.load({
 				edges: children.map(node => ({ kind: "spawn", from: node.parentSessionId, to: node.sessionId, time: node.time, source: "registry" })) };
 		}
 		function useOrchestrationFamily(sessionId, refresh, tick, listSize, selection) {
+			const [listSizeStable, setListSizeStable] = react.useState(listSize);
+			react.useEffect(() => { const timer = setTimeout(() => setListSizeStable(listSize), 1500); return () => clearTimeout(timer); }, [listSize]);
 			const [remote, setRemote] = react.useState({ owner: "", status: "loading", value: null });
 			const [branches, setBranches] = react.useState({ owner: "", value: [] });
 			const [history, setHistory] = react.useState({ key: "", status: "loading", events: [], nextCursor: null });
@@ -1481,7 +1484,7 @@ window.__ModuleLoader__.load({
 					setBranches(old => old.owner === sessionId ? old : { owner: sessionId, value: [...value.currentPath, sessionId] });
 				}).catch(() => { if (alive) setRemote(old => ({ owner: sessionId, status: "error", value: old.owner === sessionId ? old.value : null })); });
 				return () => { alive = false; controller.abort(); };
-			}, [sessionId, refresh, tick, listSize]);
+			}, [sessionId, refresh, tick, listSizeStable]);
 			const family = remote.owner === sessionId ? remote.value : null;
 			const expanded = new Set(branches.owner === sessionId ? branches.value : family?.currentPath || []);
 			const members = family?.nodes.filter(node => node.sessionId !== family.rootSessionId) || [];
@@ -1532,6 +1535,7 @@ window.__ModuleLoader__.load({
 			};
 			const [refreshNonce, setRefreshNonce] = react.useState(0);
 			const [selection, setSelection] = react.useState(null);
+			const [drawerClosed, setDrawerClosed] = react.useState(false);
 			const [focusNonce, setFocusNonce] = react.useState(0);
 			const [viewWidth, setViewWidth] = react.useState(1180);
 			const rootRef = react.useRef(null);
@@ -1607,7 +1611,8 @@ window.__ModuleLoader__.load({
 			}
 			const children = extraction.children;
 			const allChildren = extraction.allChildren || children;
-			const layout = layoutTopology(extraction, viewWidth - (viewWidth > 900 ? 350 : 0) - (viewWidth <= 460 ? 24 : 48));
+			// Drawer overlays the full-width canvas; keep layout width independent of viewport breakpoints.
+			const layout = layoutTopology(extraction, viewWidth - (viewWidth <= 460 ? 24 : 48));
 			const byId = sessionsList && sessionsList.byId && typeof sessionsList.byId === "object" ? sessionsList.byId : null;
 			const coordinatorLive = orchSessionInfo(byId, coordinatorId);
 			const now = nowTick;
@@ -1688,13 +1693,14 @@ window.__ModuleLoader__.load({
 				}, loadingOlder ? t("orch.history.loading") : t("orch.history.more"))
 				: null;
 			const L = ORCH_LAYOUT;
+			const iconCache = Object.fromEntries(Object.entries(ORCH_ICONS).map(([name, svg]) => [name, `url("data:image/svg+xml,${encodeURIComponent(svg)}")`]));
 			const icon = (name, tile = false) => {
-				const glyph = h("span", { className: "orchViewIcon", "aria-hidden": true, style: { "--orch-icon": `url("data:image/svg+xml,${encodeURIComponent(ORCH_ICONS[name] || ORCH_ICONS.task)}")` } });
+				const glyph = h("span", { className: "orchViewIcon", "aria-hidden": true, style: { "--orch-icon": iconCache[name] || iconCache.task } });
 				return tile ? h("span", { className: "orchViewIconTile", "aria-hidden": true }, glyph) : glyph;
 			};
 			const statusChip = (state) => h("span", { className: "orchViewChip", "data-kind": "status", "data-state": state }, t(`orch.status.${state}`));
 			const liveState = live => live ? (live.running ? "running" : live.completed ? "completed" : "idle") : "unknown";
-			const selected = familyActive ? familyView.selected : orchSelectedChild(children, selection, currentSessionId);
+			const selected = drawerClosed ? null : (familyActive ? familyView.selected : orchSelectedChild(children, selection, currentSessionId));
 			const selectedId = selected?.sessionId;
 			const selectedLive = selected ? orchSessionInfo(byId, selectedId) : null;
 			const fullTitle = child => orchSessionInfo(byId, child.sessionId)?.title || child.title || child.sessionId;
@@ -1716,10 +1722,11 @@ window.__ModuleLoader__.load({
 					style: { left: pos.x, top: pos.y, width: pos.width, height: pos.height },
 					title: fullTitle(child),
 					onClick: () => {
-						setSelection({ owner: currentSessionId, id: child.sessionId });
-						if (viewWidth <= 900) {
-							try { inspectorRef.current?.scrollIntoView({ block: "start", behavior: "instant" }); } catch { /* selection still works */ }
-						}
+						setSelection(old => {
+							const closing = old?.id === child.sessionId;
+							setDrawerClosed(closing);
+							return closing ? null : { owner: currentSessionId, id: child.sessionId };
+						});
 					}
 				}, icon(state === "completed" ? "done" : state === "unknown" ? "unknown" : "task", true),
 					h("span", { className: "orchViewNodeTitle" }, titleFor(child)),
@@ -1770,8 +1777,11 @@ window.__ModuleLoader__.load({
 			const groupElements = layout.rows.map(group => h("section", { key: group.groupKey, className: "orchViewGroup", style: { left: group.x, top: group.y, width: group.width, height: group.height }, "aria-label": group.team || t("orch.ungrouped") },
 				h("div", { className: "orchViewGroupHeading" }, icon("group"), h("h3", { title: group.parentId !== ORCH_COORD ? orchSessionInfo(byId,group.parentId)?.title : undefined }, group.parentId !== ORCH_COORD ? `${orchTaskTitle(orchSessionInfo(byId,group.parentId)?.title || group.parentId)} / ${group.team || t("orch.ungrouped")}` : group.team || t("orch.ungrouped")), h("span", { className: "orchViewCount" }, `· ${group.ids.length}`))));
 			const selectedEvents = familyActive ? familyView.history.events : selected ? extraction.edges.filter(edge => edge.to === selectedId || edge.from === selectedId).sort((a,b) => (a.time || 0) - (b.time || 0)) : [];
-			const branchButtons = familyActive ? children.flatMap(child => {
-				const count = allChildren.filter(node => node.parentSessionId === child.sessionId).length;
+			const branchButtons = familyActive ? (() => {
+				const childCounts = new Map();
+				for (const node of allChildren) childCounts.set(node.parentSessionId, (childCounts.get(node.parentSessionId) || 0) + 1);
+				return children.flatMap(child => {
+				const count = childCounts.get(child.sessionId) || 0;
 				if (!count) return [];
 				const pos = layout.nodes[child.sessionId];
 				return [h("button", { key: `branch:${child.sessionId}`, className: "orchViewBranch", type: "button",
@@ -1779,14 +1789,15 @@ window.__ModuleLoader__.load({
 					"aria-label": t(familyView.expanded.has(child.sessionId) ? "orch.family.collapse" : "orch.family.expand", { n: count }),
 					"aria-expanded": familyView.expanded.has(child.sessionId), onClick: () => familyView.toggle(child.sessionId) },
 					icon("group"), String(count))];
-			}) : [];
+				});
+			})() : [];
 			const eventList = familyActive ? selectedEvents : selectedEvents.slice(-20);
 			const eventLabel = edge => t(edge.kind === "send" ? (edge.delivered === false ? "orch.event.failed" : edge.delivered === undefined ? "orch.event.unconfirmed" : "orch.event.send") : `orch.event.${edge.kind}`);
 			const eventDescription = edge => familyActive ? t(edge.kind === "report" ? "orch.family.reportHint" : edge.kind === "spawn" ? "orch.family.spawnHint" : edge.delivered === false ? "orch.event.failedHint" : edge.mode === "steer" ? "orch.family.steerHint" : "orch.family.queueHint") : edge.kind === "send"
 				? t(edge.delivered === false ? "orch.event.failedHint" : edge.mode === "steer" ? "orch.event.steerHint" : "orch.event.queueHint")
 				: t(edge.kind === "report" ? "orch.event.reportHint" : "orch.event.spawnHint");
-			const inspector = selected ? h("aside", { className: "orchViewInspector", ref: inspectorRef, "aria-label": t("orch.detail") },
-				h("div", { className: "orchViewInspectorTop" }, h("h2", { title: fullTitle(selected) }, titleFor(selected))),
+			const inspector = selected ? h("aside", { className: "orchViewInspector", ref: inspectorRef, "data-open": !drawerClosed, "aria-label": t("orch.detail") },
+				h("div", { className: "orchViewInspectorTop" }, h("h2", { title: fullTitle(selected) }, titleFor(selected)), h("button", { type: "button", className: "orchViewInspectorClose", "aria-label": t("orch.detail.close"), onClick: () => { setDrawerClosed(true); setSelection(null); } }, "×")),
 				h("div", { className: "orchViewInspectorStatus" }, icon("task", true), statusChip(liveState(selectedLive))),
 				h("p", { className: "orchViewBreadcrumb" }, selected.team || t("orch.ungrouped")),
 				h("dl", { className: "orchViewFacts" },
@@ -1820,6 +1831,11 @@ window.__ModuleLoader__.load({
 			const emptyHint = familyView.status === "loading" && !familyView.family ? "orch.family.loadingHint" : familyView.family ? "orch.family.unassociatedHint" : chat === null || extraction.ok === false ? "orch.empty.unavailableHint" : hasMore !== false ? "orch.empty.windowHint" : "orch.empty.hint";
 			const runningCount = allChildren.filter(child => liveState(orchSessionInfo(byId, child.sessionId)) === "running").length;
 			const completedCount = allChildren.filter(child => liveState(orchSessionInfo(byId, child.sessionId)) === "completed").length;
+			react.useEffect(() => {
+				const onKey = event => { if (event.key === "Escape") { setDrawerClosed(true); setSelection(null); } };
+				window.addEventListener?.("keydown", onKey);
+				return () => window.removeEventListener?.("keydown", onKey);
+			}, []);
 			const tree = h("div", { className: "orchViewRoot", ref: rootRef },
 				flash ? h("p", { className: "orchViewFlash", "data-kind": flash.kind, role: "status" }, flash.text) : null,
 				...diagnostics,

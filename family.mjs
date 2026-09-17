@@ -122,7 +122,8 @@ export function createFamilyQueries({ registry, sessionController }) {
           note: 'Delivery receipts only; historical gaps and external replies are not reconstructed. Delivery does not prove consumption.' };
       }
       if (typeof sessionController.page !== 'function') return fail('history-service-unavailable');
-      const throughSeq = cursor?.throughSeq ?? parent.projections?.asOfSeq;
+      // Host page supports throughSeq:-1 as the latest cursor when projection cache misses.
+      const throughSeq = cursor?.throughSeq ?? parent.projections?.asOfSeq ?? -1;
       const beforeSeq = cursor?.beforeSeq;
       if (!Number.isSafeInteger(throughSeq) || throughSeq < -1 || (beforeSeq !== undefined && (!Number.isSafeInteger(beforeSeq) || beforeSeq < 0 || beforeSeq > throughSeq + 1))) return fail('history-cursor-unavailable', 400);
       const page = await sessionController.page({ address: { kind: 'session', sessionId: parent.sessionId }, throughSeq,
