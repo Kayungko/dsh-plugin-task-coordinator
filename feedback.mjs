@@ -4,6 +4,8 @@ export const COORDINATOR_CAPABILITIES = Object.freeze({
   externalRef: true, validatedWaitTargets: true, progressCursor: true,
   messageIdentity: true, externalFamilies: true, bridgeReceipts: true,
 });
+/** recent/feedback 扫描窗单一源（ops.mjs import；P3-2 常量耦合修复）。 */
+export const RECENT_SCAN_WINDOW = 400;
 export function decodeCursor(cursor, sessionId) {
   if (cursor === undefined) return null;
   try {
@@ -38,15 +40,17 @@ export function feedbackPage({ sessionId, events, from, throughSeq, nextSeq, lim
     messages: [], nextCursor: null, hasMore: false, coverage: 'unavailable', source,
     reason: valid ? 'cursor-ahead-of-session' : 'event-sequence-unavailable',
   };
-  const scannedEnd = Math.min(throughSeq, from + 400);
+  // P3-③（0918 评审）：limit=0 是合法配置，曾致 slice(-0) 全量泄漏 + at(-1) 崩溃——钳制 ≥1
+  const pageSize = Number.isSafeInteger(limit) && limit > 0 ? limit : 1;
+  const scannedEnd = Math.min(throughSeq, from + RECENT_SCAN_WINDOW);
   const gap = events.length !== scannedEnd - from || events.some((event, i) => event.seq !== from + i);
   const picked = events.filter(e => e.seq >= from && e.seq < scannedEnd)
     .map(e => messageProjection(e, chars)).filter(Boolean);
-  const messages = nextSeq === null ? picked.slice(-limit) : picked.slice(0, limit);
-  const moreInPage = nextSeq !== null && picked.length > limit;
+  const messages = nextSeq === null ? picked.slice(-pageSize) : picked.slice(0, pageSize);
+  const moreInPage = nextSeq !== null && picked.length > pageSize;
   const resumeAt = moreInPage ? messages.at(-1).seq + 1 : scannedEnd;
   return { messages, nextCursor: Buffer.from(JSON.stringify({ v: 1, sessionId, nextSeq: resumeAt })).toString('base64url'),
-    hasMore: resumeAt < throughSeq, coverage: (gap || (nextSeq === null && (from > 0 || picked.length > limit))) ? 'partial' : 'complete',
+    hasMore: resumeAt < throughSeq, coverage: (gap || (nextSeq === null && (from > 0 || picked.length > pageSize))) ? 'partial' : 'complete',
     ...(gap ? { reason: 'event-gap' } : {}),
     source, fromSeq: from, throughSeq: scannedEnd,
     // A model-authored excerpt, explicitly not a completion/acceptance verdict.

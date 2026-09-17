@@ -7,6 +7,7 @@ import { createOps } from '../ops.mjs';
 import { resolveConfig } from '../config.mjs';
 import { SpawnRegistry } from '../registry.mjs';
 import { buildFamily, createFamilyQueries } from '../family.mjs';
+import { feedbackPage } from '../feedback.mjs';
 const caller = { sessionId: 'task-bridge-external' };
 const event = (seq, type = 'assistant/message') => ({ seq, type, time: seq,
   data: type === 'assistant/message' ? { message: { id: `m-${seq}`, content: [{ type: 'text', text: `reply-${seq}` }] } } :
@@ -91,4 +92,14 @@ test('external families isolate refs and unknown origins; bounded receipt histor
   assert.ok(older.events.at(-1).seq < history.events[0].seq);
   assert.equal((await queries.history('same', 'b')).code, 'target-not-in-family');
   assert.equal((await queries.history('old1', 'old1')).ok, true);
+});
+
+test('feedbackPage: limit=0 钳制为 1（P3-③ 回归——slice(-0) 全量泄漏 + at(-1) 崩溃）', () => {
+  const events = [event(0, 'user/message'), event(1), event(2)];
+  const page = feedbackPage({ sessionId: 's', events, from: 0, throughSeq: 3, nextSeq: null, limit: 0, chars: 200, source: 'live' });
+  assert.equal(page.messages.length, 1, '钳制后仅取尾 1 条，不得全量泄漏');
+  assert.equal(page.coverage, 'partial', 'picked>pageSize 应如实标 partial');
+  const page2 = feedbackPage({ sessionId: 's', events, from: 0, throughSeq: 3, nextSeq: 0, limit: 0, chars: 200, source: 'live' });
+  assert.equal(page2.messages.length, 1, 'cursor 路径同样钳制');
+  assert.ok(page2.nextCursor, 'moreInPage 时 at(-1) 不崩溃且产出续读游标');
 });

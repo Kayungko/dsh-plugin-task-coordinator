@@ -1,4 +1,4 @@
-import { decodeCursor, feedbackPage, messageProjection } from './feedback.mjs';
+import { decodeCursor, feedbackPage, messageProjection, RECENT_SCAN_WINDOW } from './feedback.mjs';
 import { EXTERNAL_CALLER } from './external.mjs';
 /**
  * Session operations for dsh-plugin-task-coordinator.
@@ -453,7 +453,7 @@ export function createOps(deps) {
    * never be copied whole just to read the tail. 400 events comfortably
    * contain progressTailMessages user/assistant messages amid tool noise.
    */
-  const RECENT_SCAN_WINDOW = 400;
+  // RECENT_SCAN_WINDOW: 单一源移至 feedback.mjs（P3-2，0918 评审）。
 
   /**
    * Recent-tail projection from a LIVE agent session (0.24.1 fix): the real
