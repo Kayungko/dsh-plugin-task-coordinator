@@ -1177,7 +1177,9 @@ assert.match(clientSrc, /orchViewInspectorClose/);
 assert.match(clientSrc, /data-open/);
 assert.match(clientSrc, /setDrawerOpen\(!closing\)/);
 assert.match(clientSrc, /event\.key === "Escape"/);
-assert.match(clientSrc, /drawerClosed \? null/);
+assert.match(clientSrc, /setSelection\(null\)/);
+assert.match(clientSrc, /const selected = drawerOpen \?/);
+assert.match(clientSrc, /const inspector = selected \?/);
 assert.equal(orchApi.RECENT_MS, 120000);
 assert.equal(orchApi.ORCH_COORD, 'coordinator');
 
