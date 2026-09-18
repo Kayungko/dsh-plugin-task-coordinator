@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.26.1)
+ * dsh-plugin-task-coordinator — client module (0.26.2)
  *
  * Current UI: responsive grouped topology with selection, a read-only inspector,
  * aggregated relations, explicit navigation, and authenticated read-only family queries.
@@ -974,7 +974,14 @@ window.__ModuleLoader__.load({
 .orchViewHistoryControls{margin-bottom:16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .orchViewHistoryControls .orchViewRelationHint{width:100%;margin:0}
 .orchViewRoot *{box-sizing:border-box}
-.orchViewRoot{padding-bottom:calc(var(--dsh-composer-height,0px) + 24px)}
+.orchViewRoot{padding-bottom:24px;position:relative;overflow:hidden;height:100%;min-height:0}
+.orchViewShell{position:relative;display:flex;min-height:0;height:100%;overflow:hidden}
+.orchCanvasScroll{min-width:0;min-height:0;flex:1 1 auto;overflow:auto;scrollbar-width:thin;scrollbar-color:var(--orch-line) transparent}
+.orchDrawerLayer{position:absolute;inset:0;z-index:5;pointer-events:none}
+.orchDrawerLayer > .orchViewInspector{pointer-events:auto}
+.orchDrawerBody{min-height:0;overflow-y:auto;flex:1 1 auto;overscroll-behavior:contain}
+.orchDrawerHeader,.orchDrawerFooter{flex:none}
+[data-orchestration-hidden='true']{display:none !important}
 .orchViewRoot ::selection{background:color-mix(in srgb,var(--orch-accent) 20%,transparent)}
 .orchViewRoot button{font:inherit;cursor:pointer}
 .orchViewRoot button:focus-visible{outline:2px solid var(--orch-accent);outline-offset:4px}
@@ -1031,7 +1038,7 @@ window.__ModuleLoader__.load({
 .orchViewLegendKey{width:23px;border-top:1.5px solid var(--orch-line)}
 .orchViewLegendKey[data-kind='send']{border-color:var(--orch-accent)}
 .orchViewLegendKey[data-kind='report']{border-color:var(--orch-muted);border-top-style:dashed}
-.orchViewInspector{position:absolute;z-index:4;top:0;right:0;width:min(380px,100%);height:calc(100% - 24px);border-left:1px solid var(--orch-line);padding:30px 24px;background:var(--orch-surface);box-shadow:-10px 0 24px color-mix(in srgb,var(--orch-ink) 10%,transparent);min-width:0;overflow-wrap:anywhere;overflow-y:auto;scrollbar-width:thin;transform:translateX(100%);transition:transform 180ms ease}.orchViewInspector[data-open='true']{transform:translateX(0)}.orchViewInspectorClose{border:0;background:transparent;color:var(--orch-muted);font-size:20px;line-height:1;padding:4px 6px;border-radius:6px}.orchViewInspectorClose:hover{background:var(--orch-soft);color:var(--orch-ink)}
+.orchViewInspector{position:absolute;z-index:4;top:16px;right:16px;width:min(380px,calc(100% - 32px));max-height:calc(100% - 32px);height:auto;display:flex;flex-direction:column;border:1px solid var(--orch-line);padding:20px 24px;background:var(--orch-surface);box-shadow:-10px 0 24px color-mix(in srgb,var(--orch-ink) 10%,transparent);min-width:0;overflow-wrap:anywhere;overflow-y:auto;scrollbar-width:thin;transform:translateX(100%);transition:transform 180ms ease}.orchViewInspector[data-open='true']{transform:translateX(0)}.orchViewInspectorClose{border:0;background:transparent;color:var(--orch-muted);font-size:20px;line-height:1;padding:4px 6px;border-radius:6px}.orchViewInspectorClose:hover{background:var(--orch-soft);color:var(--orch-ink)}
 .orchViewInspectorTop{display:flex;gap:10px;align-items:start;justify-content:space-between}
 .orchViewInspector h2{font-size:21px;line-height:1.4;margin:0;font-weight:650}
 .orchViewInspectorStatus{display:flex;gap:12px;align-items:center;margin:16px 0 12px}
@@ -1061,9 +1068,8 @@ window.__ModuleLoader__.load({
 .orchViewEmpty h2{font-size:20px;margin:16px 0 10px}
 .orchViewEmpty p{font-size:13px;line-height:1.8;color:var(--orch-muted);margin:8px 0 20px}
 .orchViewEmpty .orchViewIconTile{width:48px;height:48px;margin:0 auto}
-@container orch (max-width:900px){.orchViewWorkspace{grid-template-columns:minmax(0,1fr);min-height:0}.orchViewMain{min-height:0}.orchViewInspector{border-left:0;border-top:1px solid var(--orch-line)}.orchViewFacts{grid-template-columns:1fr 1fr 2fr}.orchViewFactModel{grid-column:auto}.orchViewInspector .orchViewPrimary{max-width:300px}.orchViewLegend{margin-top:0}.orchViewToolbar{margin-bottom:20px}}
+@container orch (max-width:900px){.orchViewWorkspace{min-height:0}.orchViewMain{min-height:0}.orchViewInspector{border:1px solid var(--orch-line);top:16px;right:16px;width:min(380px,calc(100% - 32px));max-height:calc(100% - 32px)}.orchViewFacts{grid-template-columns:1fr 1fr 2fr}.orchViewFactModel{grid-column:auto}.orchViewInspector .orchViewPrimary{max-width:300px}.orchViewLegend{margin-top:0}.orchViewToolbar{margin-bottom:20px}}
 @container orch (max-width:460px){.orchViewMain,.orchViewInspector{padding:20px 12px}.orchViewTitle{font-size:20px}.orchViewFacts{grid-template-columns:1fr 1fr}.orchViewFactModel{grid-column:auto}.orchViewHistory{padding:0}.orchViewNode{padding:12px 8px}.orchViewNodeTitle{font-size:13px}.orchViewLegend{gap:12px}}
-@container orch (max-width:900px){.orchViewInspector{position:static;max-height:none;overflow:visible}}
 @media(prefers-reduced-motion:reduce){.orchViewFlow{animation:none}.orchViewNode{transition:none}}
 `;
 
@@ -1535,11 +1541,24 @@ window.__ModuleLoader__.load({
 			};
 			const [refreshNonce, setRefreshNonce] = react.useState(0);
 			const [selection, setSelection] = react.useState(null);
-			const [drawerClosed, setDrawerClosed] = react.useState(false);
+			const [drawerOpen, setDrawerOpen] = react.useState(true);
 			const [focusNonce, setFocusNonce] = react.useState(0);
 			const [viewWidth, setViewWidth] = react.useState(1180);
 			const rootRef = react.useRef(null);
 			const inspectorRef = react.useRef(null);
+			// The orchestration view is a supervision-only surface. Hide only the
+			// host composer seat and width handles while this view is mounted; the
+			// disposer restores the chat layout when the tab unmounts.
+			react.useEffect(() => {
+				const root = rootRef.current;
+				const scroll = root?.closest?.("[data-conversation-scroll]");
+				const body = scroll?.parentElement;
+				const seat = scroll?.querySelector?.("[data-composer-seat]");
+				const handles = body ? [...body.querySelectorAll("[data-width-handle]")] : [];
+				const hidden = [seat, ...handles].filter(Boolean);
+				for (const element of hidden) element.setAttribute("data-orchestration-hidden", "true");
+				return () => { for (const element of hidden) element.removeAttribute("data-orchestration-hidden"); };
+			}, []);
 			react.useEffect(() => {
 				let observer;
 				const measure = () => {
@@ -1700,7 +1719,11 @@ window.__ModuleLoader__.load({
 			};
 			const statusChip = (state) => h("span", { className: "orchViewChip", "data-kind": "status", "data-state": state }, t(`orch.status.${state}`));
 			const liveState = live => live ? (live.running ? "running" : live.completed ? "completed" : "idle") : "unknown";
-			const selected = drawerClosed ? null : (familyActive ? familyView.selected : orchSelectedChild(children, selection, currentSessionId));
+			const selected = drawerOpen ? (familyActive ? familyView.selected : orchSelectedChild(children, selection, currentSessionId)) : null;
+			// Never retain a highlight for a task that disappeared from the current projection.
+			react.useEffect(() => {
+				if (selection?.id && !children.some(child => child.sessionId === selection.id)) { setSelection(null); setDrawerOpen(false); }
+			}, [selection?.id, children]);
 			const selectedId = selected?.sessionId;
 			const selectedLive = selected ? orchSessionInfo(byId, selectedId) : null;
 			const fullTitle = child => orchSessionInfo(byId, child.sessionId)?.title || child.title || child.sessionId;
@@ -1724,7 +1747,7 @@ window.__ModuleLoader__.load({
 					onClick: () => {
 						setSelection(old => {
 							const closing = old?.id === child.sessionId;
-							setDrawerClosed(closing);
+							setDrawerOpen(!closing);
 							return closing ? null : { owner: currentSessionId, id: child.sessionId };
 						});
 					}
@@ -1796,8 +1819,8 @@ window.__ModuleLoader__.load({
 			const eventDescription = edge => familyActive ? t(edge.kind === "report" ? "orch.family.reportHint" : edge.kind === "spawn" ? "orch.family.spawnHint" : edge.delivered === false ? "orch.event.failedHint" : edge.mode === "steer" ? "orch.family.steerHint" : "orch.family.queueHint") : edge.kind === "send"
 				? t(edge.delivered === false ? "orch.event.failedHint" : edge.mode === "steer" ? "orch.event.steerHint" : "orch.event.queueHint")
 				: t(edge.kind === "report" ? "orch.event.reportHint" : "orch.event.spawnHint");
-			const inspector = selected ? h("aside", { className: "orchViewInspector", ref: inspectorRef, "data-open": !drawerClosed, "aria-label": t("orch.detail") },
-				h("div", { className: "orchViewInspectorTop" }, h("h2", { title: fullTitle(selected) }, titleFor(selected)), h("button", { type: "button", className: "orchViewInspectorClose", "aria-label": t("orch.detail.close"), onClick: () => { setDrawerClosed(true); setSelection(null); } }, "×")),
+			const inspector = selected ? h("aside", { className: "orchViewInspector", ref: inspectorRef, "data-open": drawerOpen, "aria-label": t("orch.detail") },
+				h("div", { className: "orchViewInspectorTop orchDrawerHeader" }, h("h2", { title: fullTitle(selected) }, titleFor(selected)), h("button", { type: "button", className: "orchViewInspectorClose", "aria-label": t("orch.detail.close"), onClick: () => { setDrawerOpen(false); setSelection(null); } }, "×")),
 				h("div", { className: "orchViewInspectorStatus" }, icon("task", true), statusChip(liveState(selectedLive))),
 				h("p", { className: "orchViewBreadcrumb" }, selected.team || t("orch.ungrouped")),
 				h("dl", { className: "orchViewFacts" },
@@ -1832,14 +1855,15 @@ window.__ModuleLoader__.load({
 			const runningCount = allChildren.filter(child => liveState(orchSessionInfo(byId, child.sessionId)) === "running").length;
 			const completedCount = allChildren.filter(child => liveState(orchSessionInfo(byId, child.sessionId)) === "completed").length;
 			react.useEffect(() => {
-				const onKey = event => { if (event.key === "Escape") { setDrawerClosed(true); setSelection(null); } };
+				const onKey = event => { if (event.key === "Escape") { setDrawerOpen(false); setSelection(null); } };
 				window.addEventListener?.("keydown", onKey);
 				return () => window.removeEventListener?.("keydown", onKey);
 			}, []);
 			const tree = h("div", { className: "orchViewRoot", ref: rootRef },
 				flash ? h("p", { className: "orchViewFlash", "data-kind": flash.kind, role: "status" }, flash.text) : null,
 				...diagnostics,
-				h("div", { className: "orchViewWorkspace", style: children.length ? undefined : { gridTemplateColumns: "minmax(0,1fr)" } },
+				h("div", { className: "orchViewWorkspace orchViewShell", "data-orchestration-view": true, style: children.length ? undefined : { gridTemplateColumns: "minmax(0,1fr)" } },
+					h("div", { className: "orchCanvasScroll" },
 					h("main", { className: "orchViewMain" },
 						h("div", { className: "orchViewToolbar" },
 							h("div", { className: "orchViewHeading" }, h("div", { className: "orchViewHeadingLine" }, h("h1", { className: "orchViewTitle" }, coordinatorTitle), statusChip(liveState(coordinatorLive)), h("span", { className: "orchViewRole" }, t("orch.coordinator"))),
@@ -1856,8 +1880,8 @@ window.__ModuleLoader__.load({
 							...groupElements,
 							h("svg", { className: "orchViewSvg", width: layout.size.width, height: layout.size.height, viewBox: `0 0 ${layout.size.width} ${layout.size.height}`, "aria-hidden": true }, ...edgeElements, ...memberEdges),
 							coordinatorCard, ...children.map(childCard), ...branchButtons)),
-						children.length ? h("div", { className: "orchViewLegend" }, ...["send", "spawn", "report"].map(kind => h("span", { key: kind }, h("i", { className: "orchViewLegendKey", "data-kind": kind }), t(`orch.legend.${kind}`))), h("span", null, t("orch.legend.recent"))) : null),
-					inspector));
+						children.length ? h("div", { className: "orchViewLegend" }, ...["send", "spawn", "report"].map(kind => h("span", { key: kind }, h("i", { className: "orchViewLegendKey", "data-kind": kind }), t(`orch.legend.${kind}`))), h("span", null, t("orch.legend.recent"))) : null)),
+					h("div", { className: "orchDrawerLayer", "aria-hidden": !selected }, inspector)));
 			return tree;
 			} catch (error) {
 				// Last-resort net (0.18.2 discipline): render the failure ourselves —

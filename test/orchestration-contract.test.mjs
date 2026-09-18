@@ -24,9 +24,26 @@ test('P2-3 list-size refresh is debounced while explicit refresh remains immedia
 });
 
 test('drawer contract covers toggle, Escape, close, non-modal and cleared selection', () => {
-  assert.match(source, /setDrawerClosed\(closing\)/);
+  assert.match(source, /setDrawerOpen\(!closing\)/);
   assert.match(source, /event\.key === "Escape"/);
   assert.match(source, /orchViewInspectorClose/);
   assert.match(source, /position:absolute/);
-  assert.match(source, /drawerClosed \? null/);
+  assert.match(source, /drawerOpen \?/);
+  assert.match(source, /setSelection\(null\)/);
+});
+
+test('supervision layout keeps canvas and drawer as sibling layers with bounded scrolling', () => {
+  assert.match(source, /className: "orchViewWorkspace orchViewShell"/);
+  assert.match(source, /className: "orchCanvasScroll"/);
+  assert.match(source, /className: "orchDrawerLayer"/);
+  assert.match(source, /width:min\(380px,calc\(100% - 32px\)\)/);
+  assert.match(source, /max-height:calc\(100% - 32px\)/);
+  assert.match(source, /overflow-y:auto/);
+});
+
+test('orchestration mount hides host composer and resize handles with cleanup', () => {
+  assert.match(source, /\[data-composer-seat\]/);
+  assert.match(source, /\[data-width-handle\]/);
+  assert.match(source, /data-orchestration-hidden/);
+  assert.match(source, /removeAttribute\("data-orchestration-hidden"\)/);
 });
