@@ -41,6 +41,15 @@ test('supervision layout keeps canvas and drawer as sibling layers with bounded 
   assert.match(source, /overflow-y:auto/);
 });
 
+test('canvas blank click closes only at the canvas boundary; cards and drawer stop it', () => {
+  assert.match(source, /className: "orchViewCanvas"[^}]*onPointerDown/);
+  assert.match(source, /onClick: closeFromCanvas/);
+  assert.match(source, /setDrawerOpen\(false\);\s*setSelection\(null\)/);
+  assert.match(source, /target\?\.closest\?\.\("button,\[data-role='child'\]/);
+  assert.match(source, /onClick: event => event\.stopPropagation\(\)/);
+  assert.match(source, /Math\.hypot/);
+});
+
 test('orchestration mount hides host composer and resize handles with cleanup', () => {
   assert.match(source, /\[data-composer-seat\]/);
   assert.match(source, /\[data-width-handle\]/);

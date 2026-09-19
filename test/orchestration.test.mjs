@@ -60,6 +60,11 @@ test('selection stays in overview; explicit open targets the selected task; owne
   let tree = h.render(props);
   const cards = collect(tree, el => el.props['data-role'] === 'child');
   assert.equal(cards[0].props['aria-pressed'], true);
+  const canvas = collect(tree, el => el.props.className === 'orchViewCanvas')[0];
+  const drawer = collect(tree, el => el.type === 'aside')[0];
+  canvas.props.onClick({ target: { closest: () => null }, clientX: 0, clientY: 0 });
+  tree = h.render(props);
+  assert.equal(collect(tree, el => el.type === 'aside').length, 0, 'blank canvas click closes drawer');
   cards[1].props.onClick();
   assert.deepEqual(opened, []);
   tree = h.render(props);

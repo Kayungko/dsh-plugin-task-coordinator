@@ -1544,6 +1544,7 @@ window.__ModuleLoader__.load({
 			const [drawerOpen, setDrawerOpen] = react.useState(true);
 			const [focusNonce, setFocusNonce] = react.useState(0);
 			const [viewWidth, setViewWidth] = react.useState(1180);
+			const canvasPointer = react.useRef(null);
 			const rootRef = react.useRef(null);
 			const inspectorRef = react.useRef(null);
 			// The orchestration view is a supervision-only surface. Hide only the
@@ -1819,7 +1820,7 @@ window.__ModuleLoader__.load({
 			const eventDescription = edge => familyActive ? t(edge.kind === "report" ? "orch.family.reportHint" : edge.kind === "spawn" ? "orch.family.spawnHint" : edge.delivered === false ? "orch.event.failedHint" : edge.mode === "steer" ? "orch.family.steerHint" : "orch.family.queueHint") : edge.kind === "send"
 				? t(edge.delivered === false ? "orch.event.failedHint" : edge.mode === "steer" ? "orch.event.steerHint" : "orch.event.queueHint")
 				: t(edge.kind === "report" ? "orch.event.reportHint" : "orch.event.spawnHint");
-			const inspector = selected ? h("aside", { className: "orchViewInspector", ref: inspectorRef, "data-open": drawerOpen, "aria-label": t("orch.detail") },
+			const inspector = selected ? h("aside", { className: "orchViewInspector", ref: inspectorRef, "data-open": drawerOpen, "aria-label": t("orch.detail"), onClick: event => event.stopPropagation() },
 				h("div", { className: "orchViewInspectorTop orchDrawerHeader" }, h("h2", { title: fullTitle(selected) }, titleFor(selected)), h("button", { type: "button", className: "orchViewInspectorClose", "aria-label": t("orch.detail.close"), onClick: () => { setDrawerOpen(false); setSelection(null); } }, "×")),
 				h("div", { className: "orchViewInspectorStatus" }, icon("task", true), statusChip(liveState(selectedLive))),
 				h("p", { className: "orchViewBreadcrumb" }, selected.team || t("orch.ungrouped")),
@@ -1859,6 +1860,13 @@ window.__ModuleLoader__.load({
 				window.addEventListener?.("keydown", onKey);
 				return () => window.removeEventListener?.("keydown", onKey);
 			}, []);
+			const closeFromCanvas = event => {
+				if (event?.target?.closest?.("button,[data-role='child'],[data-role='coordinator'],.orchViewBranch")) return;
+				const start = canvasPointer.current;
+				if (start && Math.hypot((event.clientX || 0) - start.x, (event.clientY || 0) - start.y) > 5) return;
+				setDrawerOpen(false);
+				setSelection(null);
+			};
 			const tree = h("div", { className: "orchViewRoot", ref: rootRef },
 				flash ? h("p", { className: "orchViewFlash", "data-kind": flash.kind, role: "status" }, flash.text) : null,
 				...diagnostics,
@@ -1876,7 +1884,7 @@ window.__ModuleLoader__.load({
 						familyActive && coordinatorId !== currentSessionId ? h("p", { className: "orchViewFamilyContext" }, t("orch.family.context", { title: orchTaskTitle(orchSessionInfo(byId,currentSessionId)?.title || currentSessionId) })) : null,
 						children.length === 0 ? h("div", { className: "orchViewEmpty" }, icon("group", true), h("h2", null, t(emptyTitle)), h("p", null, t(emptyHint)),
 							!familyView.family && chat !== null && extraction.ok !== false ? h("p", null, t("orch.empty.scanned", { n: extraction.scanned || 0 })) : null)
-						: h("div", { className: "orchViewCanvas", "aria-label": t("orch.topology") }, h("div", { className: "orchViewLayer", style: { width: layout.size.width, height: layout.size.height } },
+						: h("div", { className: "orchViewCanvas", "aria-label": t("orch.topology"), onPointerDown: event => { canvasPointer.current = { x: event.clientX, y: event.clientY }; }, onClick: closeFromCanvas }, h("div", { className: "orchViewLayer", style: { width: layout.size.width, height: layout.size.height } },
 							...groupElements,
 							h("svg", { className: "orchViewSvg", width: layout.size.width, height: layout.size.height, viewBox: `0 0 ${layout.size.width} ${layout.size.height}`, "aria-hidden": true }, ...edgeElements, ...memberEdges),
 							coordinatorCard, ...children.map(childCard), ...branchButtons)),
