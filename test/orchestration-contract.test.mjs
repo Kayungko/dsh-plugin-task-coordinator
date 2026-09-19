@@ -36,9 +36,12 @@ test('supervision layout keeps canvas and drawer as sibling layers with bounded 
   assert.match(source, /className: "orchViewWorkspace orchViewShell"/);
   assert.match(source, /className: "orchCanvasScroll"/);
   assert.match(source, /className: "orchDrawerLayer"/);
+  assert.match(source, /\.orchDrawerLayer\{position:sticky;top:16px/);
+  assert.match(source, /height:calc\(var\(--dsh-conversation-viewport-height,100dvh\) - 32px\)/);
   assert.match(source, /width:min\(380px,calc\(100% - 32px\)\)/);
   assert.match(source, /max-height:calc\(100% - 32px\)/);
   assert.match(source, /overflow-y:auto/);
+  assert.doesNotMatch(source, /\.orchDrawerLayer\{position:fixed/);
 });
 
 test('canvas blank click closes only at the canvas boundary; cards and drawer stop it', () => {
