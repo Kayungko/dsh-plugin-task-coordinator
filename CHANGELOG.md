@@ -1,5 +1,11 @@
 # 更新日志
 
+## [0.26.4] - 2026-09-19
+
+### 修复
+
+- 编排详情抽屉从相对 shell 的 absolute 改为参与真实外层 `[data-conversation-scroll]` 滚动祖先的 sticky 覆盖层：滚动任务卡片/外层会话区域时抽屉保持在当前可视面板；高度使用宿主 `--dsh-conversation-viewport-height`（fallback `100dvh`）减 32px，内容超出时仅抽屉内部滚动。保持画布独立滚动、非模态、卡片切换、空白/Esc/关闭行为；明确禁止 global fixed。
+
 ## [0.26.3] - 2026-09-18
 
 ### 修复
