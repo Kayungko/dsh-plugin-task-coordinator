@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.26.2)
+ * dsh-plugin-task-coordinator — client module (0.26.3)
  *
  * Current UI: responsive grouped topology with selection, a read-only inspector,
  * aggregated relations, explicit navigation, and authenticated read-only family queries.
