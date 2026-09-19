@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.26.5)
+ * dsh-plugin-task-coordinator — client module (0.26.6)
  *
  * Current UI: responsive grouped topology with selection, a read-only inspector,
  * aggregated relations, explicit navigation, and authenticated read-only family queries.
@@ -1038,7 +1038,7 @@ window.__ModuleLoader__.load({
 .orchViewLegendKey{width:23px;border-top:1.5px solid var(--orch-line)}
 .orchViewLegendKey[data-kind='send']{border-color:var(--orch-accent)}
 .orchViewLegendKey[data-kind='report']{border-color:var(--orch-muted);border-top-style:dashed}
-.orchViewInspector{position:absolute;z-index:4;top:0;right:16px;width:min(380px,calc(100% - 32px));max-height:calc(var(--dsh-conversation-viewport-height,100dvh) - 32px);height:auto;display:flex;flex-direction:column;border:1px solid var(--orch-line);padding:20px 24px;background:var(--orch-surface);box-shadow:-10px 0 24px color-mix(in srgb,var(--orch-ink) 10%,transparent);min-width:0;overflow-wrap:anywhere;overflow-y:auto;scrollbar-width:thin;transform:translateX(100%);transition:transform 180ms ease}.orchViewInspector[data-open='true']{transform:translateX(0)}.orchViewInspectorClose{border:0;background:transparent;color:var(--orch-muted);font-size:20px;line-height:1;padding:4px 6px;border-radius:6px}.orchViewInspectorClose:hover{background:var(--orch-soft);color:var(--orch-ink)}
+.orchViewInspector{position:absolute;z-index:4;top:0;right:16px;width:min(380px,calc(100cqw - 32px));max-height:calc(var(--dsh-conversation-viewport-height,100dvh) - 32px);height:auto;display:flex;flex-direction:column;border:1px solid var(--orch-line);padding:20px 24px;background:var(--orch-surface);box-shadow:-10px 0 24px color-mix(in srgb,var(--orch-ink) 10%,transparent);min-width:0;overflow-wrap:anywhere;overflow-y:auto;scrollbar-width:thin;transform:translateX(100%);transition:transform 180ms ease}.orchViewInspector[data-open='true']{transform:translateX(0)}.orchViewInspectorClose{border:0;background:transparent;color:var(--orch-muted);font-size:20px;line-height:1;padding:4px 6px;border-radius:6px}.orchViewInspectorClose:hover{background:var(--orch-soft);color:var(--orch-ink)}
 .orchViewInspectorTop{display:flex;gap:10px;align-items:start;justify-content:space-between}
 .orchViewInspector h2{font-size:21px;line-height:1.4;margin:0;font-weight:650}
 .orchViewInspectorStatus{display:flex;gap:12px;align-items:center;margin:16px 0 12px}

@@ -42,7 +42,12 @@ test('supervision layout keeps canvas and drawer as sibling layers with bounded 
   assert.match(layerRule, /position:sticky;top:16px/);
   assert.match(layerRule, /height:0;min-height:0;overflow:visible/);
   assert.doesNotMatch(layerRule, /dsh-conversation-viewport-height/);
-  assert.match(inspectorRule, /width:min\(380px,calc\(100% - 32px\)\)/);
+  assert.match(inspectorRule, /width:min\(380px,calc\(100cqw - 32px\)\)/);
+  // 0.26.6 regression pin: the inspector's containing block is the ZERO-WIDTH
+  // sticky sentinel (.orchDrawerLayer{width:0}), so a percentage width resolves
+  // against 0 and clamps to 0 — the drawer renders invisible on wide panels.
+  // Width must come from the container-query unit (cqw), never from %.
+  assert.doesNotMatch(inspectorRule, /calc\(100%/);
   assert.match(inspectorRule, /max-height:calc\(var\(--dsh-conversation-viewport-height,100dvh\) - 32px\)/);
   assert.match(inspectorRule, /overflow-y:auto/);
   assert.doesNotMatch(source, /\.orchDrawerLayer\{position:fixed/);
