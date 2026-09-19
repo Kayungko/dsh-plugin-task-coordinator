@@ -36,21 +36,27 @@ test('supervision layout keeps canvas and drawer as sibling layers with bounded 
   assert.match(source, /className: "orchViewWorkspace orchViewShell"/);
   assert.match(source, /className: "orchCanvasScroll"/);
   assert.match(source, /className: "orchDrawerLayer"/);
-  assert.match(source, /\.orchDrawerLayer\{position:sticky;top:16px/);
+  // 0.26.7 bisect ruling: the sticky zero-width sentinel (0.26.4-0.26.6) never
+  // rendered the drawer on the real host — three geometry variants failed — so
+  // the layer returns to the last known-good 0.26.3 shape: a full-coverage
+  // absolute layer over the (position:relative) shell, which also gives the
+  // inspector a full-width containing block for its percentage width.
+  assert.match(source, /\.orchDrawerLayer\{position:absolute;inset:0/);
   const layerRule = source.match(/\.orchDrawerLayer\{([^}]+)\}/)?.[1] || '';
   const inspectorRule = source.match(/\.orchViewInspector\{position:absolute;([^}]+)\}/)?.[1] || '';
-  assert.match(layerRule, /position:sticky;top:16px/);
-  assert.match(layerRule, /height:0;min-height:0;overflow:visible/);
-  assert.doesNotMatch(layerRule, /dsh-conversation-viewport-height/);
-  assert.match(inspectorRule, /width:min\(380px,calc\(100cqw - 32px\)\)/);
-  // 0.26.6 regression pin: the inspector's containing block is the ZERO-WIDTH
-  // sticky sentinel (.orchDrawerLayer{width:0}), so a percentage width resolves
-  // against 0 and clamps to 0 — the drawer renders invisible on wide panels.
-  // Width must come from the container-query unit (cqw), never from %.
-  assert.doesNotMatch(inspectorRule, /calc\(100%/);
+  assert.match(layerRule, /position:absolute;inset:0/);
+  assert.doesNotMatch(layerRule, /position:sticky/);
+  assert.doesNotMatch(source, /\.orchDrawerLayer\{position:fixed/);
+  assert.match(inspectorRule, /top:16px;right:16px/);
+  assert.match(inspectorRule, /width:min\(380px,calc\(100% - 32px\)\)/);
   assert.match(inspectorRule, /max-height:calc\(var\(--dsh-conversation-viewport-height,100dvh\) - 32px\)/);
   assert.match(inspectorRule, /overflow-y:auto/);
-  assert.doesNotMatch(source, /\.orchDrawerLayer\{position:fixed/);
+  // 0.26.7 bottom-blank fix: root and shell stretch to the host-published
+  // conversation viewport height (percentage fallback keeps old hosts a no-op).
+  const rootRule = source.match(/\.orchViewRoot\{padding-bottom:24px;([^}]+)\}/)?.[1] || '';
+  const shellRule = source.match(/\.orchViewShell\{([^}]+)\}/)?.[1] || '';
+  assert.match(rootRule, /min-height:var\(--dsh-conversation-viewport-height,100%\)/);
+  assert.match(shellRule, /min-height:var\(--dsh-conversation-viewport-height,100%\)/);
 });
 
 test('canvas blank click closes only at the canvas boundary; cards and drawer stop it', () => {

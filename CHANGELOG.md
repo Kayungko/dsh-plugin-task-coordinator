@@ -1,5 +1,13 @@
 # 更新日志
 
+## [0.26.7] - 2026-09-19
+
+### 紧急修复（二分回退 + 空白修复）
+
+- 抽屉几何二分回退到 0.26.3 已知可用形态：0.26.4→0.26.6 三代「sticky 零宽哨兵层」几何（% 宽、cqw 宽）在真实宿主上均未渲染出抽屉，而 0.26.3 的「absolute 全覆盖层（inset:0）+ 百分比宽」是用户确认过的最后可用形态。drawer layer 回退为 `position:absolute;inset:0`，inspector 回退为 `top:16px` + `width:min(380px,calc(100% - 32px))`（包含块重新变成整块 shell，百分比有确定基准）；`max-height` 保留宿主视口变量写法。**代价：暂时失去 0.26.4 的滚动粘附（sticky），抽屉随内容滚动——先恢复可见性，粘附待在真实渲染验证后重新落地。**
+- 修复编排页底部大片空白（实况截图证实：root 仅 744px 而面板可用约 1050px）：root 与 shell 增加 `min-height:var(--dsh-conversation-viewport-height,100%)` 拉伸到宿主会话视口高度；该变量由宿主 `dsh-client-ui-conversation` 在 scroller 上以 `clientHeight` 发布（已在本机宿主 bundle 中取证），百分比回退保证未发布变量的旧宿主行为不变。
+- 契约测试同步：钉住 absolute inset:0 layer、百分比宽、top:16px、root/shell 视口变量拉伸；删除 0.26.6 的 cqw 断言与 sticky 断言。
+
 ## [0.26.6] - 2026-09-19
 
 ### 紧急修复
