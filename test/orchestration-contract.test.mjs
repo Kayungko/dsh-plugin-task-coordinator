@@ -37,10 +37,14 @@ test('supervision layout keeps canvas and drawer as sibling layers with bounded 
   assert.match(source, /className: "orchCanvasScroll"/);
   assert.match(source, /className: "orchDrawerLayer"/);
   assert.match(source, /\.orchDrawerLayer\{position:sticky;top:16px/);
-  assert.match(source, /height:calc\(var\(--dsh-conversation-viewport-height,100dvh\) - 32px\)/);
-  assert.match(source, /width:min\(380px,calc\(100% - 32px\)\)/);
-  assert.match(source, /max-height:calc\(100% - 32px\)/);
-  assert.match(source, /overflow-y:auto/);
+  const layerRule = source.match(/\.orchDrawerLayer\{([^}]+)\}/)?.[1] || '';
+  const inspectorRule = source.match(/\.orchViewInspector\{position:absolute;([^}]+)\}/)?.[1] || '';
+  assert.match(layerRule, /position:sticky;top:16px/);
+  assert.match(layerRule, /height:0;min-height:0;overflow:visible/);
+  assert.doesNotMatch(layerRule, /dsh-conversation-viewport-height/);
+  assert.match(inspectorRule, /width:min\(380px,calc\(100% - 32px\)\)/);
+  assert.match(inspectorRule, /max-height:calc\(var\(--dsh-conversation-viewport-height,100dvh\) - 32px\)/);
+  assert.match(inspectorRule, /overflow-y:auto/);
   assert.doesNotMatch(source, /\.orchDrawerLayer\{position:fixed/);
 });
 

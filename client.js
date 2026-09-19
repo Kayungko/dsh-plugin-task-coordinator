@@ -1,5 +1,5 @@
 /**
- * dsh-plugin-task-coordinator — client module (0.26.4)
+ * dsh-plugin-task-coordinator — client module (0.26.5)
  *
  * Current UI: responsive grouped topology with selection, a read-only inspector,
  * aggregated relations, explicit navigation, and authenticated read-only family queries.
@@ -977,7 +977,7 @@ window.__ModuleLoader__.load({
 .orchViewRoot{padding-bottom:24px;position:relative;overflow:visible;min-height:100%}
 .orchViewShell{position:relative;display:flex;min-height:100%;overflow:visible}
 .orchCanvasScroll{min-width:0;min-height:0;flex:1 1 auto;overflow:auto;scrollbar-width:thin;scrollbar-color:var(--orch-line) transparent}
-.orchDrawerLayer{position:sticky;top:16px;align-self:flex-start;flex:0 0 0;width:0;height:calc(var(--dsh-conversation-viewport-height,100dvh) - 32px);z-index:5;pointer-events:none}
+.orchDrawerLayer{position:sticky;top:16px;align-self:flex-start;flex:0 0 0;width:0;height:0;min-height:0;overflow:visible;z-index:5;pointer-events:none}
 .orchDrawerLayer > .orchViewInspector{pointer-events:auto}
 .orchDrawerBody{min-height:0;overflow-y:auto;flex:1 1 auto;overscroll-behavior:contain}
 .orchDrawerHeader,.orchDrawerFooter{flex:none}
@@ -1038,7 +1038,7 @@ window.__ModuleLoader__.load({
 .orchViewLegendKey{width:23px;border-top:1.5px solid var(--orch-line)}
 .orchViewLegendKey[data-kind='send']{border-color:var(--orch-accent)}
 .orchViewLegendKey[data-kind='report']{border-color:var(--orch-muted);border-top-style:dashed}
-.orchViewInspector{position:absolute;z-index:4;top:0;right:16px;width:min(380px,calc(100% - 32px));max-height:calc(100% - 32px);height:auto;display:flex;flex-direction:column;border:1px solid var(--orch-line);padding:20px 24px;background:var(--orch-surface);box-shadow:-10px 0 24px color-mix(in srgb,var(--orch-ink) 10%,transparent);min-width:0;overflow-wrap:anywhere;overflow-y:auto;scrollbar-width:thin;transform:translateX(100%);transition:transform 180ms ease}.orchViewInspector[data-open='true']{transform:translateX(0)}.orchViewInspectorClose{border:0;background:transparent;color:var(--orch-muted);font-size:20px;line-height:1;padding:4px 6px;border-radius:6px}.orchViewInspectorClose:hover{background:var(--orch-soft);color:var(--orch-ink)}
+.orchViewInspector{position:absolute;z-index:4;top:0;right:16px;width:min(380px,calc(100% - 32px));max-height:calc(var(--dsh-conversation-viewport-height,100dvh) - 32px);height:auto;display:flex;flex-direction:column;border:1px solid var(--orch-line);padding:20px 24px;background:var(--orch-surface);box-shadow:-10px 0 24px color-mix(in srgb,var(--orch-ink) 10%,transparent);min-width:0;overflow-wrap:anywhere;overflow-y:auto;scrollbar-width:thin;transform:translateX(100%);transition:transform 180ms ease}.orchViewInspector[data-open='true']{transform:translateX(0)}.orchViewInspectorClose{border:0;background:transparent;color:var(--orch-muted);font-size:20px;line-height:1;padding:4px 6px;border-radius:6px}.orchViewInspectorClose:hover{background:var(--orch-soft);color:var(--orch-ink)}
 .orchViewInspectorTop{display:flex;gap:10px;align-items:start;justify-content:space-between}
 .orchViewInspector h2{font-size:21px;line-height:1.4;margin:0;font-weight:650}
 .orchViewInspectorStatus{display:flex;gap:12px;align-items:center;margin:16px 0 12px}
@@ -1068,7 +1068,7 @@ window.__ModuleLoader__.load({
 .orchViewEmpty h2{font-size:20px;margin:16px 0 10px}
 .orchViewEmpty p{font-size:13px;line-height:1.8;color:var(--orch-muted);margin:8px 0 20px}
 .orchViewEmpty .orchViewIconTile{width:48px;height:48px;margin:0 auto}
-@container orch (max-width:900px){.orchViewWorkspace{min-height:0}.orchViewMain{min-height:0}.orchViewInspector{border:1px solid var(--orch-line);top:0;right:16px;width:min(380px,calc(100cqw - 32px));max-height:100%}.orchViewFacts{grid-template-columns:1fr 1fr 2fr}.orchViewFactModel{grid-column:auto}.orchViewInspector .orchViewPrimary{max-width:300px}.orchViewLegend{margin-top:0}.orchViewToolbar{margin-bottom:20px}}
+@container orch (max-width:900px){.orchViewWorkspace{min-height:0}.orchViewMain{min-height:0}.orchViewInspector{border:1px solid var(--orch-line);top:0;right:16px;width:min(380px,calc(100cqw - 32px));max-height:calc(var(--dsh-conversation-viewport-height,100dvh) - 32px)}.orchViewFacts{grid-template-columns:1fr 1fr 2fr}.orchViewFactModel{grid-column:auto}.orchViewInspector .orchViewPrimary{max-width:300px}.orchViewLegend{margin-top:0}.orchViewToolbar{margin-bottom:20px}}
 @container orch (max-width:460px){.orchViewMain,.orchViewInspector{padding:20px 12px}.orchViewTitle{font-size:20px}.orchViewFacts{grid-template-columns:1fr 1fr}.orchViewFactModel{grid-column:auto}.orchViewHistory{padding:0}.orchViewNode{padding:12px 8px}.orchViewNodeTitle{font-size:13px}.orchViewLegend{gap:12px}}
 @media(prefers-reduced-motion:reduce){.orchViewFlow{animation:none}.orchViewNode{transition:none}}
 `;

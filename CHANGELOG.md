@@ -1,5 +1,11 @@
 # 更新日志
 
+## [0.26.5] - 2026-09-19
+
+### 紧急修复
+
+- 修复 v0.26.4 sticky drawer layer 以视口高度参与 flex 布局，导致抽屉消失和页面底部巨空白：drawer layer 改为 `height:0; min-height:0; overflow:visible` 的零高 sticky sentinel，不再贡献布局高度；视口高度约束移到 inspector 自身，继续保持内部独立滚动与 shell 范围内粘附。
+
 ## [0.26.4] - 2026-09-19
 
 ### 修复
