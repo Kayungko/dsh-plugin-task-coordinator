@@ -9,10 +9,10 @@
 
 [![DSH 0.1.2-rc.1 verified](https://img.shields.io/badge/DSH-0.1.2--rc.1%20verified-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![105 unit tests](https://img.shields.io/badge/tests-105%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![155 unit tests](https://img.shields.io/badge/tests-155%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
-[What is this](#what-is-this) · [Screenshots](#screenshots) · [Quick start](#quick-start) · [Tools](#the-eleven-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Changelog](CHANGELOG.md) · [Chinese](README.zh-CN.md)
+[What is this](#what-is-this) · [Screenshots](#screenshots) · [Quick start](#quick-start) · [Tools](#the-eleven-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Web bridge](docs/WEB-BRIDGE.md) · [Changelog](CHANGELOG.md) · [Chinese](README.zh-CN.md)
 
 </div>
 
@@ -300,6 +300,12 @@ Config resolution **rejects wrong types instead of guessing**: a bad type fails 
 
 ---
 
+## External task bridge (experimental)
+
+Since 0.27.0 the former standalone `dsh-plugin-task-bridge` package lives **inside this plugin**, behind a GUI experiment toggle: **Settings → 任务编排 → 外部任务桥**. Enabled, the host webserver serves the seven frozen `/v1/*` routes on `127.0.0.1:43120` (spawn / send / progress / wait / list / models / capabilities), guarded by `X-Task-Bridge-Token` against `~/.dsh/task-bridge-token` — so loopback processes such as [dsh-task-bridge-mcp](../bridge-mcp/README.md), and through it a ChatGPT web session via OpenAI's Secure MCP Tunnel, can drive DSH task sessions with your chat quota. The wire contract is frozen: routes, header, token path and envelope shapes are identical to the standalone package's v0.3.0, so existing consumers needed zero changes. Toggling off drains in-flight requests for ~5 s, then unregisters every route — external callers get an immediate 404, never a hanging connection. Patch-row tunables (`defaultCwd` and friends) moved under the `bridge` sub-object of this plugin's patch config. Deployment and verification walkthrough: **[docs/WEB-BRIDGE.md](docs/WEB-BRIDGE.md)**.
+
+---
+
 ## For developers
 
 Module layering, DI boundaries and the degradation strategy live in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**. Quick reference only here.
@@ -308,7 +314,7 @@ Module layering, DI boundaries and the degradation strategy live in **[docs/ARCH
 
 ```powershell
 node --check *.mjs                      # syntax check
-node --test test/smoke.test.mjs         # 105 unit tests (mocked host)
+node --test test/smoke.test.mjs         # 155 unit tests (mocked host)
 # after installing into a profile (see Quick start):
 node verify-installed.mjs               # installed-location integration check: real host packages + mock ctx
 ```

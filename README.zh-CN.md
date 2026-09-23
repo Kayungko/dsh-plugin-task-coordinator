@@ -9,10 +9,10 @@
 
 [![DSH 0.1.2-rc.1 实测](https://img.shields.io/badge/DSH-0.1.2--rc.1%20实测-16A34A?style=for-the-badge)](docs/PROTOCOL.md)
 [![Node.js](https://img.shields.io/badge/Node.js-%5E22.19%20%7C%20%3E%3D24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](package.json)
-[![105 个单元测试](https://img.shields.io/badge/tests-105%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
+[![155 个单元测试](https://img.shields.io/badge/tests-155%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
-[这是什么](#这是什么) · [界面一览](#界面一览) · [快速开始](#快速开始) · [十一个工具](#十一个工具) · [架构设计](docs/ARCHITECTURE.md) · [主机契约](docs/PROTOCOL.md) · [更新日志](CHANGELOG.md) · [English](README.md)
+[这是什么](#这是什么) · [界面一览](#界面一览) · [快速开始](#快速开始) · [十一个工具](#十一个工具) · [架构设计](docs/ARCHITECTURE.md) · [主机契约](docs/PROTOCOL.md) · [网页桥接](docs/WEB-BRIDGE.md) · [更新日志](CHANGELOG.md) · [English](README.md)
 
 </div>
 
@@ -299,6 +299,12 @@ pwsh install.ps1 -Source .
 
 ---
 
+## 外部任务桥（实验性）
+
+0.27.0 起，原独立包 `dsh-plugin-task-bridge` **合并进本插件**，由 GUI 实验开关管理：**设置 → 任务编排 → 外部任务桥**。开启后宿主 webserver 在 `127.0.0.1:43120` 服务七条冻结的 `/v1/*` 路由（spawn / send / progress / wait / list / models / capabilities），以 `X-Task-Bridge-Token` 对照 `~/.dsh/task-bridge-token` 鉴权——供 [dsh-task-bridge-mcp](../bridge-mcp/README.md) 这类回环进程、以及经它通过 OpenAI Secure MCP Tunnel 接入的 **ChatGPT 网页会话**（用聊天额度驱动本机 DSH 任务）使用。wire 契约冻结：路由、请求头、token 路径与信封形状与独立包 v0.3.0 完全一致，既有消费方零改动。关闭开关先排空在途请求约 5 秒再卸载全部路由——外部调用立刻收到 404，不留悬挂连接。patch 行可调项（`defaultCwd` 等）迁入本插件 patch 配置的 `bridge` 子对象。部署与验证 walkthrough：**[docs/WEB-BRIDGE.md](docs/WEB-BRIDGE.md)**。
+
+---
+
 ## 给开发者
 
 模块分层、DI 边界与降级策略见 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**。本节只留速查。
@@ -307,7 +313,7 @@ pwsh install.ps1 -Source .
 
 ```powershell
 node --check *.mjs                      # 语法检查
-node --test test/smoke.test.mjs         # 105 个单元测试（mock 宿主）
+node --test test/smoke.test.mjs         # 155 个单元测试（mock 宿主）
 # 安装进 profile 后（见快速开始）：
 node verify-installed.mjs               # 安装态集成验证：真实宿主包 + mock ctx
 ```

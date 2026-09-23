@@ -1,5 +1,20 @@
 # 更新日志
 
+## [0.27.0] - 2026-09-23
+
+### 外部任务桥合并（独立包硬切内置）
+
+- 原独立包 dsh-plugin-task-bridge v0.3.0 的整条挂载面硬切合并进本插件：七条 exact 路由（/v1/spawn、send、progress、wait、list、models、capabilities）、X-Task-Bridge-Token 鉴权、token 文件默认路径（~/.dsh/task-bridge-token）、256KB body 上限与 60s/10 次 spawn 策略闸**全部冻结不改**——bridge-mcp 与线上 Secure MCP Tunnel 依赖它们。新增 bridge-auth / bridge-endpoints / bridge-policy / bridge-runtime 四个纯模块（可离线单测）；挂载监管 createBridgeSupervisor 状态机：开=挂载全部路由，关=5s 排空在途请求后调 disposer 反注册（"关就是关"——外部立刻 404，不留悬挂连接）；宿主 webserver 缺席或挂载抛错时降级告警，不炸 coordinator 主 apply。
+- 实验开关进 GUI：task-coordinator 设置区新增 bridgeEnabled / bridgeTokenFile 两个扁平字段（设置 → 任务编排 → 外部任务桥），保存即热生效、无需重启；client.js 编辑器同版落地——checkbox + token 路径行、staged-write 草稿语义（未保存前「当前状态」仍显示 stored 值，不谎报）、开关关闭时 token 行禁用、honest-save 回读核对后才报「已保存 ✓」。settings onChange → supervisor.reconcile() 是唯一生效路径（手改 settings.yaml 走同一条路）。
+- patch 行 tunables 迁移：旧 task-bridge-runtime 覆盖块的 config 键（defaultCwd / tokenFile / maxBodyBytes / spawnWindowMs / spawnMaxPerWindow）改为 task-coordinator-runtime 行 config 的 `bridge` 子对象；resolveConfig 增加 bridge 透传 + 形状守卫（值校验与默认仍归 bridge-runtime.resolveConfig，单一事实源）。
+- 0.24.0 跨组 isolate 服务缝（'dsh-task-bridge' 共享 label + 503 降级语义）RETIRED：桥现在进程内解析同组 provide，无外部消费组残留；docs/PROTOCOL.md §17 同步标注退役。
+- 验证：smoke 155/155（含新增 bridge-toggle 套件）+ verify-installed 安装态全绿；GUI 热开关实测 200↔404 双向切换、宿主 PID 不变；不传 cwd 的桥 spawn 精确落在 patch `bridge.defaultCwd` 工作区（未回退 homedir）；ChatGPT 网页 → OpenAI Secure MCP Tunnel → bridge-mcp → 合并后桥的端到端回传与本地直连逐字段一致（capabilities 自报 bridgeVersion/coordinatorVersion=0.27.0、coordinatorEnabled=true）。
+- 发版：git tag v0.27.0。独立包 dsh-plugin-task-bridge 标 DEPRECATED、保留一个发布周期后删（见其仓 0.3.1）。
+
+### 同期修复（client.js 草稿构造）
+
+- provider / model 下拉的 onChange 由整对象重建改为展开式：整对象重建在新增字段后会静默丢弃未命名字段（改 provider 会把桥开关 reset 回 stored 值），展开式消除这一类隐患；draft 构造收拢到 draftFromStored 单一入口（stored-sync effect、discard、字段重建三处共用），新增字段不可能再漏掉某条路径。
+
 ## [0.26.7] - 2026-09-19
 
 ### 紧急修复（二分回退 + 空白修复）
