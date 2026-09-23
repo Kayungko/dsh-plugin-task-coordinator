@@ -1,7 +1,10 @@
 // bridge-toggle.test.mjs — 0.27.0 实验外部桥：设置归一化 + 热挂载/卸载状态机。
 // 离线单测：fake ctx/webServer/定时器，不碰宿主与真桥（wire 契约由 smoke 覆盖）。
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import z from '@deepseek-ai/schemastery';
 
 import {
@@ -57,7 +60,17 @@ test('schema/base：实验字段默认关、默认空路径', () => {
 // supervisor 状态机（fake 定时器）
 // ---------------------------------------------------------------------------
 
-function makeWorld({ enabled = false, tokenFile } = {}) {
+// 测试隔离（必须）：mount 回调经 resolveConfig 落到 tokenFile，而 ensureTokenFile
+// 在文件缺失时**会写盘**（固定契约①的合并后接替者）。默认路径是真实的
+// ~/.dsh/task-bridge-token —— 绝不允许 npm test 往用户主目录写文件，也不允许
+// 因作者本机恰好有个遗产 token 文件而让「生成」分支永远测不到。故 makeWorld 的
+// tokenFile 默认指向本文件独占的一次性临时目录，跑完整体清理。
+const TEST_TMP = mkdtempSync(join(tmpdir(), 'dsh-bridge-toggle-'));
+after(() => {
+  try { rmSync(TEST_TMP, { recursive: true, force: true }); } catch { /* 尽力清理 */ }
+});
+
+function makeWorld({ enabled = false, tokenFile = join(TEST_TMP, 'task-bridge-token') } = {}) {
   const prefs = { enabled, tokenFile };
   const routes = [];
   const disposed = [];
@@ -80,7 +93,7 @@ function makeWorld({ enabled = false, tokenFile } = {}) {
     mount: (ctx) => {
       mountCalls += 1;
       if (mountError) throw mountError;
-      return mountExternalBridge(ctx, resolveConfig({}));
+      return mountExternalBridge(ctx, resolveConfig({ tokenFile }));
     },
     logger: { info: () => {}, warn: () => {} },
     setTimeoutFn: fakeSetTimeout,
@@ -101,6 +114,20 @@ test('supervisor：默认关不挂载；attach 后开=挂 7 路由', () => {
   // 重复 reconcile 不重复挂载
   w.sup.reconcile();
   assert.equal(w.mountCalls, 1);
+});
+
+test('supervisor：挂载即确保 token 文件在位（固定契约①接替者，缺文件也能起来）', () => {
+  // 用独占探针路径，不依赖测试执行顺序（默认 tokenFile 可能已被其他用例生成）。
+  const file = join(TEST_TMP, 'token-ensure-probe');
+  assert.equal(existsSync(file), false, '前置：探针路径上还没有 token 文件');
+
+  const w = makeWorld({ enabled: true, tokenFile: file });
+  w.sup.attach(w.wsCtx);
+  w.sup.reconcile();
+
+  assert.equal(w.routes.length, ENDPOINTS.length, '路由照常挂满');
+  assert.equal(existsSync(file), true, '挂载路径必须已生成 token 文件——否则七条路由一律 503 bridge token is unavailable');
+  assert.match(readFileSync(file, 'utf8'), /^[0-9a-f]{64}$/u);
 });
 
 test('supervisor：关=drain 后卸载；drain 内重开=取消卸载', () => {

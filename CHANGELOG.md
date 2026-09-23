@@ -1,5 +1,37 @@
 # 更新日志
 
+## [0.27.2] - 2026-09-24
+
+### 修复：token 文件不会自动生成（0.27.0 合并遗留的功能缺口）
+
+- **现象**：从市场新装 coordinator 0.27.0/0.27.1 的用户，在 GUI 打开「启用外部桥」后，七条路由一律回 **503 `bridge token is unavailable`**——而 `docs/WEB-BRIDGE.md` 当时写着「桥首次挂载自动生成」。排障表也只有 401 行、没有 503 行，用户查不到原因，现象看起来像「桥坏了」。
+- **根因**：0.27.0 把独立包 `dsh-plugin-task-bridge` 硬切合并时，**唯一的 token 生成者**（其 `install.ps1` 首装分支：32 随机字节 → 64 hex、已存在不覆盖、收紧 ACL）随之退役，没有任何东西接替它。`TokenStore` 只有 `statSync`/`readFileSync`，三个 bridge 模块里 `writeFileSync`/`randomBytes` 零命中；生成逻辑只存在于已 DEPRECATED 的独立包安装脚本里。作者本机之所以一直可用，是因为 `~/.dsh/task-bridge-token` 是 2026-09-10 装旧独立包时留下的遗产文件（早于 09-23 的合并）——**这个缺口在开发机上结构性不可见**。
+- **修复**：`bridge-auth.mjs` 新增 `ensureTokenFile()`，由 `bridge-runtime.mountExternalBridge()` 在建 `TokenStore` 之前调用。语义与原 `install.ps1` 逐条对齐：已存在 → 原样保留（**绝不覆盖**，保护用户手工轮换过的 token）；不存在 → 32 随机字节的小写十六进制（64 字符，ascii、无尾换行）；父目录缺失 → 递归创建；权限尽力收紧（`mode: 0o600` + chmod 双写，POSIX 生效、Windows 属尽力而为）。**失败一律不抛**，只留 warn 并说明后果是 503——对齐既有降级告警语义，开关不该有让宿主起不来的能力。脱敏红线：日志与返回值只含路径，绝不含 token 值。
+- wire 契约零改动：7 exact 路由 / `X-Task-Bridge-Token` / token 文件默认路径 / 信封形状全部冻结未动。
+
+### 修复：既有测试隔离缺陷（被上述写盘能力激活）
+
+- `test/bridge-toggle.test.mjs` 的 mount 回调一直走 `resolveConfig({})`，即 `tokenFile` 落到**真实的** `~/.dsh/task-bridge-token`（`makeWorld` 的 `tokenFile` 参数只喂给了 `prefs`，从未传给 `resolveConfig`——与 `index.mjs` 的真实 mount 回调不一致）。引入 `ensureTokenFile` 后，`npm test` 会往用户主目录写文件；而在作者本机因遗产文件早已存在，「生成」分支永远测不到。
+- 修法：`makeWorld` 的 `tokenFile` 默认指向本文件独占的 `mkdtemp` 临时目录（`after()` 整体清理），并按 `index.mjs:262-266` 的真实形态把它透传给 `resolveConfig`。已验证跑完整套件后真实 token 的 mtime 仍为 2026-09-10 09:22:27，未被触碰。
+
+### 文档大修（三路并行审计：npm 发包就绪度 / tunnel-client 解析规则 / 部署文档缺口）
+
+- `docs/WEB-BRIDGE.md`：
+  - **profile 字段名写错**——原文 `channels.main`，实际是 `mcp.commands[]`（每项一个 `channel` + 一条 `command`）；`/api/status` 回显里的 `channels[]` 是运行态投影，不能照着反推配置结构。补完整脱敏 profile 模板（此前全文没有任何可对照样本）。
+  - **验证判定腐化**——`bridgeVersion`/`coordinatorVersion` 从硬编码 `= 0.27.0` 改为 `≥ 0.27.0 且两值相等`。该值与 `package.json` 单一版本轨锁步（`bridge-endpoints.mjs` 直接读它），装 0.27.2 就报 0.27.2，原文会让 0.27.1+ 用户**误判全链路失败**进而回滚重装；且与同仓 `PROTOCOL.md` §17 自相矛盾。
+  - 补 `command` 串分词实测规则（tunnel-client v0.0.14）：POSIX shell-word 分词、**不经 shell**；`\` 是转义符（引号外与 YAML 双引号内都会吃掉下一字符，`D:\git\x` → `D:gitx`，报错只说 script not found）；单引号内完全字面；不做 `${VAR}`/`%VAR%`/`~` 展开；`env:`/`file:` 前缀不适用于 `command`；`fileMCPCommand` 只接受 `channel` 与 `command` 两字段（无 argv/env/cwd 逃生口）。
+  - 补三种取法对照表（`npm i -g` 后 profile 只写 shim 名 / 全局装 + node 直调 / 仅 clone），按「profile 里还要不要写仓库绝对路径」排序；记录 `npx -y dsh-task-bridge-mcp` 当前不可用（registry 404）及其冷启动、离线隐患。
+  - 补多实例冲突点（`listen_addr` 默认 **8080** 而非 8787、`log.file` 交错、cloudflared 固定文件名）与**同 `tunnel_id` 双实例是抢单不是冗余**（轮询按 tunnel 排空共享队列，协议文档否认 active-active；端口错开也解决不了）。
+  - 补运维陷阱：**`doctor` 会真的 bind health 端口**，校验在用的 profile 会跟生产实例抢端口。
+  - 排障表补 5 行：503 token 缺失、反斜杠被吃、端口被占、同 tunnel_id 抢单、npx 形态握手超时。
+  - 验证节前置「先读」竞态提示（404/ECONNREFUSED 是启动窗口，等 30–60s 重探），并补 Windows 可复制的 `curl.exe` 命令（PowerShell 5 里裸 `curl` 是 `Invoke-WebRequest` 别名、参数不兼容）。
+  - hooks.json 片段指引修正：原文「Windows 反斜杠」正在诱导用户写出会**静默失效**的配置——JSON 里 `\U`/`\a`/`\d` 是非法转义（整份文件解析失败），`\t`/`\n` 合法但静默变控制字符（路径指向不存在的文件，hook 无声失效）。改为必须写 `\\` 或整段用正斜杠。
+  - 补 hook fail-open 的代价：token 缺失时同样只输出 `{}`、不注入也不报错，现象是「读回没生效」而非任何错误。
+- `docs/PROTOCOL.md`：删掉表格里硬编码的「当前 `0.24.0`」，改为「随发版前进，不在此处钉死具体号」。
+- 双语 `README.md` / `README.zh-CN.md`：桥节的跨仓相对链接 `../bridge-mcp/README.md` 改绝对 URL（`plugin/package.json` 的 `files` 含 `docs/`，随 npm 包与独立仓发行时该相对路径 404）；补 token 自动生成的版本分界说明；「文档」节补 `docs/WEB-BRIDGE.md` 行；英文导航标注 `Web bridge (zh)`（目标文档只有中文版）。
+- 验证：`npm run check` 全过 + smoke **167/167** 全绿（原 155 + 新增 12：`bridge-auth` 11 个单测覆盖生成/不覆盖/递归建目录/失败不抛/脱敏/0o600/chmod 失败容忍/可注入随机源，`bridge-toggle` 1 个集成断言钉住「挂载即保证凭据在位」）。
+- 发版：git tag v0.27.2。
+
 ## [0.27.1] - 2026-09-23
 
 ### 桌面端读回信道（可选 Codex hook 随包发行，零行为变更）

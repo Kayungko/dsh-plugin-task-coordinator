@@ -15,7 +15,7 @@
  */
 
 import { homedir } from 'node:os';
-import { TokenStore, defaultTokenFile, TOKEN_HEADER_NAME } from './bridge-auth.mjs';
+import { TokenStore, defaultTokenFile, ensureTokenFile, TOKEN_HEADER_NAME } from './bridge-auth.mjs';
 import { RollingWindowGate } from './bridge-policy.mjs';
 import { ENDPOINTS, createEndpointHandler } from './bridge-endpoints.mjs';
 
@@ -74,6 +74,11 @@ export function mountExternalBridge(ctx, config) {
     /* host getter 永不阻断挂载 */
   }
 
+  // 固定契约①的合并后接替者：token 文件缺失即生成（32 随机字节 → 64 hex），
+  // **已存在绝不覆盖**——保护用户手工轮换过的 token。必须早于 TokenStore：
+  // 后者惰性读、构造不碰文件，但「先保证凭据在位再建读取器」语义更清晰，
+  // 且生成失败只留 warn 不抛（见 ensureTokenFile），不会炸掉挂载。
+  ensureTokenFile(config.tokenFile, { logger: ctx.logger });
   const tokenStore = new TokenStore(config.tokenFile);
   const gate = new RollingWindowGate({ windowMs: config.spawnWindowMs, max: config.spawnMaxPerWindow });
   // 同组服务自解析（合并后无跨组缝）：仍惰性活取，coordinator 自身 provide 的

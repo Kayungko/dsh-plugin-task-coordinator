@@ -12,7 +12,7 @@
 [![155 unit tests](https://img.shields.io/badge/tests-155%20unit-0EA5E9?style=for-the-badge)](test/smoke.test.mjs)
 [![MIT](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
-[What is this](#what-is-this) · [Screenshots](#screenshots) · [Quick start](#quick-start) · [Tools](#the-eleven-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Web bridge](docs/WEB-BRIDGE.md) · [Changelog](CHANGELOG.md) · [Chinese](README.zh-CN.md)
+[What is this](#what-is-this) · [Screenshots](#screenshots) · [Quick start](#quick-start) · [Tools](#the-eleven-tools) · [Architecture](docs/ARCHITECTURE.md) · [Host contract](docs/PROTOCOL.md) · [Web bridge (zh)](docs/WEB-BRIDGE.md) · [Changelog](CHANGELOG.md) · [Chinese](README.zh-CN.md)
 
 </div>
 
@@ -302,7 +302,7 @@ Config resolution **rejects wrong types instead of guessing**: a bad type fails 
 
 ## External task bridge (experimental)
 
-Since 0.27.0 the former standalone `dsh-plugin-task-bridge` package lives **inside this plugin**, behind a GUI experiment toggle: **Settings → 任务编排 → 外部任务桥**. Enabled, the host webserver serves the seven frozen `/v1/*` routes on `127.0.0.1:43120` (spawn / send / progress / wait / list / models / capabilities), guarded by `X-Task-Bridge-Token` against `~/.dsh/task-bridge-token` — so loopback processes such as [dsh-task-bridge-mcp](../bridge-mcp/README.md), and through it a ChatGPT web session via OpenAI's Secure MCP Tunnel, can drive DSH task sessions with your chat quota. The wire contract is frozen: routes, header, token path and envelope shapes are identical to the standalone package's v0.3.0, so existing consumers needed zero changes. Toggling off drains in-flight requests for ~5 s, then unregisters every route — external callers get an immediate 404, never a hanging connection. Patch-row tunables (`defaultCwd` and friends) moved under the `bridge` sub-object of this plugin's patch config. Deployment and verification walkthrough: **[docs/WEB-BRIDGE.md](docs/WEB-BRIDGE.md)**.
+Since 0.27.0 the former standalone `dsh-plugin-task-bridge` package lives **inside this plugin**, behind a GUI experiment toggle: **Settings → 任务编排 → 外部任务桥**. Enabled, the host webserver serves the seven frozen `/v1/*` routes on `127.0.0.1:43120` (spawn / send / progress / wait / list / models / capabilities), guarded by `X-Task-Bridge-Token` against `~/.dsh/task-bridge-token` (generated on first mount since 0.27.2, and **never overwritten** so a token you rotated yourself survives; on 0.27.0/0.27.1 you must create that file by hand or every route answers 503) — so loopback processes such as [dsh-task-bridge-mcp](https://github.com/Kayungko/dsh-task-bridge-mcp), and through it a ChatGPT web session via OpenAI's Secure MCP Tunnel, can drive DSH task sessions with your chat quota. The wire contract is frozen: routes, header, token path and envelope shapes are identical to the standalone package's v0.3.0, so existing consumers needed zero changes. Toggling off drains in-flight requests for ~5 s, then unregisters every route — external callers get an immediate 404, never a hanging connection. Patch-row tunables (`defaultCwd` and friends) moved under the `bridge` sub-object of this plugin's patch config. Deployment and verification walkthrough: **[docs/WEB-BRIDGE.md](docs/WEB-BRIDGE.md)**.
 
 The package also ships an **optional Codex readback hook** (`scripts/dsh-readback-hook.mjs`, zero dependencies): at Codex turn boundaries it auto-injects digests of settled DSH tasks into the turn context (plus a bounded Stop wait-loop that keeps a delegating turn alive until the task settles). It never wakes idle conversations; setup is per-machine — paste-ready snippet and limits in the docs section above ("桌面端读回信道").
 
@@ -348,6 +348,7 @@ dsh-plugin-task-coordinator/
 
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — architecture: why a plugin, module layering, guard layers, degradation strategy
 - **[docs/PROTOCOL.md](docs/PROTOCOL.md)** — host contract & delivery semantics, field-tested (injection surface, facade signatures, limits, verification records)
+- **[docs/WEB-BRIDGE.md](docs/WEB-BRIDGE.md)** — web bridge deployment (Chinese only): drive local DSH task sessions with your ChatGPT web quota over OpenAI's Secure MCP Tunnel. Three-step setup, redacted profile template, `command` tokenization rules (forward slashes / YAML single quotes), multi-instance conflicts, troubleshooting table
 - **[CHANGELOG.md](CHANGELOG.md)** — release history
 - **[skills/task-coordination/SKILL.md](skills/task-coordination/SKILL.md)** — the supervisor playbook the model actually reads
 

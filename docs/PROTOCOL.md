@@ -282,7 +282,7 @@ ctx.provide('taskCoordinator', { config, version, ops });
 | 字段 | 类型 | 语义 |
 |---|---|---|
 | `config` | object | `resolveConfig` 产物（含 `minSendIntervalMs`/`maxQueuePerTask` 等限流参数——桥侧据此计算 429 的 `retryAfterMs`） |
-| `version` | string | 与 package.json 锁步的插件版本（当前 `0.24.0`） |
+| `version` | string | 与 package.json 锁步的插件版本（随发版前进，不在此处钉死具体号；`/v1/capabilities` 的 `bridgeVersion` 同源） |
 | `ops` | object | **`createOps` 产物同一实例**——`registerTools` 已在用的那个，不另建。13 成员：`pendingCount`、`listTasks`、`progress`、`sendMessage`、`spawnTask`、`confirmPlan`、`confirmSelect`、`consumeConfirmation`、`workspaceOp`、`models`、`spawnBatch`、`waitFor`、`cancelTask` |
 
 **时序与形状规则**：

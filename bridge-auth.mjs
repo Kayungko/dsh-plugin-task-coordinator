@@ -14,10 +14,10 @@
  * 脱敏红线：本模块绝不把 token 值写进日志/错误消息；错误文案全为静态安全串。
  */
 
-import { readFileSync, statSync } from 'node:fs';
-import { timingSafeEqual } from 'node:crypto';
+import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 /** 鉴权头规范大小写形式（仅用于文档/日志展示；HTTP 读写一律走小写键）。 */
 export const TOKEN_HEADER_NAME = 'X-Task-Bridge-Token';
@@ -28,6 +28,68 @@ export const TOKEN_HEADER_KEY = 'x-task-bridge-token';
 /** token 文件默认路径：<用户主目录>/.dsh/task-bridge-token（契约固定）。 */
 export function defaultTokenFile() {
   return join(homedir(), '.dsh', 'task-bridge-token');
+}
+
+/**
+ * 确保 token 文件存在——固定契约①（首装生成、已存在不覆盖）的合并后接替者。
+ *
+ * 0.27.0 把独立包 dsh-plugin-task-bridge 合并进来时，唯一的 token 生成者
+ * （其 install.ps1 首装分支：32 随机字节 → 64 hex、已存在不覆盖、收紧 ACL）
+ * 随之退役，没有任何东西接替它。后果是「GUI 开关一开、七条路由全 503
+ * `bridge token is unavailable`」——文档却仍写着「桥首次挂载自动生成」。
+ * 本函数把该能力接回挂载路径，语义与原 install.ps1 逐条对齐：
+ *  - 已存在 → 原样保留（**保护用户轮换过的 token**，绝不覆写）；
+ *  - 不存在 → 32 随机字节的小写十六进制（64 字符），ascii、无尾换行；
+ *  - 父目录缺失 → 递归创建；
+ *  - 权限尽力收紧：`mode: 0o600` + chmod 双写。POSIX 生效；Windows 的
+ *    chmod 只映射到只读属性，真正收紧 ACL 需 icacls（宿主外能力），
+ *    因此 Windows 上属「尽力而为」，失败不升级为错误。
+ *
+ * 失败一律**不抛**（对齐 bridge-runtime 的降级告警语义）：生成不了就让
+ * TokenStore 照常回 unavailable/503 并留下 warn，比炸掉 coordinator 的
+ * apply 更好——开关不该有让宿主起不来的能力。
+ *
+ * 脱敏红线：日志与返回值只含**路径**，绝不含 token 值。
+ *
+ * @param {string} filePath token 文件绝对路径
+ * @param {{ fs?: { statSync?: Function, mkdirSync?: Function, writeFileSync?: Function, chmodSync?: Function }, randomBytes?: Function, logger?: { info?: Function, warn?: Function } }} [deps] 可注入以便离线单测
+ * @returns {{ created: boolean, path: string, reason: 'exists' | 'generated' | `generate-failed: ${string}` }}
+ */
+export function ensureTokenFile(filePath, deps = {}) {
+  const fs = deps.fs ?? { statSync, mkdirSync, writeFileSync, chmodSync };
+  const random = deps.randomBytes ?? randomBytes;
+  const logger = deps.logger;
+
+  let exists = false;
+  try {
+    // throwIfNoEntry:false 让「不存在」走返回值而非异常（Node ≥16.17）。
+    exists = Boolean(fs.statSync(filePath, { throwIfNoEntry: false }));
+  } catch {
+    exists = false; // stat 抛错视同不存在，继续尝试生成
+  }
+  if (exists) return { created: false, path: filePath, reason: 'exists' };
+
+  try {
+    const dir = dirname(filePath);
+    if (dir) fs.mkdirSync(dir, { recursive: true });
+    const token = random(32).toString('hex');
+    fs.writeFileSync(filePath, token, { encoding: 'ascii', mode: 0o600 });
+    try {
+      fs.chmodSync(filePath, 0o600);
+    } catch {
+      /* Windows 等平台 chmod 语义有限，忽略 */
+    }
+    logger?.info?.(
+      `task-bridge: generated bridge token file (64 hex chars from 32 random bytes, current-user perms best-effort): ${filePath}`,
+    );
+    return { created: true, path: filePath, reason: 'generated' };
+  } catch (error) {
+    const detail = error?.message ?? String(error);
+    logger?.warn?.(
+      `task-bridge: could not generate token file at ${filePath}: ${detail} — every bridge route will answer 503 until that file exists (create it manually; rotate by overwriting, hot-reloaded)`,
+    );
+    return { created: false, path: filePath, reason: `generate-failed: ${detail}` };
+  }
 }
 
 /**
