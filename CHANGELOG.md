@@ -1,5 +1,17 @@
 # 更新日志
 
+## [0.27.1] - 2026-09-23
+
+### 桌面端读回信道（可选 Codex hook 随包发行，零行为变更）
+
+- `scripts/dsh-readback-hook.mjs`（零依赖 handler）收入包内并发行：可选的 Codex 生命周期 hook——桌面 Codex turn 结束时自动拉取桥结果信箱（43120），把 `<dsh-readback>` 已读回执注入会话，将桥的纯拉模型补强为「turn 结束即可发现结果」。配置入口在用户侧 `.codex/hooks.json`，本插件只随包携带 handler，**不自动启用**，桥核心路由与 wire 契约零改动。
+- `package.json` `files` 收录 `scripts/`——安装/pack 后 handler 随包就位，hook 可指向包内路径（包内 vs 自放副本的双路径形态、信任模型与残余风险见 docs/WEB-BRIDGE.md「桌面端读回信道」节）。
+- `docs/WEB-BRIDGE.md` 新增读回信道节：hook 工作机制、双路径形态、信任边界、残余风险（信箱命中≠已消费、信箱写入≠唤醒 Codex 等）。
+- 双语 README 桥节末尾补读回信道指针。
+- 配套：bridge-mcp 仓 SKILL.md 拉模型纪律补 `<dsh-readback>` 已读回执句（bridge-mcp 893df1c，文档性变更）。
+- 验证：smoke 155/155 全绿；`node --check` handler 语法通过。
+- 发版：git tag v0.27.1。
+
 ## [0.27.0] - 2026-09-23
 
 ### 外部任务桥合并（独立包硬切内置）
