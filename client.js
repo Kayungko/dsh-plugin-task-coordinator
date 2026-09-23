@@ -187,6 +187,17 @@ window.__ModuleLoader__.load({
 				"field.queue.hint": "同一目标会话可排队的消息上限（0 = 跟随部署配置，默认 5；最大 {cap}）。队列每轮消化约 1 条，改完下一次 task_send 检查即生效。",
 				"queue.invalid": "队列深度上限须为 0–{cap} 的整数。",
 				"queue.follow": "跟随部署配置",
+				// 0.27.0 experimental external bridge group (merged dsh-plugin-task-bridge)
+				"exp.title": "外部任务桥",
+				"exp.tag": "实验性",
+				"exp.intro": "在本机回环地址 127.0.0.1:43120 上开放 7 条 /v1/* 路由，让宿主之外的本机进程（bridge-mcp、Codex 总控、ChatGPT Secure MCP Tunnel 等）驱动 DSH 任务会话。原独立插件 dsh-plugin-task-bridge 已合并至此。",
+				"field.bridge": "启用外部桥",
+				"bridge.on": "已启用",
+				"bridge.off": "已关闭",
+				"status.bridgeNow": "当前状态",
+				"field.bridgeToken": "Token 文件路径",
+				"bridge.tokenDefault": "留空 = 默认 ~/.dsh/task-bridge-token",
+				"field.bridge.hint": "保存后立即生效，无需重启宿主。开启：挂载全部路由。关闭：约 5 秒排空在途请求后卸载全部路由，外部调用立刻收到 404（不留悬挂连接）。请求须携带 X-Task-Bridge-Token 且只接受本机回环来源——token 是唯一凭据，请妥善保管该文件。",
 				"degraded.scope": "设置服务不可用（宿主缺少 settingsScope），本页暂不可编辑；派发仍按已存默认与宿主默认执行。",
 				"degraded.catalog": "模型目录不可用：{message}",
 				"degraded.namespace": "设置区未在宿主设置文档中注册（插件可能未随宿主装载），本页暂不可编辑。",
@@ -316,6 +327,17 @@ window.__ModuleLoader__.load({
 				"field.queue.hint": "Max queued messages per target session (0 = follow the deployment config, default 5; ceiling {cap}). The queue drains ~1 per round; an edit applies from the next task_send check onward.",
 				"queue.invalid": "The send-queue cap must be an integer between 0 and {cap}.",
 				"queue.follow": "deployment config",
+				// 0.27.0 experimental external bridge group (merged dsh-plugin-task-bridge)
+				"exp.title": "External task bridge",
+				"exp.tag": "Experimental",
+				"exp.intro": "Serves the seven /v1/* routes on loopback 127.0.0.1:43120 so processes outside the host (bridge-mcp, a Codex supervisor, the ChatGPT Secure MCP Tunnel, …) can drive DSH task sessions. Merged in from the former standalone dsh-plugin-task-bridge plugin.",
+				"field.bridge": "Enable the external bridge",
+				"bridge.on": "enabled",
+				"bridge.off": "off",
+				"status.bridgeNow": "Current state",
+				"field.bridgeToken": "Token file path",
+				"bridge.tokenDefault": "Empty = default ~/.dsh/task-bridge-token",
+				"field.bridge.hint": "Applies on save, no host restart. On: all routes mount. Off: in-flight requests drain for ~5s, then every route unregisters and external calls get an immediate 404 (no hanging connections). Requests must carry X-Task-Bridge-Token and come from loopback — the token is the only credential, so keep that file safe.",
 				"degraded.scope": "The settings service is unavailable (no settingsScope on this host); this page is read-only for now — spawns still follow the stored default and the host default.",
 				"degraded.catalog": "The model catalog is unavailable: {message}",
 				"degraded.namespace": "The settings section is not registered in the host settings document (the plugin may not be loaded with the host); this page is read-only for now.",
@@ -577,7 +599,17 @@ window.__ModuleLoader__.load({
 			".tcSettingsIntro{margin:0 0 4px;font-size:13px;line-height:21px;color:var(--dsw-alias-label-secondary,#5b616e);max-width:560px}",
 			".tcSettingsHint{margin:0;font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary,#5b616e);max-width:560px}",
 			".tcSettingsHeading{margin:0;font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary,#0f1115)}",
-			".tcSettingsPageTitle{margin:0 0 12px;font-size:18px;font-weight:600;color:var(--dsw-alias-label-primary,#0f1115)}"
+			".tcSettingsPageTitle{margin:0 0 12px;font-size:18px;font-weight:600;color:var(--dsw-alias-label-primary,#0f1115)}",
+			// 0.27.0 experimental bridge group: a dashed divider inside the SAME
+			// card (one namespace = one atomic mutation, so one Save button owns
+			// every field; a second card would strand the toggle below its button).
+			".tcSettingsExpGroup{display:flex;flex-direction:column;gap:12px;padding-top:14px;margin-top:2px;border-top:1px dashed var(--dsw-alias-border-l2,#0000001f)}",
+			".tcSettingsExpTag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;font-size:11px;font-weight:500;vertical-align:1px;border:1px solid var(--dsw-alias-border-l2,#0000001f);color:var(--dsw-alias-label-secondary,#5b616e)}",
+			// Native checkbox (this module injects only "slots" — the host's
+			// Switch lives in dsh-client-ui-primitives, which we do not depend on).
+			".tcSettingsSwitch{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--dsw-alias-label-primary,#0f1115);cursor:pointer}",
+			".tcSettingsSwitch input{width:15px;height:15px;margin:0;cursor:pointer;accent-color:var(--dsw-alias-brand,#2f6feb)}",
+			".tcSettingsSwitch input:disabled{cursor:default;opacity:.5}"
 		].join("\n");
 		function installSettingsStyles() {
 			if (document.querySelector(`style[data-plugin="${STYLE_ID_SETTINGS}"]`) !== null) return () => {};
@@ -651,12 +683,32 @@ window.__ModuleLoader__.load({
 		}
 		/** Hard ceiling for the queue-cap field — mirrors MAX_QUEUE_PER_TASK_CAP in settings.mjs (host side clamps too). */
 		const QUEUE_CAP = 50;
-		/** Stable equality over the four draft fields (route triple + queue cap). */
+		/**
+		 * Build the staged draft from a stored section value.
+		 * Single source of truth for the draft shape — the stored-sync effect,
+		 * Discard, and the (0.27.0) field rebuilds all go through here, so a new
+		 * field cannot silently fall out of one path and survive in another.
+		 * 0.27.0: bridgeEnabled / bridgeTokenFile join the four spawn-default
+		 * fields (experimental bridge toggle; settings.mjs is the host mirror).
+		 */
+		function draftFromStored(stored) {
+			return {
+				provider: String(stored?.provider ?? ""),
+				model: String(stored?.model ?? ""),
+				reasoningEffort: String(stored?.reasoningEffort ?? ""),
+				maxQueuePerTask: Number.isFinite(Number(stored?.maxQueuePerTask)) ? Math.max(0, Math.trunc(Number(stored?.maxQueuePerTask))) : 0,
+				bridgeEnabled: stored?.bridgeEnabled === true,
+				bridgeTokenFile: String(stored?.bridgeTokenFile ?? "")
+			};
+		}
+		/** Stable equality over the whole draft face (route triple + queue cap + bridge pair). */
 		function sameRoute(left, right) {
 			return String(left?.provider ?? "") === String(right?.provider ?? "")
 				&& String(left?.model ?? "") === String(right?.model ?? "")
 				&& String(left?.reasoningEffort ?? "") === String(right?.reasoningEffort ?? "")
-				&& Number(left?.maxQueuePerTask ?? 0) === Number(right?.maxQueuePerTask ?? 0);
+				&& Number(left?.maxQueuePerTask ?? 0) === Number(right?.maxQueuePerTask ?? 0)
+				&& (left?.bridgeEnabled === true) === (right?.bridgeEnabled === true)
+				&& String(left?.bridgeTokenFile ?? "") === String(right?.bridgeTokenFile ?? "");
 		}
 		/**
 		 * Settings tab: GUI editor for the plugin's spawn-model default.
@@ -742,12 +794,7 @@ window.__ModuleLoader__.load({
 			react.useEffect(() => {
 				if (!stored) return;
 				try {
-					setDraft((previous) => (previous === null || sameRoute(previous, stored) ? {
-						provider: String(stored.provider ?? ""),
-						model: String(stored.model ?? ""),
-						reasoningEffort: String(stored.reasoningEffort ?? ""),
-						maxQueuePerTask: Number.isFinite(Number(stored.maxQueuePerTask)) ? Math.max(0, Math.trunc(Number(stored.maxQueuePerTask))) : 0
-					} : previous));
+					setDraft((previous) => (previous === null || sameRoute(previous, stored) ? draftFromStored(stored) : previous));
 				} catch { /* a malformed stored value leaves the draft untouched */ }
 			}, [stored]);
 			try {
@@ -775,11 +822,18 @@ window.__ModuleLoader__.load({
 					// and the scope's write channel RESOLVES NORMALLY on a
 					// rejected mutation (silent recovery read), so the old code
 					// reported "saved" while provider/model never landed.
+					// 0.27.0: the bridge pair rides the same atomic mutation —
+					// bridgeEnabled/bridgeTokenFile are part of this namespace,
+					// and splitting them into a second write would let the host
+					// onChange fire twice (two reconciles: one for the route
+					// change, one for the toggle) instead of one.
 					const ops = [
 						{ op: "set", path: ["provider"], value: draft.provider },
 						{ op: "set", path: ["model"], value: draft.model },
 						{ op: "set", path: ["reasoningEffort"], value: draft.reasoningEffort },
-						{ op: "set", path: ["maxQueuePerTask"], value: draft.maxQueuePerTask }
+						{ op: "set", path: ["maxQueuePerTask"], value: draft.maxQueuePerTask },
+						{ op: "set", path: ["bridgeEnabled"], value: draft.bridgeEnabled },
+						{ op: "set", path: ["bridgeTokenFile"], value: draft.bridgeTokenFile }
 					];
 					if (typeof scope.mutate === "function") {
 						await scope.mutate(ops);
@@ -791,6 +845,8 @@ window.__ModuleLoader__.load({
 						await scope.set("model", draft.model);
 						await scope.set("reasoningEffort", draft.reasoningEffort);
 						await scope.set("maxQueuePerTask", draft.maxQueuePerTask);
+						await scope.set("bridgeEnabled", draft.bridgeEnabled);
+						await scope.set("bridgeTokenFile", draft.bridgeTokenFile);
 					}
 					// Honest-save verification: the write channel swallows host
 					// rejections, so read back the landed snapshot and compare
@@ -816,12 +872,7 @@ window.__ModuleLoader__.load({
 			// reference, so a null-out would leave the selects disabled.
 			const discard = () => {
 				setMessage(null);
-				setDraft(stored === undefined ? null : {
-					provider: String(stored.provider ?? ""),
-					model: String(stored.model ?? ""),
-					reasoningEffort: String(stored.reasoningEffort ?? ""),
-					maxQueuePerTask: Number.isFinite(Number(stored.maxQueuePerTask)) ? Math.max(0, Math.trunc(Number(stored.maxQueuePerTask))) : 0
-				});
+				setDraft(stored === undefined ? null : draftFromStored(stored));
 			};
 			const h = react.createElement;
 			const optionRow = (key, value, label, selected) => h("option", { key, value }, label);
@@ -879,7 +930,11 @@ window.__ModuleLoader__.load({
 							className: "tcSettingsSelect",
 							value: draft ? draft.provider : "",
 							disabled: !draft || !writable,
-							onChange: (event) => setDraft((previous) => ({ provider: event.target.value, model: "", reasoningEffort: "", maxQueuePerTask: previous ? previous.maxQueuePerTask : 0 }))
+							// Spread-then-override (like the effort/queue rows): a
+							// rebuild-from-scratch here dropped every field it did
+							// not name, so adding bridgeEnabled in 0.27.0 would have
+							// silently reset the toggle whenever the provider changed.
+							onChange: (event) => setDraft((previous) => ({ ...previous, provider: event.target.value, model: "", reasoningEffort: "" }))
 						}, providerOptions)
 					),
 					h("div", { className: "tcSettingsRow" },
@@ -888,7 +943,7 @@ window.__ModuleLoader__.load({
 							className: "tcSettingsSelect",
 							value: draft ? draft.model : "",
 							disabled: !draft || !writable || (draft && draft.provider.length === 0),
-							onChange: (event) => setDraft((previous) => ({ provider: previous.provider, model: event.target.value, reasoningEffort: "", maxQueuePerTask: previous ? previous.maxQueuePerTask : 0 }))
+							onChange: (event) => setDraft((previous) => ({ ...previous, model: event.target.value, reasoningEffort: "" }))
 						}, modelOptions)
 					),
 					h("div", { className: "tcSettingsRow" },
@@ -918,6 +973,45 @@ window.__ModuleLoader__.load({
 						})
 					),
 					h("p", { className: "tcSettingsHint" }, t("field.queue.hint", { cap: QUEUE_CAP })),
+					// 0.27.0 experimental external bridge group (merged
+					// dsh-plugin-task-bridge). Same card as the spawn defaults so
+					// the single Save below commits one atomic mutation for all
+					// six fields; the dashed divider only signals "different
+					// concern, higher blast radius".
+					h("div", { className: "tcSettingsExpGroup" },
+						h("h3", { className: "tcSettingsHeading" },
+							t("exp.title"),
+							h("span", { className: "tcSettingsExpTag" }, t("exp.tag"))),
+						h("p", { className: "tcSettingsIntro" }, t("exp.intro")),
+						h("div", { className: "tcSettingsRow" },
+							h("label", { className: "tcSettingsLabel" }, t("field.bridge")),
+							h("label", { className: "tcSettingsSwitch" },
+								h("input", {
+									type: "checkbox",
+									checked: draft ? draft.bridgeEnabled === true : false,
+									disabled: !draft || !writable,
+									onChange: (event) => setDraft((previous) => ({ ...previous, bridgeEnabled: event.target.checked === true }))
+								}),
+								h("span", null, draft?.bridgeEnabled === true ? t("bridge.on") : t("bridge.off"))
+							)
+						),
+						h("div", { className: "tcSettingsRow" },
+							h("label", { className: "tcSettingsLabel" }, t("field.bridgeToken")),
+							h("input", {
+								type: "text",
+								className: "tcSettingsSelect",
+								placeholder: t("bridge.tokenDefault"),
+								value: draft ? draft.bridgeTokenFile : "",
+								// Greyed while the bridge is off: the path is only
+								// consulted at mount time, so editing it under an
+								// off switch cannot do anything.
+								disabled: !draft || !writable || draft?.bridgeEnabled !== true,
+								onChange: (event) => setDraft((previous) => ({ ...previous, bridgeTokenFile: event.target.value.trim() }))
+							})
+						),
+						h("p", { className: "tcSettingsHint" }, t("field.bridge.hint")),
+						h("p", { className: "tcSettingsStatus" }, `${t("status.bridgeNow")}: ${stored?.bridgeEnabled === true ? t("bridge.on") : t("bridge.off")}`)
+					),
 					!pairValid ? h("p", { className: "tcSettingsStatus", "data-kind": "error" }, t("invalid.pair")) : null,
 					!queueValid ? h("p", { className: "tcSettingsStatus", "data-kind": "error" }, t("queue.invalid", { cap: QUEUE_CAP })) : null,
 					catalog.status === "error" ? h("p", { className: "tcSettingsStatus", "data-kind": "error" }, t("degraded.catalog", { message: catalog.error })) : null,

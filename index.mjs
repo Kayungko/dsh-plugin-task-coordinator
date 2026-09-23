@@ -22,7 +22,7 @@ import { COORDINATOR_CAPABILITIES } from './feedback.mjs';
 
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
-import { statSync } from 'node:fs';
+import { statSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import z from '@deepseek-ai/schemastery';
 import { defineTool } from '@deepseek-ai/dsh-tools';
@@ -36,7 +36,13 @@ import { mountCoordinatorSkills } from './skills.mjs';
 import { SpawnRegistry } from './registry.mjs';
 import { installFamilyRoutes } from './family.mjs';
 import { resolveUiLocale, uiStrings } from './i18n.mjs';
-import { SPAWN_MODELS_NS, SPAWN_MODELS_BASE, buildSpawnModelsSchema, normalizeSpawnRoute, normalizeQueueCap, validateSpawnModelsSection } from './settings.mjs';
+import { SPAWN_MODELS_NS, SPAWN_MODELS_BASE, buildSpawnModelsSchema, normalizeSpawnRoute, normalizeQueueCap, normalizeBridgeSection, validateSpawnModelsSection } from './settings.mjs';
+import { resolveConfig as resolveBridgeConfig, mountExternalBridge, createBridgeSupervisor } from './bridge-runtime.mjs';
+
+// Single version track (0.27.0): the service payload, /v1/capabilities
+// bridgeVersion and serverInfo-style consumers all read this, so a bump is
+// one place — same lesson as bridge-mcp's package.json-driven serverInfo.
+const PKG_VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 
 export const name = 'task-coordinator';
 export const inject = ['agents', 'tools', 'sessionController', 'commands'];
@@ -57,7 +63,7 @@ export function apply(ctx, input = {}) {
   // signal bridge consumers map to 503; enabled provides the full payload
   // after createOps below (the instance only exists on that path).
   if (!config.enabled) {
-    ctx.provide('taskCoordinator', { config, version: '0.26.7' });
+    ctx.provide('taskCoordinator', { config, version: PKG_VERSION });
     ctx.logger?.info('task-coordinator: disabled by config; no tools registered');
     return;
   }
@@ -188,6 +194,10 @@ export function apply(ctx, input = {}) {
   // on the pre-0.18 host-default behavior. The live read mirrors readUiLocale
   // (read per call, never cached), so a GUI edit applies from the next spawn
   // onward without a restart.
+  // 0.27.0 experimental external bridge supervisor (assigned after the settings
+  // section install below; onChange closes over this ref, so it must exist
+  // before installSection can ever fire a change callback).
+  let bridgeSupervisorRef = null;
   ctx.inject(['settings'], (settingsCtx) => {
     try {
       settingsCtx.settings.installSection(ctx, SPAWN_MODELS_NS, buildSpawnModelsSchema(z), SPAWN_MODELS_BASE, {
@@ -195,7 +205,7 @@ export function apply(ctx, input = {}) {
         validate: (value) => {
           validateSpawnModelsSection(value);
         },
-        onChange: () => {},
+        onChange: () => { bridgeSupervisorRef?.reconcile(); },
       });
       ctx.logger?.info?.(`task-coordinator: settings section "${SPAWN_MODELS_NS}" installed (spawn-model defaults)`);
     } catch (error) {
@@ -225,6 +235,41 @@ export function apply(ctx, input = {}) {
       return null;
     }
   };
+  // Experimental external task bridge (0.27.0): the standalone
+  // dsh-plugin-task-bridge package merged into this plugin behind a GUI toggle
+  // in this same 任务编排 section (bridgeEnabled / bridgeTokenFile; design and
+  // frozen wire contract: research/bridge-merge-into-coordinator-design.md).
+  // Hot mount/unmount without restart: the supervisor reconciles on every
+  // settings onChange and once the (optional) host webserver dependency is
+  // available; toggling off drains 5s then unregisters the seven exact routes
+  // ("off means off" — bridge-mcp sees a clean connection refusal).
+  const readBridgePrefs = () => {
+    try {
+      const service = typeof ctx.get === 'function' ? ctx.get('settings') : undefined;
+      const stored = typeof service?.get === 'function' ? service.get(SPAWN_MODELS_NS) : undefined;
+      return normalizeBridgeSection(stored);
+    } catch {
+      return { enabled: false, tokenFile: undefined };
+    }
+  };
+  bridgeSupervisorRef = createBridgeSupervisor({
+    readPrefs: readBridgePrefs,
+    mount: (wsCtx) => {
+      const prefs = readBridgePrefs();
+      // Patch-row tunables (the old task-bridge-runtime config keys) stay the
+      // fallback layer; the GUI tokenFile overrides only the token path.
+      const tunables = config.bridge && typeof config.bridge === 'object' && !Array.isArray(config.bridge) ? config.bridge : {};
+      const bridgeConfig = resolveBridgeConfig({
+        ...tunables,
+        ...(prefs.tokenFile !== undefined ? { tokenFile: prefs.tokenFile } : {}),
+      });
+      return mountExternalBridge(wsCtx, bridgeConfig);
+    },
+    logger: ctx.logger,
+  });
+  ctx.inject(['webServer'], (wsCtx) => {
+    bridgeSupervisorRef.attach(wsCtx);
+  });
   // Cross-workspace migration (0.16.0): the host never rewrites a session's
   // stored cwd, so a true move is clone + archive — the route the host's own
   // fork() uses internally (sessions.create seeded with the full event log)
@@ -301,13 +346,14 @@ export function apply(ctx, input = {}) {
   // contract (docs/PROTOCOL.md §17): consumers call members, never replace
   // or wrap them. This is the enabled-branch provide; the disabled early
   // return above provided the reduced payload.
-  ctx.provide('taskCoordinator', { config, version: '0.26.7', ops, capabilities: COORDINATOR_CAPABILITIES });
+  ctx.provide('taskCoordinator', { config, version: PKG_VERSION, ops, capabilities: COORDINATOR_CAPABILITIES });
   installFamilyRoutes(ctx, { registry, sessionController });
   const dispose = registerTools(ctx, ops, { defineTool }, config);
   const disposeCommands = registerCommands(ctx, ops, uiStrings(readUiLocale()));
   ctx.effect(() => () => {
     dispose();
     disposeCommands();
+    bridgeSupervisorRef?.dispose();
   }, 'task-coordinator.dispose');
   // Ship the supervisor playbook skill with the bundle. Fire-and-forget: the
   // mount degrades to a warning on failure and never breaks the tools above.

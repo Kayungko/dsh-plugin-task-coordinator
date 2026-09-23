@@ -261,7 +261,15 @@
 - **技能目录拷内容不拷目录**：`Copy-Item` 的源是目录且目标目录已存在时会拷**进去**（嵌套 `skills/skills/`），正式路径技能文件从此不再更新——0.4.0–0.8.3 的实际事故。现行脚本复制 `skills\*` 内容并清理历史嵌套残留；技能走 `patchReload: live`，内容更新**无需重启**即刻热刷新。
 - **安装态自检**：任何宿主/插件变更后，把 `verify-installed.mjs` 复制进安装目录运行（跑完删除），全绿才放行；它断言服务版本、11 工具、`/tasks`、确认闸门、多选确认子集强制、复用凭证跨批、task_workspace 实体链与 migrate 克隆五步链（目标 cwd 出生/元数据携带/同 cwd 拒绝零副作用）、spawn cwd 升级、**0.19.0 工作区落位（回执 placement/workspace 字段、祖先归一全链 workspaceId+根 cwd+i18n kickoff 提示+注册表 expectedWorkspace、未分组警告+task_list ungrouped 过滤）**、子会话模型指定（预校验拒绝/安装时序/成对约束/错误路线提示）、task_models 目录投影、客户端 i18n 回归（0.16.1：裸键 `t()` 回退内置词典、迟注册 locale 服务首见即注册、zh/en 实时解析）、工作区归属与客户端模块全链、0.17.0 投递回执（task_send queueDepth 分列断言、回报后缀让位协议句断言）、**0.24.0 服务缝（enabled 载荷含活 ops 且 13 成员可调、经载荷直调 listTasks 端到端、disabled 载荷 ops 缺席）**、**0.25.0 externalRef（spawn 带 ref → 回执 trim 回显 + registry 落盘 + list 行/progress 透出、超长 bad-request 零孤儿）**。
 
-## 17. 服务缝（0.24.0 新增）
+## 17. 服务缝（0.24.0 新增；0.27.0 起跨组缝退役）
+
+> **0.27.0 注记**：外部任务桥（原独立包 `dsh-plugin-task-bridge`）已硬切合并进本插件，
+> 由「任务编排」设置段的实验开关 `bridgeEnabled` 驱动（设计与冻结 wire 契约见
+> `research/bridge-merge-into-coordinator-design.md`）。§17.3 的跨组共享 isolate label
+> （`'dsh-task-bridge'`）随独立包退役而**退役**：桥现为本插件进程内模块，经本组自身
+> provide 解析服务；§17.1/§17.2 的载荷形状与只读消费契约继续有效（消费方=桥模块自身
+> 与既有测试）。`/v1/capabilities` 的 `bridgeVersion` 自 0.27.0 起上报合并模块版本
+> （= 本插件版本，package.json 单一版本轨）。
 
 本插件在宿主进程内 provide 一个 `taskCoordinator` 服务，供未来的桥接插件（`dsh-plugin-task-bridge`——Codex→DSH 控制面桥，进程外 HTTP 消费方的进程内代理）解析并复用。缝面恰为两处改动，对既有工具行为零变化（设计蓝图 `research/task-bridge-reanchoring.md` §1）。
 

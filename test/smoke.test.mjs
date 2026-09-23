@@ -87,6 +87,18 @@ test('config: workspacePolicy enum — default ancestor, grouping reserved (0.19
   assert.match(error.message, /grouping.*reserved/);
 });
 
+test('config: bridge tunables sub-object survives the whitelist (0.27.0)', () => {
+  // The patch-row fallback layer (old task-bridge-runtime config keys) reaches
+  // index.mjs's mount() via config.bridge — resolveConfig must pass the object
+  // through untouched; value validation belongs to bridge-runtime.mjs.
+  const bridge = { defaultCwd: 'D:\\git\\DHS-Tool', spawnMaxPerWindow: 3 };
+  assert.deepEqual(resolveConfig({ confirmBeforeBatch: true, bridge }).bridge, bridge);
+  assert.equal(resolveConfig({}).bridge, undefined, 'absent bridge stays absent — no default sub-object');
+  for (const bad of ['nope', 42, null, true, [1, 2]]) {
+    assert.throws(() => resolveConfig({ bridge: bad }), /"bridge" must be an object/, `bridge: ${JSON.stringify(bad)}`);
+  }
+});
+
 /* ------------------------------------------------------------------ */
 /* spawn-title rule: MMDD｜类型｜主题                                    */
 /* ------------------------------------------------------------------ */
@@ -2506,13 +2518,17 @@ test('service seam: apply() provides a two-shaped taskCoordinator payload (0.24.
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   // disabled branch: the service still exists, but ops is ABSENT — the
   // bridge consumer's 503 degrade signal, never a missing service
-  assert.match(src, /ctx\.provide\('taskCoordinator', \{ config, version: '[^']+' \}\);/, 'disabled branch must provide { config, version } with ops absent');
+  assert.match(src, /ctx\.provide\('taskCoordinator', \{ config, version: PKG_VERSION \}\);/, 'disabled branch must provide { config, version } with ops absent');
   // enabled branch: the full payload — the field name is exactly `ops`
-  assert.match(src, /ctx\.provide\('taskCoordinator', \{ config, version: '[^']+', ops, capabilities: COORDINATOR_CAPABILITIES \}\);/, 'enabled branch must provide { config, version, ops }');
+  assert.match(src, /ctx\.provide\('taskCoordinator', \{ config, version: PKG_VERSION, ops, capabilities: COORDINATOR_CAPABILITIES \}\);/, 'enabled branch must provide { config, version, ops }');
+  // 0.27.0: single version track — PKG_VERSION reads package.json once, so the
+  // service payload (and /v1/capabilities bridgeVersion via it) can never
+  // drift from the published version the way the old literal could.
+  assert.match(src, /const PKG_VERSION = JSON\.parse\(readFileSync\(new URL\('\.\/package\.json', import\.meta\.url\), 'utf8'\)\)\.version;/, 'version must be read from package.json, not hardcoded');
   // the ops-bearing provide must come after createOps (the instance only
   // exists once the factory has run on the enabled path)
   const opsAt = src.indexOf('const ops = createOps(');
-  const fullProvideAt = src.indexOf(`ctx.provide('taskCoordinator', { config, version: '${pkg.version}', ops, capabilities: COORDINATOR_CAPABILITIES })`);
+  const fullProvideAt = src.indexOf(`ctx.provide('taskCoordinator', { config, version: PKG_VERSION, ops, capabilities: COORDINATOR_CAPABILITIES })`);
   assert.ok(opsAt >= 0 && fullProvideAt > opsAt, 'the ops-bearing provide must follow createOps');
   // exactly one provide per branch — cordis throws on a duplicate provide of
   // the same service, so there is no "provide early, provide again later"
@@ -2521,9 +2537,9 @@ test('service seam: apply() provides a two-shaped taskCoordinator payload (0.24.
   // and registerTools receives that very variable
   assert.equal((src.match(/createOps\(/g) ?? []).length, 1, 'apply() must build the ops exactly once');
   assert.match(src, /const dispose = registerTools\(ctx, ops, \{ defineTool \}, config\);/, 'registerTools must receive the same ops variable the provide carries');
-  // the version string stays in lockstep with package.json
-  assert.match(src, new RegExp(`ctx\\.provide\\('taskCoordinator', \\{ config, version: '${pkg.version.replace(/\./g, '\\.')}', ops, capabilities: COORDINATOR_CAPABILITIES \\}\\);`), 'the enabled provide must carry the package version');
-  assert.match(src, new RegExp(`ctx\\.provide\\('taskCoordinator', \\{ config, version: '${pkg.version.replace(/\./g, '\\.')}' \\}\\);`), 'the disabled provide must carry the package version too');
+  // the version string stays in lockstep with package.json (0.27.0: single
+  // PKG_VERSION track — the literal-provide regexes were replaced by the
+  // package.json-read assertion above)
 });
 
 test('service seam: the provided ops is the 13-member createOps surface (0.24.0)', () => {

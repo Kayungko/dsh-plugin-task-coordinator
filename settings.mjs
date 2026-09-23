@@ -33,7 +33,7 @@ export const MAX_QUEUE_PER_TASK_CAP = 50;
  * behavior. maxQueuePerTask 0 = "not set — follow the patch config" (the
  * config.mjs default is 5).
  */
-export const SPAWN_MODELS_BASE = Object.freeze({ provider: '', model: '', reasoningEffort: '', maxQueuePerTask: 0 });
+export const SPAWN_MODELS_BASE = Object.freeze({ provider: '', model: '', reasoningEffort: '', maxQueuePerTask: 0, bridgeEnabled: false, bridgeTokenFile: '' });
 
 /**
  * Build the host-side schema for the section.
@@ -52,6 +52,13 @@ export function buildSpawnModelsSchema(z) {
     // the range is clamped at consumption (normalizeQueueCap) and constrained
     // in the GUI input.
     maxQueuePerTask: z.number().step(1).min(0).max(MAX_QUEUE_PER_TASK_CAP).default(0),
+    // 0.27.0 experimental external task bridge (merged dsh-plugin-task-bridge,
+    // research/bridge-merge-into-coordinator-design.md). Flat fields keep the
+    // section's GUI-row precedent (every existing field is flat; nested object
+    // rendering has no field-verified precedent). '' tokenFile = contract
+    // default path (~/.dsh/task-bridge-token).
+    bridgeEnabled: z.boolean().default(false),
+    bridgeTokenFile: z.string().default(''),
   });
 }
 
@@ -136,4 +143,35 @@ export function validateSpawnModelsSection(value) {
   if (value.maxQueuePerTask !== undefined && typeof value.maxQueuePerTask !== 'number') {
     throw new Error('spawn-model default field "maxQueuePerTask" must be a number');
   }
+  // 0.27.0 experimental bridge fields: types-only at the write boundary, same
+  // 0.18.5 lesson — clamping/defaults live at consumption (normalizeBridgeSection).
+  if (value.bridgeEnabled !== undefined && typeof value.bridgeEnabled !== 'boolean') {
+    throw new Error('spawn-model default field "bridgeEnabled" must be a boolean');
+  }
+  if (value.bridgeTokenFile !== undefined && typeof value.bridgeTokenFile !== 'string') {
+    throw new Error('spawn-model default field "bridgeTokenFile" must be a string');
+  }
+}
+
+/**
+ * Normalize the stored section's experimental external-bridge prefs (0.27.0).
+ *
+ * Contract:
+ *  - absent / not an object            -> { enabled: false, tokenFile: undefined };
+ *  - bridgeEnabled                     -> true only on strict true (default off);
+ *  - bridgeTokenFile                   -> trimmed non-empty string, else undefined
+ *    (undefined = contract default path; the token VALUE is never stored here).
+ *
+ * @param {unknown} value - resolved section value from the settings service.
+ * @returns {{ enabled: boolean, tokenFile?: string }}
+ */
+export function normalizeBridgeSection(value) {
+  if (value === undefined || value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return { enabled: false, tokenFile: undefined };
+  }
+  const rawFile = typeof value.bridgeTokenFile === 'string' ? value.bridgeTokenFile.trim() : '';
+  return {
+    enabled: value.bridgeEnabled === true,
+    ...(rawFile.length > 0 ? { tokenFile: rawFile } : {}),
+  };
 }

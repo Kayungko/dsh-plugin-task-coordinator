@@ -147,6 +147,18 @@ export function resolveConfig(input = {}) {
     }
     config.workspacePolicy = policy;
   }
+  // 0.27.0: bridge tunables sub-object passthrough (the old task-bridge-runtime
+  // patch-row keys: defaultCwd / tokenFile / maxBodyBytes / spawnWindowMs /
+  // spawnMaxPerWindow). The whitelist above would silently drop `bridge` and
+  // kill the patch-row fallback layer index.mjs documents — value validation
+  // and defaults stay owned by bridge-runtime.mjs resolveConfig (single source
+  // of truth); this layer only guards the shape.
+  if (source.bridge !== undefined) {
+    if (typeof source.bridge !== 'object' || source.bridge === null || Array.isArray(source.bridge)) {
+      throw new TypeError('task-coordinator config "bridge" must be an object');
+    }
+    config.bridge = source.bridge;
+  }
   if (config.maxQueuePerTask < 1) config.maxQueuePerTask = 1;
   if (config.titleMaxTopicChars < 1) config.titleMaxTopicChars = 1;
   if (config.registryMaxEntries < 1) config.registryMaxEntries = 1;
