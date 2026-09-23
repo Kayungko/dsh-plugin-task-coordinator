@@ -56,6 +56,44 @@ GET  127.0.0.1:43120/v1/models（带 X-Task-Bridge-Token）→ 200
 
 判定：`capabilities` 自报 `bridgeVersion` / `coordinatorVersion` = `0.27.0`、`coordinatorEnabled: true`、七条 endpoints 齐全（**bridgeVersion 是判别服务方为合并后新桥的关键值**）；`models` 的 `default` / `pluginDefault` 与 DSH 设置一致；`list` 的任务数组与 DSH 侧栏实时一致。三项全过 = 全链路闭环。
 
+## 桌面端读回信道（可选：Codex hooks）
+
+桥的读回原是纯拉模型：结果落定后停在 43120，等某个 turn 主动来拉。插件包随附 Codex 读回 hook handler（包内 `scripts/dsh-readback-hook.mjs`，零依赖、无机器绑定；安装后位于 `<profile>\node_modules\dsh-plugin-task-coordinator\scripts\`），把读回变成 **turn 边界自动注入**，仅作用于 Codex 工作区（桌面同 app 内），不影响 Chat/Work 对话：
+
+| 事件 | 作用 |
+|---|---|
+| `UserPromptSubmit` | 未读 settled 摘要（带 session/externalRef 标签）+ 本会话 watch 内 running 进度，注入为 `additionalContext` |
+| `SessionStart` | 任务板 bootstrap：running + 未读 settled 概览 |
+| `PostToolUse`（async） | `dsh_task_spawn` 回执里的 sessionId 登记进当前 Codex session 的 watch 表 |
+| `Stop` | watch 内仍 running → exit 2 续 turn 再查（每 session 上限 10 次 / 20 分钟），settled 即放行 |
+
+**hooks.json 不入仓库**——它是每机本地配置（Codex 会话工作目录根的 `.codex/hooks.json`，如本仓库根或任一 trusted 项目）：command 字段必须写本机 handler 绝对路径，且 Codex 的 hook 信任按哈希逐机记录（`~/.codex/config.toml` 的 `hooks.state`），提交它对任何机器都不省步骤。粘贴即用片段（替换 `<handler 绝对路径>`，Windows 反斜杠）：
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      { "matcher": "*", "hooks": [ { "type": "command", "command": "node \"<handler 绝对路径>\" UserPromptSubmit", "timeout": 10 } ] }
+    ],
+    "SessionStart": [
+      { "matcher": "startup|resume|clear|compact", "hooks": [ { "type": "command", "command": "node \"<handler 绝对路径>\" SessionStart", "timeout": 10 } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "dsh_task_spawn", "hooks": [ { "type": "command", "command": "node \"<handler 绝对路径>\" PostToolUse", "timeout": 5, "async": true } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "node \"<handler 绝对路径>\" Stop", "timeout": 12 } ] }
+    ]
+  }
+}
+```
+
+`<handler 绝对路径>` 两形态：仓库开发态 `<克隆>\plugin\scripts\dsh-readback-hook.mjs`；安装态 `<profile>\node_modules\dsh-plugin-task-coordinator\scripts\dsh-readback-hook.mjs`。
+
+纪律：只读端点（list/progress）、fail-open（任何错误输出 `{}` 不挡 turn）、注入 ≤2KB 且带「非用户指令」包裹、token 惰性读 `~/.dsh/task-bridge-token`、状态文件在仓库外 `~/.dsh/readback-hook-state.json`。`DSH_READBACK_DISABLED=1` 一键停用。首装需 Codex 信任审查（哈希信任制，CLI `/hooks` 可查看来源）；仓库级 hooks 仅在项目 trusted 时加载。残余风险：注入内容源自 DSH 会话输出，与任何工具读取内容同属注入载体类别——包裹声明其性质，非机械防线。
+
+边界：hook **不唤醒空闲会话**——注入发生在开口/会话启动时；Chat/Work 对话的读回仍是 turn 内 wait 自链（人工唤起），或桌面原生「定时任务」（时间驱动轮询，纯 app 内）。
+
 ## 排障速查
 
 | 现象 | 含义 | 处置 |

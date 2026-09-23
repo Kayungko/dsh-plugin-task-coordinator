@@ -29,6 +29,7 @@
     "commands.mjs",
     "skills.mjs",
     "skills/",
+    "scripts/",
     "client.js",
     "cordis.patch.yml",
     "screenshots.json",
