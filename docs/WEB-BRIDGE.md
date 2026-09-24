@@ -1,10 +1,31 @@
 # 网页端桥接教程（ChatGPT Web → DSH）
 
-**适用版本：dsh-plugin-task-coordinator ≥ 0.27.0（token 文件自动生成需 ≥ 0.27.2）· dsh-task-bridge-mcp ≥ 0.4.1 · 独立包 dsh-plugin-task-bridge 已 DEPRECATED（合并内置）。**
+**适用版本：dsh-plugin-task-coordinator ≥ 0.27.0（token 文件自动生成需 ≥ 0.27.2）· dsh-task-bridge-mcp ≥ 0.4.1（网页侧直接读写本机文件的 `local_*` 工具需 ≥ 0.5.0）· 独立包 dsh-plugin-task-bridge 已 DEPRECATED（合并内置）。**
 
 ## 它解决什么
 
 桌面端 Codex 额度不够、但 ChatGPT **聊天**额度还有剩——本链路让网页聊天额度驱动本机 DSH 的任务会话做开发协作：你在 ChatGPT 网页里说话，MCP 工具调用经隧道落到本机，由 task-coordinator 真正执行 spawn / send / progress / wait。聊天额度只付"对话与工具调用"的钱，重活全在本机 DSH。
+
+### 两种工作模式（bridge-mcp ≥ 0.5.0）
+
+同一个隧道、同一个 connector，网页侧可以按需走两条路：
+
+| | **A. 派给 DSH**（`dsh_task_*`，默认） | **B. 直接操作本机**（`local_*`，默认关闭） |
+|---|---|---|
+| 谁干活 | DSH 任务会话里的 agent | bridge-mcp 进程自己 |
+| 额度 | 消耗 DSH 侧模型额度 | **零模型额度** |
+| 延迟 | 秒级到分钟级 | 毫秒级 |
+| 拿到的 | agent 的转述 + 尾部摘要（默认 6 条消息，可 cursor 分页） | 文件原文 / 命令原始输出 |
+| 人在环 | 有（DSH 确认闸门、你在 DSH 里看得见） | **没有**（网页侧静默执行） |
+| 适合 | 需要推理、改多处、跑测试的开发任务 | 查代码、读配置、看日志、跑一条命令 |
+
+模式 B 让网页 GPT 能直接读你本机的文件（不用先派个任务让 DSH agent 去读再把摘要转回来），
+代价是**没有人在环**：网页会话里的提示注入可直接指挥它读写文件、执行命令。因此 B 默认一个
+工具都不注册，需要显式 opt-in，且内置了强制凭据保护与写/执行审计日志。启用方式、五个工具
+的参数、四层防护与有界性详见 bridge-mcp 仓 README 的「本地文件与命令工具」节。
+
+**建议的启用梯度**：先只开 `DSH_BRIDGE_LOCAL_FS=1`（读/写/列目录/搜索，不含 shell）——
+"网页侧查代码"的绝大部分需求这一档就够了；确需跑命令再另开 `DSH_BRIDGE_LOCAL_EXEC=1`。
 
 ## 拓扑
 
@@ -13,11 +34,11 @@ ChatGPT 网页（聊天额度）
   → OpenAI Secure MCP Tunnel（云端 connector，出向由本机轮询拉取，无需公网入口）
   → tunnel-client（本机常驻进程；管理面默认 127.0.0.1:8080，由 profile 的 health.listen_addr 决定——本文示例用 8787）
   → dsh-task-bridge-mcp（stdio MCP server；七个 dsh_task_* 工具，全部带 input/outputSchema）
-  → DSH 宿主 webserver 127.0.0.1:43120（合并后桥，coordinator ≥0.27.0 内置）
-  → task-coordinator 任务会话
+      ├─ 模式 A：→ DSH 宿主 webserver 127.0.0.1:43120（合并后桥，coordinator ≥0.27.0 内置）→ task-coordinator 任务会话
+      └─ 模式 B：→ 本机文件系统 / shell（0.5.0 起的 local_* 工具，默认关闭；**不经 43120、不消耗模型额度**）
 ```
 
-每一跳只认下一跳的冻结契约：bridge-mcp 只认 43120 的七条 `/v1/*` 路由与 `X-Task-Bridge-Token`，不关心桥是独立包还是内置——所以 0.27.0 硬切换时它**零改动存活、无需重启**。
+每一跳只认下一跳的冻结契约：bridge-mcp 只认 43120 的七条 `/v1/*` 路由与 `X-Task-Bridge-Token`，不关心桥是独立包还是内置——所以 0.27.0 硬切换时它**零改动存活、无需重启**。模式 B 是 bridge-mcp 进程内的本地能力，**不走桥、不改 wire 契约**，因此它的增删对 DSH 侧与既有消费方零影响。
 
 ## 前提
 
