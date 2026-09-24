@@ -1,12 +1,29 @@
 # 更新日志
 
+## [0.27.4] - 2026-09-24
+
+### 文档修正：模式 A 的「人在环」声称与实现相反（评审 P0）
+
+纯文档版，插件代码与 wire 契约零改动。
+
+四路并行评审（安全 / 正确性 / 文档一致性 / 契约兼容）中，文档一致性一路逐条核对 120+ 条事实性陈述后判定：0.27.3 新增的「两种工作模式」对照表把**模式 A（派给 DSH）写成「有人在环（DSH 确认闸门、用户在场）」，与实现相反**，且这一句出现在 5 处（本仓 `docs/WEB-BRIDGE.md`、本仓 CHANGELOG、bridge-mcp README 两处、根 README）。
+
+实现事实（已验证）：桥的 `/v1/spawn` 直调 `ops.spawnTask`（`bridge-endpoints.mjs` 的 `case 'spawn'` → `callOps(deps, 'spawnTask', …)`），而 `spawnTask` 的签名里**没有 `confirmationId`**；确认门只在 `spawnBatch`（`ops.mjs`）。`bridge-policy.mjs` 的注释本身即写明：「MVP 桥只用单发 spawnTask（**无 coordinator 侧确认门**——门只在 spawnBatch），但桥侧自补策略闸」。桥侧唯一的闸是 60s/10 次限流，活体 `/v1/capabilities` 的 `limits` 亦为 `{spawnMaxPerWindow:10, spawnWindowMs:60000}`。
+
+影响：这句是两份文档用来做**风险对比的核心论据**（「A 有闸门兜底、B 没有」）。照原文，用户会以为网页 GPT 派任务给 DSH 时需要人批准；实际是网页一句话即可无确认地在本机 spawn 任务，只受限流约束。方向是**把风险说小了**，与 `local_*` 那侧把风险写透的严谨度不匹配。
+
+修正后表述（5 处同步）：「**部分**人在环——任务在 DSH 侧栏实时可见、可随时 steer/cancel；但桥侧单发 spawn **不弹确认卡**（确认门只覆盖 `task_spawn_batch`），只有 60s/10 次策略闸」。
+
+同期在 bridge-mcp 仓（0.5.1）修正的相关文档失真见该仓 CHANGELOG：凭据保护对 `local_exec` 不成立、「只开文件更稳」不成立（文件写权限即可达成代码执行与持久化）、审计行在生产部署下不落盘、头号特性缺 tunnel-client 形态的启用路径说明。
+
 ## [0.27.3] - 2026-09-24
 
 ### 文档：网页侧两种工作模式（配合 bridge-mcp 0.5.0）
 
 纯文档版，插件代码与 wire 契约零改动。
 
-- `docs/WEB-BRIDGE.md` 新增「两种工作模式」节：bridge-mcp 0.5.0 起，同一条隧道、同一个 connector 下网页侧可按需走两条路——**A. 派给 DSH**（`dsh_task_*`，消耗 DSH 侧模型额度、秒级到分钟级、只拿到尾部摘要、有 DSH 确认闸门即人在环）与 **B. 直接操作本机**（`local_*`，零模型额度、毫秒级、拿到文件原文、**无人在环**）。给出六维对照表、模式 B 的风险定位（网页侧提示注入可直接指挥读写文件与执行命令）、以及建议的启用梯度（先只开 `DSH_BRIDGE_LOCAL_FS`，确需跑命令再另开 `DSH_BRIDGE_LOCAL_EXEC`）。
+- `docs/WEB-BRIDGE.md` 新增「两种工作模式」节：bridge-mcp 0.5.0 起，同一条隧道、同一个 connector 下网页侧可按需走两条路——**A. 派给 DSH**（`dsh_task_*`，消耗 DSH 侧模型额度、秒级到分钟级、只拿到尾部摘要；任务在 DSH 侧可见可干预，但**桥侧单发 spawn 不经确认卡**——确认门只覆盖 `task_spawn_batch`，桥侧只有 60s/10 次策略闸）与 **B. 直接操作本机**（`local_*`，零模型额度、毫秒级、拿到文件原文、**无人在环**）。给出六维对照表、模式 B 的风险定位（网页侧提示注入可直接指挥读写文件与执行命令）、以及建议的启用梯度（先只开 `DSH_BRIDGE_LOCAL_FS`，确需跑命令再另开 `DSH_BRIDGE_LOCAL_EXEC`）。
+  > 0.27.4 修正：本节初版把模式 A 写成「有 DSH 确认闸门即人在环」，与实现相反（文档评审 P0）。`ops.spawnTask` 签名无 `confirmationId`，确认门只在 `spawnBatch`；`bridge-policy.mjs` 的注释本身即写明「MVP 桥只用单发 spawnTask（无 coordinator 侧确认门——门只在 spawnBatch）」。已按事实改为「可见可干预但派发不经确认卡」，WEB-BRIDGE 与两份 README、根 README 同步。
 - 拓扑图补模式 B 分支，并注明它**不经 43120、不改 wire 契约**——因此它的增删对 DSH 侧与既有消费方零影响。
 - 「适用版本」行标注 `local_*` 需 bridge-mcp ≥ 0.5.0。
 - 详细启用方式、五个工具的参数、四层内置防护（默认关闭双开关 / 本链路凭据强制不可读且不可解除 / 默认凭据保护可显式解除 / 写与执行审计日志）与有界性说明见 bridge-mcp 仓 README 的「本地文件与命令工具」节，本文只做模式选择层的导引，避免两处文档各写一份细节而互相漂移。
