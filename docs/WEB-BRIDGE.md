@@ -1,6 +1,6 @@
 # 网页端桥接教程（ChatGPT Web → DSH）
 
-**适用版本：dsh-plugin-task-coordinator ≥ 0.27.0（token 文件自动生成需 ≥ 0.27.2）· dsh-task-bridge-mcp ≥ 0.4.1（网页侧直接读写本机文件的 `local_*` 工具需 ≥ 0.5.0）· 独立包 dsh-plugin-task-bridge 已 DEPRECATED（合并内置）。**
+**适用版本：dsh-plugin-task-coordinator ≥ 0.27.0（token 文件自动生成需 ≥ 0.27.2）· dsh-task-bridge-mcp ≥ 0.4.1（网页侧直接读写本机文件的 `local_*` 工具需 ≥ 0.5.0，**开 `local_*` 则需 ≥ 0.5.4**：0.5.0–0.5.2 有一个可穿透全部凭据保护的 P1，0.5.3 修掉它、0.5.4 又补齐了同批四项）· 独立包 dsh-plugin-task-bridge 已 DEPRECATED（合并内置）。**
 
 ## 它解决什么
 
@@ -24,17 +24,28 @@
 工具都不注册，需要显式 opt-in，且内置了强制凭据保护与写/执行审计日志。启用方式、五个工具
 的参数、六层防护与有界性详见 bridge-mcp 仓 README 的「本地文件与命令工具」节。
 
-**建议的启用梯度**（bridge-mcp ≥0.5.2）：
+**建议的启用梯度**（bridge-mcp **≥0.5.4**；0.5.0–0.5.2 有一个可穿透全部凭据保护的 P1，
+0.5.3 已修，**不要用 0.5.2 及更早版本开 `local_*`**，详见下方安全说明）：
 
 1. **只开文件、不开 shell**：`DSH_BRIDGE_LOCAL_FS=1`。"网页侧查代码"的绝大部分需求这一档就够了。
 2. **同时把范围收窄到项目目录**：再加 `DSH_BRIDGE_FS_ALLOW=<项目根>`。白名单与凭据保护是
    **AND** 关系（只收窄、永不放宽：把 home 加进白名单，`~/.ssh/id_rsa` 与桥 token 照样被拒），
-   且递归遍历内逐条目生效、`..` 穿越与 junction 逃逸都以 canonical 结果判定。
+   且递归遍历内逐条目生效、`..` 穿越与 junction 逃逸都以 canonical 结果判定
+   （⚠️ 这句**直到 bridge-mcp 0.5.3 才对新建文件成立**：0.5.1–0.5.2 的 `canonical` 不解析祖先
+   链接而 `displayPath` 解析，「junction 祖先 + 不存在的叶子」会让判定路径与落盘路径分叉，
+   实测可穿透全部三级凭据保护，含「不可配置解除」那一级；Windows 自带的
+   `C:\Documents and Settings` → `C:\Users` junction 使其**零前置条件**可利用。0.5.3 起两者
+   共用同一解析函数并在 `guardPath` 末尾加恒等式自校验，详见 bridge-mcp CHANGELOG）。
 3. **确需跑命令再另开** `DSH_BRIDGE_LOCAL_EXEC=1`，并且要清楚：**开了 exec 就没有文件级边界了**。
    凭据保护、白名单、自身完整性保护全都是文件工具层的约束，而 shell 不受它们管
    （`type C:\Users\you\.ssh\id_rsa`、`echo x > <工作树>\src\local-fs.mjs` 一条命令就够）。
    这不是实现缺陷而是「给出 shell」的定义本身——所以别把六层防护当成开了 exec 之后还在生效。
    这一条是 bridge-mcp 0.5.2 用独立脚本实测确认的边界，不是推断。
+
+另需注意 **0.5.4 起凭据保护清单里的名字用作目录名时连带保护整个子树**：项目里若真有叫
+`credentials` / `.env` / `auth.json` 的目录（测试 fixture、mock 数据），其子树会一并不可访问，
+需 `DSH_BRIDGE_FS_DENY_CREDENTIALS=0` 解除（启动打强告警）。这是为消除「同一路径直读能读、
+遍历搜不到」的判定不一致而做的，代价已如实写明。
 
 另：`local_write_file` 不得改写 bridge-mcp **自己的包目录**（生产 profile 直接跑工作树，
 改写源码会在下次重启后被加载，属持久化通道），也不得改写审计日志文件。前者可用
