@@ -14,7 +14,8 @@ test('P2-1 orchReadFamily consumes four fetch response states', async () => {
 
 test('P2-2 history uses latest cursor fallback when projections are absent', () => {
   const family = readFileSync(new URL('../family.mjs', import.meta.url), 'utf8');
-  assert.match(family, /parent\.projections\?\.asOfSeq \?\? -1/);
+  assert.doesNotMatch(family, /parent\.projections\?\.asOfSeq \?\? -1/);
+  assert.match(family, /throughSeq === undefined \? \{\} : \{ throughSeq \}/);
 });
 
 test('P2-3 list-size refresh is debounced while explicit refresh remains immediate', () => {

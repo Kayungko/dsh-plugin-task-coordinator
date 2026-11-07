@@ -27,7 +27,7 @@ import { join } from 'node:path';
 import z from '@deepseek-ai/schemastery';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
-import { resolveConfig } from './config.mjs';
+import { resolveConfig, DEFAULTS } from './config.mjs';
 import { SendLimiter } from './safety.mjs';
 import { createOps } from './ops.mjs';
 import { registerTools } from './tools.mjs';
@@ -47,6 +47,17 @@ const PKG_VERSION = JSON.parse(readFileSync(new URL('./package.json', import.met
 export const name = 'task-coordinator';
 export const inject = ['agents', 'tools', 'sessionController', 'commands'];
 
+const field = (value) => (Array.isArray(value) ? z.array(z.string()) :
+  typeof value === 'boolean' ? z.boolean() : typeof value === 'number' ? z.number() : z.string()).default(value);
+export const Config = z.object({
+  ...Object.fromEntries(Object.entries(DEFAULTS).map(([key, value]) => [key, field(value)])),
+  bridge: z.any(),
+  ...Object.fromEntries(Object.entries(buildSpawnModelsSchema(z).dict).map(([key, schema]) => [key, schema.volatile()])),
+});
+const readConfig = (input) => Object.fromEntries(Object.entries(input).map(([key, value]) =>
+  [key, value && typeof value.get === 'function' ? value.get() : value]));
+
+
 /** Default registry path: <DSH_HOME or ~/.dsh>/task-coordinator/registry.json */
 export function defaultRegistryFile() {
   const dshHome = process.env.DSH_HOME && process.env.DSH_HOME.trim().length > 0
@@ -56,7 +67,9 @@ export function defaultRegistryFile() {
 }
 
 export function apply(ctx, input = {}) {
-  const config = resolveConfig(input);
+  const initial = readConfig(input);
+  if (initial.maxQueuePerTask === 0) delete initial.maxQueuePerTask;
+  const config = resolveConfig(initial);
   // 0.24.0 service seam: the service ALWAYS exists (a missing service would
   // leave bridge consumers forever inert), but the payload is two-shaped.
   // Disabled provides { config, version } with ops ABSENT — the degrade
@@ -179,7 +192,7 @@ export function apply(ctx, input = {}) {
   const readUiLocale = () => {
     try {
       const service = typeof ctx.get === 'function' ? ctx.get('settings') : undefined;
-      const stored = typeof service?.get === 'function' ? service.get('locale') : undefined;
+      const stored = typeof service?.get === 'function' ? service.get('locale') : service?.describe?.().find((row) => row.ns === 'locale')?.value;
       return resolveUiLocale(stored?.preference);
     } catch {
       return 'zh';
@@ -200,6 +213,10 @@ export function apply(ctx, input = {}) {
   let bridgeSupervisorRef = null;
   ctx.inject(['settings'], (settingsCtx) => {
     try {
+      if (typeof settingsCtx.settings.installSection !== 'function') {
+        settingsCtx.effect(() => settingsCtx.settings.configure({ auto: false }, ctx.fiber));
+        return;
+      }
       settingsCtx.settings.installSection(ctx, SPAWN_MODELS_NS, buildSpawnModelsSchema(z), SPAWN_MODELS_BASE, {
         setSource: () => {},
         validate: (value) => {
@@ -215,7 +232,7 @@ export function apply(ctx, input = {}) {
   const readSpawnDefaults = () => {
     try {
       const service = typeof ctx.get === 'function' ? ctx.get('settings') : undefined;
-      const stored = typeof service?.get === 'function' ? service.get(SPAWN_MODELS_NS) : undefined;
+      const stored = typeof service?.get === 'function' ? service.get(SPAWN_MODELS_NS) : readConfig(input);
       return normalizeSpawnRoute(stored); // throws only on a malformed half pair
     } catch {
       // Defensive by contract: a malformed stored layer (or a missing service)
@@ -229,7 +246,7 @@ export function apply(ctx, input = {}) {
   const readQueueCap = () => {
     try {
       const service = typeof ctx.get === 'function' ? ctx.get('settings') : undefined;
-      const stored = typeof service?.get === 'function' ? service.get(SPAWN_MODELS_NS) : undefined;
+      const stored = typeof service?.get === 'function' ? service.get(SPAWN_MODELS_NS) : readConfig(input);
       return normalizeQueueCap(stored);
     } catch {
       return null;
@@ -246,7 +263,7 @@ export function apply(ctx, input = {}) {
   const readBridgePrefs = () => {
     try {
       const service = typeof ctx.get === 'function' ? ctx.get('settings') : undefined;
-      const stored = typeof service?.get === 'function' ? service.get(SPAWN_MODELS_NS) : undefined;
+      const stored = typeof service?.get === 'function' ? service.get(SPAWN_MODELS_NS) : readConfig(input);
       return normalizeBridgeSection(stored);
     } catch {
       return { enabled: false, tokenFile: undefined };
@@ -267,6 +284,7 @@ export function apply(ctx, input = {}) {
     },
     logger: ctx.logger,
   });
+  ctx.on?.('loader/volatile-update', () => { bridgeSupervisorRef?.reconcile(); });
   ctx.inject(['webServer'], (wsCtx) => {
     bridgeSupervisorRef.attach(wsCtx);
   });

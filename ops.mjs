@@ -79,6 +79,30 @@ export const OP_CODES = Object.freeze({
 
 const MIGRATE_GUARD_MIN = [0, 1, 5];
 
+/** Read a cold Session without resuming it; 0.2 exposes bounded event pages. */
+export async function readPersistedProgress(controller, sessionId, nextSeq, signal) {
+  let events;
+  let throughSeq;
+  if (typeof controller.inspect === 'function') {
+    events = (await controller.inspect(sessionId, signal))?.events;
+    if (Array.isArray(events) && events.length && events.every(e => Number.isSafeInteger(e?.seq))) {
+      throughSeq = events.reduce((max, e) => Math.max(max, e.seq), -1) + 1;
+    }
+  } else {
+    const page = await controller.events({
+      address: { kind: 'session', sessionId }, maxMessages: RECENT_SCAN_WINDOW,
+      ...(nextSeq === null ? {} : { beforeSeq: nextSeq + RECENT_SCAN_WINDOW }),
+    }, signal ?? new AbortController().signal);
+    if (!Array.isArray(page?.records) || !Number.isSafeInteger(page.cursor)) throw new Error('invalid persisted event page');
+    events = page.records.filter(row => row.type === 'event').map(row => row.event);
+    throughSeq = page.cursor + 1; // Host cursor is inclusive; feedback cursors are exclusive.
+  }
+  const from = nextSeq ?? (Number.isSafeInteger(throughSeq) ? Math.max(0, throughSeq - RECENT_SCAN_WINDOW) : 0);
+  return { events: Array.isArray(events) && Number.isSafeInteger(throughSeq)
+    ? events.filter(e => e.seq >= from && e.seq < Math.min(throughSeq, from + RECENT_SCAN_WINDOW)) : events,
+    from, throughSeq };
+}
+
 let cachedHostCoreVersion;
 let hostCoreVersionSettled = false;
 
@@ -613,14 +637,9 @@ export function createOps(deps) {
         result.note = 'cold session (no live agent): not running does not mean no pending work — a persisted queue may exist, and the send-depth guard (maxQueuePerTask) does not cover cold targets';
         result.queue = [];
         try {
-          const observed = await sessionController.inspect(targetId, signal);
-          const events = observed?.events;
-          result.recent = tailFromEvents(events, config.progressTailMessages);
-          if (Array.isArray(events) && events.length && events.every(e => Number.isSafeInteger(e?.seq))) {
-            const throughSeq = events.reduce((max, e) => Math.max(max, e.seq), -1) + 1;
-            const from = nextSeq ?? Math.max(0, throughSeq - RECENT_SCAN_WINDOW);
-            Object.assign(captured, { throughSeq, from, events: events.filter(e => e.seq >= from && e.seq < Math.min(throughSeq, from + RECENT_SCAN_WINDOW)) });
-          }
+          const observed = await readPersistedProgress(sessionController, targetId, nextSeq, signal);
+          result.recent = tailFromEvents(observed.events, config.progressTailMessages);
+          Object.assign(captured, observed);
         } catch (error) {
           result.recent = [];
           result.inspectError = error?.message ?? String(error);

@@ -122,20 +122,22 @@ export function createFamilyQueries({ registry, sessionController }) {
           note: 'Delivery receipts only; historical gaps and external replies are not reconstructed. Delivery does not prove consumption.' };
       }
       if (typeof sessionController.page !== 'function') return fail('history-service-unavailable');
-      // Host page supports throughSeq:-1 as the latest cursor when projection cache misses.
-      const throughSeq = cursor?.throughSeq ?? parent.projections?.asOfSeq ?? -1;
+      // Omit an unknown cut: on 0.2, -1 is the empty cut, not the latest one.
+      const throughSeq = cursor?.throughSeq ?? parent.projections?.asOfSeq;
       const beforeSeq = cursor?.beforeSeq;
-      if (!Number.isSafeInteger(throughSeq) || throughSeq < -1 || (beforeSeq !== undefined && (!Number.isSafeInteger(beforeSeq) || beforeSeq < 0 || beforeSeq > throughSeq + 1))) return fail('history-cursor-unavailable', 400);
-      const page = await sessionController.page({ address: { kind: 'session', sessionId: parent.sessionId }, throughSeq,
+      if ((throughSeq !== undefined && (!Number.isSafeInteger(throughSeq) || throughSeq < -1)) || (beforeSeq !== undefined && (!Number.isSafeInteger(beforeSeq) || beforeSeq < 0 || (throughSeq !== undefined && beforeSeq > throughSeq + 1)))) return fail('history-cursor-unavailable', 400);
+      const page = await sessionController.page({ address: { kind: 'session', sessionId: parent.sessionId },
+        ...(throughSeq === undefined ? {} : { throughSeq }),
         ...(beforeSeq === undefined ? {} : { beforeSeq }), maxMessages: 30 }, signal);
       if (!Array.isArray(page?.records)) return fail('history-shape-invalid');
       // Cap what this plugin scans/returns even when a message has many tool events.
       const records = page.records.slice(-2000);
       const first = records.find(record => record.type === 'event' && Number.isSafeInteger(record.event?.seq))?.event.seq;
       const { events, unmatched } = relationEvents(records, parent.sessionId, targetId);
-      const hasMore = (page.hasMore === true || page.records.length > records.length) && Number.isSafeInteger(first) && first > 0;
+      const fixedCut = throughSeq ?? page.cursor;
+      const hasMore = (page.hasMore === true || page.records.length > records.length) && Number.isSafeInteger(first) && first > 0 && Number.isSafeInteger(fixedCut);
       return { ok: true, sourceSessionId: parent.sessionId, targetSessionId: targetId, events,
-        hasMore, nextCursor: hasMore ? { throughSeq, beforeSeq: first } : null, scanned: records.length, unmatched,
+        hasMore, nextCursor: hasMore ? { throughSeq: fixedCut, beforeSeq: first } : null, scanned: records.length, unmatched,
         coverage: hasMore || unmatched ? 'partial' : 'loaded' };
     },
   };

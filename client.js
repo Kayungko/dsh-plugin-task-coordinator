@@ -627,7 +627,12 @@ window.__ModuleLoader__.load({
 				// ctx.get() bypasses the runner's inject-declaration gate (see
 				// the ensureLocale note); a plain .settingsScope read would
 				// throw under our "slots"-only declaration.
-				const svc = hostCtx && (typeof hostCtx.get === "function" ? hostCtx.get("settingsScope") : hostCtx.settingsScope);
+				const forms = hostCtx && typeof hostCtx.get === "function" ? hostCtx.get("configForms") : null;
+                if (typeof forms?.get === "function") {
+                    const scope = forms.get("task-coordinator-runtime");
+                    if (scope && typeof scope.getSnapshot === "function") return (boundScope = scope);
+                }
+                const svc = hostCtx && (typeof hostCtx.get === "function" ? hostCtx.get("settingsScope") : hostCtx.settingsScope);
 				if (typeof svc?.bind === "function") {
 					const scope = svc.bind({ namespace: NS_SETTINGS });
 					if (scope && typeof scope.getSnapshot === "function") boundScope = scope;
