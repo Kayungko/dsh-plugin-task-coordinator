@@ -60,10 +60,17 @@ if (-not (Test-Path $ManifestPath)) { throw "profile manifest not found: $Manife
 # while it is any process's working directory, and file overwrites work even
 # when the running host has the loaded modules in memory.
 if (-not (Test-Path $Target)) { New-Item -ItemType Directory -Force -Path $Target | Out-Null }
-$files = @('package.json', 'cordis.patch.yml', 'index.mjs', 'config.mjs', 'safety.mjs', 'title.mjs', 'registry.mjs', 'family.mjs', 'feedback.mjs', 'external.mjs', 'i18n.mjs', 'settings.mjs', 'ops.mjs', 'tools.mjs', 'commands.mjs', 'skills.mjs', 'client.js', 'README.md')
+$files = @('package.json', 'cordis.patch.yml', 'index.mjs', 'bridge-runtime.mjs', 'bridge-endpoints.mjs', 'bridge-policy.mjs', 'bridge-auth.mjs', 'bridge-discovery.mjs', 'config.mjs', 'safety.mjs', 'title.mjs', 'registry.mjs', 'family.mjs', 'feedback.mjs', 'external.mjs', 'i18n.mjs', 'settings.mjs', 'ops.mjs', 'tools.mjs', 'commands.mjs', 'skills.mjs', 'client.js', 'README.md')
 foreach ($file in $files) {
   $from = Join-Path $Source $file
   if (Test-Path $from) { Copy-Item $from (Join-Path $Target $file) -Force }
+}
+# Bundled client helpers (readback + discovery) import the adjacent package.
+$scriptsSrc = Join-Path $Source 'scripts'
+$scriptsDst = Join-Path $Target 'scripts'
+if (Test-Path $scriptsSrc) {
+  if (-not (Test-Path $scriptsDst)) { New-Item -ItemType Directory -Force -Path $scriptsDst | Out-Null }
+  Copy-Item (Join-Path $scriptsSrc '*') $scriptsDst -Recurse -Force
 }
 # bundled skills directory (recursive). Copy the CONTENTS into the target:
 # Copy-Item with an existing destination directory puts the source directory

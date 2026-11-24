@@ -1,3 +1,4 @@
+import { BRIDGE_INSTANCE_HEADER } from './bridge-discovery.mjs';
 import { readFileSync } from 'node:fs';
 const BRIDGE_VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 /**
@@ -585,7 +586,8 @@ export function createEndpointHandler(endpoint, deps) {
           sendJson(response, 503, failEnvelope(ENVELOPE_CODES.UPSTREAM_ERROR, 'bridge token is unavailable'));
         } else {
           deps.logger?.warn?.(`task-bridge: unauthorized request on ${endpoint.path}`);
-          sendJson(response, 401, failEnvelope(ENVELOPE_CODES.UNAUTHORIZED, 'unauthorized'));
+          sendJson(response, 401, failEnvelope(ENVELOPE_CODES.UNAUTHORIZED, 'unauthorized'),
+            endpoint.kind === 'capabilities' && deps.instance ? { [BRIDGE_INSTANCE_HEADER]: deps.instance } : undefined);
         }
         return;
       }

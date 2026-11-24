@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { publishBridgeInstance } from './bridge-discovery.mjs';
 /**
  * bridge-runtime.mjs — 外部任务桥挂载监管（0.27.0 起由 coordinator 实验开关驱动）。
  *
@@ -86,16 +88,23 @@ export function mountExternalBridge(ctx, config) {
   const getCoordinator = () => (typeof ctx.get === 'function' ? ctx.get('taskCoordinator') : undefined);
 
   const disposers = [];
-  for (const endpoint of ENDPOINTS) {
-    const handler = createEndpointHandler(endpoint, { config, tokenStore, gate, getCoordinator, logger: ctx.logger });
-    const route = { kind: 'exact', path: endpoint.path, handler };
-    // 照 webhook-github 注册模式：ctx.effect(() => webServer.register(route), label)
-    // ——effect 返回 single-shot disposer（cordis fiber.ts 签名实证），供热卸载。
-    if (typeof ctx.effect === 'function') {
-      disposers.push(ctx.effect(() => webServer.register(route), `task-bridge: ${endpoint.path}`));
-    } else {
-      webServer.register(route); // 无 effect 面时直接注册（丢失热卸载能力，强告警）
+  const instance = randomUUID();
+  try {
+    for (const endpoint of ENDPOINTS) {
+      const handler = createEndpointHandler(endpoint, { config, tokenStore, gate, getCoordinator, logger: ctx.logger, instance });
+      // DSH authentication must admit these exact routes to their own loopback + token guard.
+      const route = { kind: 'exact', path: endpoint.path, auth: 'anonymous', handler };
+      // 照 webhook-github 注册模式：ctx.effect(() => webServer.register(route), label)
+      // ——effect 返回 single-shot disposer（cordis fiber.ts 签名实证），供热卸载。
+      if (typeof ctx.effect === 'function') {
+        disposers.push(ctx.effect(() => webServer.register(route), `task-bridge: ${endpoint.path}`));
+      } else {
+        webServer.register(route); // 无 effect 面时直接注册（丢失热卸载能力，强告警）
+      }
     }
+  } catch (error) {
+    for (const dispose of disposers) dispose?.();
+    throw error;
   }
   if (disposers.length === 0) {
     ctx.logger?.warn?.('task-bridge: no ctx.effect surface; routes mounted without hot-unmount capability');
@@ -104,6 +113,7 @@ export function mountExternalBridge(ctx, config) {
   ctx.logger?.info?.(
     `task-bridge: ${ENDPOINTS.length} exact routes mounted on the host webserver (${ENDPOINTS.map((e) => `${e.method} ${e.path}`).join(', ')}); auth ${TOKEN_HEADER_NAME} via ${config.tokenFile}`,
   );
+  disposers.push(publishBridgeInstance(webServer, config.tokenFile, instance, ctx.logger));
   return disposers;
 }
 
