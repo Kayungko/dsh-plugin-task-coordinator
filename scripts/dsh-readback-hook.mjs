@@ -2,7 +2,7 @@
 /**
  * DSH readback hook for Codex（仓库级 .codex/hooks.json 的唯一 handler）。
  *
- * 把 dsh-plugin-task-coordinator ≥0.27.0 内置桥（127.0.0.1:43120）的任务状态
+ * 把 dsh-plugin-task-coordinator ≥0.27.0 内置桥（当前宿主地址）的任务状态
  * 在 Codex 生命周期事件里自动读回模型上下文，补齐 GPT→DSH 写通路之外的
  * DSH→GPT 读回缺口（拉模型 → turn 边界自动注入 + turn 内机械等待）：
  *
@@ -30,11 +30,12 @@
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { discoverBridgeOrigin, requestLocalBridge } from '../bridge-discovery.mjs';
 
 const EVENT = process.argv[2] || 'UserPromptSubmit';
 
 const CFG = {
-  baseUrl: (process.env.TASK_BRIDGE_URL || 'http://127.0.0.1:43120').replace(/\/+$/, ''),
+  baseUrl: process.env.TASK_BRIDGE_URL?.replace(/\/+$/, ''),
   tokenFile: process.env.TASK_BRIDGE_TOKEN_FILE || path.join(os.homedir(), '.dsh', 'task-bridge-token'),
   stateFile: process.env.DSH_READBACK_STATE_FILE || path.join(os.homedir(), '.dsh', 'readback-hook-state.json'),
   stdinMs: 1500,
@@ -172,10 +173,10 @@ async function bridgeGet(token, pathname) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CFG.fetchMs);
   try {
-    const res = await fetch(`${CFG.baseUrl}${pathname}`, {
-      headers: { 'X-Task-Bridge-Token': token },
-      signal: controller.signal,
-    });
+    const options = { headers: { 'X-Task-Bridge-Token': token }, signal: controller.signal };
+    const res = CFG.baseUrl
+      ? await fetch(`${CFG.baseUrl}${pathname}`, { ...options, redirect: 'error' })
+      : await requestLocalBridge(await discoverBridgeOrigin(CFG.tokenFile, options), pathname, options);
     if (!res.ok) return { ok: false, status: res.status };
     const json = await res.json().catch(() => null);
     return json && json.ok ? { ok: true, json } : { ok: false, status: res.status };

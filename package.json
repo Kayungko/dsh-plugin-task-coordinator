@@ -12,6 +12,7 @@
   "files": [
     "index.mjs",
     "bridge-runtime.mjs",
+    "bridge-discovery.mjs",
     "bridge-endpoints.mjs",
     "bridge-policy.mjs",
     "bridge-auth.mjs",
@@ -51,7 +52,7 @@
     }
   },
   "scripts": {
-    "check": "node --check index.mjs && node --check family.mjs && node --check feedback.mjs && node --check external.mjs && node --check config.mjs && node --check safety.mjs && node --check title.mjs && node --check registry.mjs && node --check i18n.mjs && node --check settings.mjs && node --check ops.mjs && node --check tools.mjs && node --check commands.mjs && node --check skills.mjs && node --check client.js && node --check bridge-auth.mjs && node --check bridge-policy.mjs && node --check bridge-endpoints.mjs && node --check bridge-runtime.mjs",
+    "check": "node --check index.mjs && node --check family.mjs && node --check feedback.mjs && node --check external.mjs && node --check config.mjs && node --check safety.mjs && node --check title.mjs && node --check registry.mjs && node --check i18n.mjs && node --check settings.mjs && node --check ops.mjs && node --check tools.mjs && node --check commands.mjs && node --check skills.mjs && node --check client.js && node --check bridge-auth.mjs && node --check bridge-policy.mjs && node --check bridge-endpoints.mjs && node --check bridge-runtime.mjs && node --check bridge-discovery.mjs && node --check scripts/dsh-bridge-url.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "peerDependencies": {

@@ -301,7 +301,7 @@ pwsh install.ps1 -Source .
 
 ## 外部任务桥（实验性）
 
-0.27.0 起，原独立包 `dsh-plugin-task-bridge` **合并进本插件**，由 GUI 实验开关管理：**设置 → 任务编排 → 外部任务桥**。开启后宿主 webserver 在 `127.0.0.1:43120` 服务七条冻结的 `/v1/*` 路由（spawn / send / progress / wait / list / models / capabilities），以 `X-Task-Bridge-Token` 对照 `~/.dsh/task-bridge-token` 鉴权（该文件自 0.27.2 起由桥在挂载时自动生成，**已存在则绝不覆盖**——保护你手工轮换过的值；0.27.0/0.27.1 上需手工创建，否则七条路由一律回 503）——供 [dsh-task-bridge-mcp](https://github.com/Kayungko/dsh-task-bridge-mcp) 这类回环进程、以及经它通过 OpenAI Secure MCP Tunnel 接入的 **ChatGPT 网页会话**（用聊天额度驱动本机 DSH 任务）使用。wire 契约冻结：路由、请求头、token 路径与信封形状与独立包 v0.3.0 完全一致，既有消费方零改动。关闭开关先排空在途请求约 5 秒再卸载全部路由——外部调用立刻收到 404，不留悬挂连接。patch 行可调项（`defaultCwd` 等）迁入本插件 patch 配置的 `bridge` 子对象。部署与验证 walkthrough：**[docs/WEB-BRIDGE.md](docs/WEB-BRIDGE.md)**。
+0.27.0 起，原独立包 `dsh-plugin-task-bridge` **合并进本插件**，由 GUI 实验开关管理：**设置 → 任务编排 → 外部任务桥**。开启后宿主 webserver 在 DSH 实际的回环端口（Desktop 重启后端口可能变化，请使用下文的定位工具） 服务七条冻结的 `/v1/*` 路由（spawn / send / progress / wait / list / models / capabilities），以 `X-Task-Bridge-Token` 对照 `~/.dsh/task-bridge-token` 鉴权（该文件自 0.27.2 起由桥在挂载时自动生成，**已存在则绝不覆盖**——保护你手工轮换过的值；0.27.0/0.27.1 上需手工创建，否则七条路由一律回 503）——供 [dsh-task-bridge-mcp](https://github.com/Kayungko/dsh-task-bridge-mcp) 这类回环进程、以及经它通过 OpenAI Secure MCP Tunnel 接入的 **ChatGPT 网页会话**（用聊天额度驱动本机 DSH 任务）使用。wire 契约冻结：路由、请求头、token 路径与信封形状与独立包 v0.3.0 完全一致，既有消费方零改动。关闭开关先排空在途请求约 5 秒再卸载全部路由——外部调用立刻收到 404，不留悬挂连接。patch 行可调项（`defaultCwd` 等）迁入本插件 patch 配置的 `bridge` 子对象。部署与验证 walkthrough：**[docs/WEB-BRIDGE.md](docs/WEB-BRIDGE.md)**。
 
 本包随附**可选 Codex 读回 hook**（`scripts/dsh-readback-hook.mjs`，零依赖）：在 Codex turn 边界自动注入 DSH 已落定任务摘要进上下文（含带上限的 Stop 续 turn 等待环），不唤醒空闲会话；配置逐机一次，粘贴片段与边界见上述文档「桌面端读回信道」节。
 

@@ -190,7 +190,7 @@ window.__ModuleLoader__.load({
 				// 0.27.0 experimental external bridge group (merged dsh-plugin-task-bridge)
 				"exp.title": "外部任务桥",
 				"exp.tag": "实验性",
-				"exp.intro": "在本机回环地址 127.0.0.1:43120 上开放 7 条 /v1/* 路由，让宿主之外的本机进程（bridge-mcp、Codex 总控、ChatGPT Secure MCP Tunnel 等）驱动 DSH 任务会话。原独立插件 dsh-plugin-task-bridge 已合并至此。",
+				"exp.intro": "在 DSH 当前本机回环端口上开放 7 条 /v1/* 路由，让宿主之外的本机进程（bridge-mcp、Codex 总控、ChatGPT Secure MCP Tunnel 等）驱动 DSH 任务会话。原独立插件 dsh-plugin-task-bridge 已合并至此。",
 				"field.bridge": "启用外部桥",
 				"bridge.on": "已启用",
 				"bridge.off": "已关闭",
@@ -330,7 +330,7 @@ window.__ModuleLoader__.load({
 				// 0.27.0 experimental external bridge group (merged dsh-plugin-task-bridge)
 				"exp.title": "External task bridge",
 				"exp.tag": "Experimental",
-				"exp.intro": "Serves the seven /v1/* routes on loopback 127.0.0.1:43120 so processes outside the host (bridge-mcp, a Codex supervisor, the ChatGPT Secure MCP Tunnel, …) can drive DSH task sessions. Merged in from the former standalone dsh-plugin-task-bridge plugin.",
+				"exp.intro": "Serves the seven /v1/* routes on the current DSH loopback port so processes outside the host (bridge-mcp, a Codex supervisor, the ChatGPT Secure MCP Tunnel, …) can drive DSH task sessions. Merged in from the former standalone dsh-plugin-task-bridge plugin.",
 				"field.bridge": "Enable the external bridge",
 				"bridge.on": "enabled",
 				"bridge.off": "off",

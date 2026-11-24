@@ -61,11 +61,11 @@ ChatGPT 网页（聊天额度）
   → OpenAI Secure MCP Tunnel（云端 connector，出向由本机轮询拉取，无需公网入口）
   → tunnel-client（本机常驻进程；管理面默认 127.0.0.1:8080，由 profile 的 health.listen_addr 决定——本文示例用 8787）
   → dsh-task-bridge-mcp（stdio MCP server；七个 dsh_task_* 工具，全部带 input/outputSchema）
-      ├─ 模式 A：→ DSH 宿主 webserver 127.0.0.1:43120（合并后桥，coordinator ≥0.27.0 内置）→ task-coordinator 任务会话
-      └─ 模式 B：→ 本机文件系统 / shell（0.5.0 起的 local_* 工具，默认关闭；**不经 43120、不消耗模型额度**）
+      ├─ 模式 A：→ DSH 宿主 webserver 的实际回环端口（合并后桥，coordinator ≥0.27.0 内置）→ task-coordinator 任务会话
+      └─ 模式 B：→ 本机文件系统 / shell（0.5.0 起的 local_* 工具，默认关闭；**不经桥、不消耗模型额度**）
 ```
 
-每一跳只认下一跳的冻结契约：bridge-mcp 只认 43120 的七条 `/v1/*` 路由与 `X-Task-Bridge-Token`，不关心桥是独立包还是内置——所以 0.27.0 硬切换时它**零改动存活、无需重启**。模式 B 是 bridge-mcp 进程内的本地能力，**不走桥、不改 wire 契约**，因此它的增删对 DSH 侧与既有消费方零影响。
+每一跳只认下一跳的冻结契约：bridge-mcp 只认桥的七条 `/v1/*` 路由与 `X-Task-Bridge-Token`，不关心桥是独立包还是内置——所以 0.27.0 硬切换时它**零改动存活、无需重启**。模式 B 是 bridge-mcp 进程内的本地能力，**不走桥、不改 wire 契约**，因此它的增删对 DSH 侧与既有消费方零影响。
 
 ## 前提
 
@@ -153,7 +153,7 @@ mcp:
 - 不含引号时按空白切分，**所以路径含空格必须加引号**；克隆路径尽量避开空格与非 ASCII 字符，能省掉一整类问题。
 - `env:` / `file:` 前缀**不适用于 `command`**（官方原文限定只用于 `control_plane.api_key` 与静态 header 值），写了就是字面量。
 
-**进程生命周期**：以独立进程运行（`Start-Process` 一类；不要挂在会随终端退出的会话里）。未注册开机自启的话，重启机器后需手动拉起；DSH Desktop 也必须在跑（43120 由宿主 webserver 提供）。
+**进程生命周期**：以独立进程运行（`Start-Process` 一类；不要挂在会随终端退出的会话里）。未注册开机自启的话，重启机器后需手动拉起；DSH Desktop 也必须在跑（桥的端口由宿主 webserver 提供）。
 
 **同一个 `tunnel_id` 不允许多个活动实例**：轮询是「按 tunnel 排空一个共享队列」，不是按实例分队列，协议文档明确否认 active-active。开两份的后果是**抢单**——控制面下发的命令被非确定性分走、各自路由到自己的 bridge-mcp 子进程，表现为间歇性、无法复现的请求丢失或走错实例，**端口错开也解决不了**。要多实例就得各自一个独立 `tunnel_id`（对应 ChatGPT 里不同 connector），外加各自的 `listen_addr` 与 `log.file`。
 
@@ -165,7 +165,9 @@ mcp:
 
 ## 验证
 
-> **先读**：43120 由宿主 webserver 提供，而 webserver 先于 coordinator 插件组就绪——DSH 刚拉起时探测会**短暂 404**；在 GUI 里动插件（更新/回滚）或手动重启宿主，会有**数十秒 ECONNREFUSED 窗口**。这两类失败先等 30–60s 重探，别当成桥坏了（详见文末排障速查）。探测脚本必须容忍 404 重试、并带超时，否则分不清"关干净"和"挂起"。
+Desktop 默认动态分配端口。安装包的 `scripts/dsh-bridge-url.mjs` 在当前电脑上打印已启用的桥地址，不打印或发送 token。它根据 token 文件旁边的实例记录查找，并核对实例仍在监听；未就绪、关停、记录已过期或同一 token 路径对应多个活跃实例时会报错，而不是猜端口。自定义 token 路径时，给 locator 和调用方设置同一个绝对路径 `TASK_BRIDGE_TOKEN_FILE`。多实例请为每个实例指定不同 token 文件，或明确设置各自的地址。
+
+已固定端口的部署仍可明确设置 `TASK_BRIDGE_URL`（例如实际监听 `http://127.0.0.1:43120` 时）。此设置优先于自动发现。自带读回 hook 未指定地址时，每次调用重新发现；如果独立 **dsh-task-bridge-mcp** 只在启动时读取地址，Desktop 重启后请重新运行 locator、更新它的地址并重启该进程。本插件不改变独立适配器的缓存行为。启动或更新后先等待宿主和插件就绪再运行 locator。
 
 本地半（不碰云端）：
 
@@ -173,7 +175,7 @@ mcp:
 GET  127.0.0.1:8787/healthz   → live
 GET  127.0.0.1:8787/readyz    → ready
 GET  127.0.0.1:8787/api/status → channels[].probe_status = ok（stdio 启动日志里的 Skipping MCP probe 是设计行为，不是故障）
-GET  127.0.0.1:43120/v1/models（带 X-Task-Bridge-Token）→ 200
+GET  <当前回环地址>/v1/models（带 X-Task-Bridge-Token）→ 200
 ```
 
 Windows 可复制形态（用 `curl.exe`：PowerShell 5 里裸 `curl` 是 `Invoke-WebRequest` 的别名、参数不兼容，pwsh 7 移除了该别名但 `curl` 未必在 PATH）：
@@ -183,7 +185,9 @@ curl.exe -s http://127.0.0.1:8787/healthz
 curl.exe -s http://127.0.0.1:8787/api/status
 # 带 token 打桥端；$T 只用于构造请求头，别把它打印出来
 $T = (Get-Content "$env:USERPROFILE\.dsh\task-bridge-token" -Raw).Trim()
-curl.exe -s -H "X-Task-Bridge-Token: $T" http://127.0.0.1:43120/v1/capabilities
+$B = node "<profile>\node_modules\dsh-plugin-task-coordinator\scripts\dsh-bridge-url.mjs"
+if ($LASTEXITCODE -ne 0) { throw "找不到已启动的外部任务桥" }
+curl.exe --noproxy "*" -s -H "X-Task-Bridge-Token: $T" "$B/v1/capabilities"
 ```
 
 云端半——在新对话里粘贴：
@@ -200,7 +204,7 @@ curl.exe -s -H "X-Task-Bridge-Token: $T" http://127.0.0.1:43120/v1/capabilities
 
 ## 桌面端读回信道（可选：Codex hooks）
 
-桥的读回原是纯拉模型：结果落定后停在 43120，等某个 turn 主动来拉。插件包随附 Codex 读回 hook handler（包内 `scripts/dsh-readback-hook.mjs`，零依赖、无机器绑定；安装后位于 `<profile>\node_modules\dsh-plugin-task-coordinator\scripts\`），把读回变成 **turn 边界自动注入**，仅作用于 Codex 工作区（桌面同 app 内），不影响 Chat/Work 对话：
+桥的读回原是纯拉模型：结果落定后停在桥里，等某个 turn 主动来拉。插件包随附 Codex 读回 hook handler（包内 `scripts/dsh-readback-hook.mjs`，零依赖、无机器绑定；安装后位于 `<profile>\node_modules\dsh-plugin-task-coordinator\scripts\`），把读回变成 **turn 边界自动注入**，仅作用于 Codex 工作区（桌面同 app 内），不影响 Chat/Work 对话：
 
 | 事件 | 作用 |
 |---|---|
@@ -241,10 +245,10 @@ curl.exe -s -H "X-Task-Bridge-Token: $T" http://127.0.0.1:43120/v1/capabilities
 | 现象 | 含义 | 处置 |
 |---|---|---|
 | "工具列表里没有 dsh_task_*" | connector 没挂进这个对话 | 新对话 + 启用 connector（缓存怪癖） |
-| 43120 返回 404 | 桥开关关闭，或 DSH 刚启动插件组未就绪 | GUI 开开关；刚启动则等几秒重探 |
-| 43120 ECONNREFUSED | 宿主不在跑，或正处于重启窗口（GUI 动插件/手动重启会令宿主重启数十秒） | 等 30–60s 重探；仍拒连则启动 DSH |
+| 桥返回 404 | 桥开关关闭，或 DSH 刚启动插件组未就绪 | GUI 开开关；刚启动则等几秒重探 |
+| 桥连接 ECONNREFUSED | 宿主不在跑，或正处于重启窗口（GUI 动插件/手动重启会令宿主重启数十秒） | 等 30–60s 重探；仍拒连则启动 DSH |
 | 401 unauthorized | token 不对 | 核对 `~/.dsh/task-bridge-token` 与 bridge-mcp 读取路径 |
-| 43120 返回 **503** `bridge token is unavailable` | token 文件不存在/不可读/为空（coordinator < 0.27.2 不会自动生成） | 按「① 之前」建文件；自定义路径时核对 GUI「Token 文件路径」与 bridge-mcp 侧读取路径一致 |
+| 桥返回 **503** `bridge token is unavailable` | token 文件不存在/不可读/为空（coordinator < 0.27.2 不会自动生成） | 按「① 之前」建文件；自定义路径时核对 GUI「Token 文件路径」与 bridge-mcp 侧读取路径一致 |
 | /api/status probe 非 ok | bridge-mcp stdio 起不来 | 看 tunnel-client 日志里该 channel 的 stderr |
 | doctor FAIL / command 起不来，但路径看着是对的 | `command:` 里用了 Windows 反斜杠，被当转义符吃掉（`D:\git\x` → `D:gitx`），报错只说 "script not found" | 全改正斜杠 `D:/git/x`；或套 **YAML 单引号**让反斜杠字面存活（YAML 双引号里 `\g` 本身还是非法转义）；`log.file` 同理 |
 | doctor / run 报端口被占，进程直接退出 | `health.listen_addr` 冲突（默认 8080）。注意 **doctor 自己也会 bind 这个端口**，校验在用的 profile 会跟生产实例抢 | 换端口，或用 `127.0.0.1:0` + `url_file`；校验生产 profile 前先复制一份改端口 |
